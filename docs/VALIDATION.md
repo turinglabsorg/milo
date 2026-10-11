@@ -4,7 +4,7 @@ Verified locally on the Linux development machine:
 
 - `ruff check milo tests scripts install.py`: passed.
 - `node --check web/app.js`: passed.
-- Combined API, sync and Chromium suite: **38 tests passed**.
+- Combined API, sync and Chromium suite: **60 tests passed**.
 - Browser flows at 1440×1000, 900×900 and 390×844: reading, replying, saving and
   reopening drafts, deleting drafts, categories and search. No page errors or
   horizontal document overflow were observed.
@@ -18,6 +18,14 @@ Verified locally on the Linux development machine:
   identity, label outbox operations, interrupted backfill, history pagination
   and expired-cursor recovery, canonical Gmail send identity, and access-log
   stripping of OAuth query parameters.
+- Account management: shared names/pause, encrypted IMAP credential rotation,
+  unchanged account/message/draft identities and persistence after reopening.
+  Invalid identity changes and Google password edits are rejected. Browser
+  checks cover account editing at 1440×1000 and 390×844.
+- Concurrency: Gmail read/star edits and account pause complete while a network
+  sync lock is held; newer outbox edits survive older acknowledgements; flag
+  reconciliation is atomic with user edits. Explicit Gmail sending does not
+  wait for backfill and retains a newer shared draft saved during sending.
 - Two clients with separate cookie jars authenticated to one service and
   observed the same account configuration, message changes, AI preferences and
   drafts. The saved archive and configuration survived reopening the store.

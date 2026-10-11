@@ -16,7 +16,16 @@ from .ai import AI
 from .demo import seed_demo
 from .google import Gmail, GoogleOAuth
 from .mail import SyncEngine, parse_message, safe_error, send_mail
-from .models import AccountInput, AISettings, DraftInput, Login, MessagePatch, RuleInput
+from .models import (
+    AccountInput,
+    AccountUpdate,
+    AISettings,
+    DraftInput,
+    GoogleStart,
+    Login,
+    MessagePatch,
+    RuleInput,
+)
 from .store import Store
 
 
@@ -141,12 +150,14 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         return google.status()
 
     @app.post("/api/oauth/google/start", dependencies=[Depends(auth)])
-    def google_start(request: Request, response: Response):
+    def google_start(request: Request, response: Response, data: GoogleStart | None = None):
         live()
         try:
-            url, browser = google.start(request.cookies.get("milo_session"))
+            url, browser = google.start(request.cookies.get("milo_session"), data.account_id if data else None)
         except RuntimeError as exc:
             raise HTTPException(400, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
         # Google returns via a cross-site top-level navigation. Keep the main
         # session Strict; this short-lived Lax nonce binds only the OAuth flow.
         response.set_cookie("milo_oauth", browser, httponly=True, secure=secure_cookies,
@@ -191,6 +202,30 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         background.add_task(engine.sync_account, account)
         return {"id": account_id}
 
+    @app.patch("/api/accounts/{account_id}", dependencies=[Depends(auth)])
+    def update_account(account_id: str, data: AccountUpdate, background: BackgroundTasks):
+        live()
+        patch = data.model_dump(exclude_unset=True)
+        connection_fields = set(patch) - {"name", "enabled"}
+        lock = engine.account_lock(account_id) if connection_fields else store.lock
+        with lock:
+            previous = store.account(account_id)
+            if not previous:
+                raise HTTPException(404, "Account non trovato")
+            if any(value is None for value in patch.values()):
+                raise HTTPException(422, "Impostazioni account non valide")
+            if previous["provider"] == "google" and set(patch) - {"name", "enabled"}:
+                raise HTTPException(422, "Per aggiornare l'accesso Google usa Ricollega")
+            changed = {key for key, value in patch.items() if key == "password" or previous.get(key) != value}
+            try:
+                account = store.update_account(account_id, {key: patch[key] for key in changed})
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            connection = changed - {"name", "enabled"}
+            if account["enabled"] and (connection or ("enabled" in changed)):
+                background.add_task(engine.sync_account, account)
+        return account
+
     @app.post("/api/sync", dependencies=[Depends(auth)])
     async def sync_now():
         if demo:
@@ -203,8 +238,8 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
 
     @app.get("/api/messages/{message_id}", dependencies=[Depends(auth)])
     def get_message(message_id: str):
-        message = message_or_404(message_id)
-        raw = store.message(message_id, raw=True)["raw"]
+        message = message_or_404(message_id, raw=True)
+        raw = message.pop("raw")
         mail = email.message_from_bytes(raw, policy=policy.default)
         message["attachments"] = [{"index": i, "name": part.get_filename() or "allegato",
                                     "type": part.get_content_type()}
@@ -224,11 +259,16 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     @app.patch("/api/messages/{message_id}", dependencies=[Depends(auth)])
     def patch_message(message_id: str, data: MessagePatch):
         message = message_or_404(message_id)
-        with engine.account_lock(message["account_id"]):
+        account = store.account(message["account_id"])
+        # Gmail identities survive label changes. Apply local edits immediately
+        # while network sync runs; the outbox preserves later user operations.
+        lock = store.lock if account["provider"] == "google" else engine.account_lock(message["account_id"])
+        with lock:
             patch = data.model_dump(exclude_unset=True)
             if any(v is None for k, v in patch.items() if k != "snoozed_until"):
                 raise HTTPException(422, "Stato non valido")
-            store.patch_message(message_id, patch)
+            if not store.patch_message(message_id, patch):
+                raise HTTPException(404, "Email non trovata")
             if demo:
                 store.execute("DELETE FROM outbox WHERE message_id=?", (message_id,))
         return store.message(message_id)
@@ -307,25 +347,29 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             rows = store.rows("SELECT data FROM drafts WHERE id=?", (draft_id,))
             if not rows:
                 raise HTTPException(404, "Bozza non trovata")
-            draft = json.loads(rows[0]["data"])
-            account = next((a for a in store.accounts(private=True) if a["id"] == draft["account_id"]), None)
+            saved_data = rows[0]["data"]
+            draft = json.loads(saved_data)
+            account = store.account(draft["account_id"])
             if not account:
                 raise HTTPException(404, "Account non trovato")
             sending.add(draft_id)
         try:
             original = store.message(draft["reply_to_id"]) if draft.get("reply_to_id") else None
-            with engine.account_lock(account["id"]):
-                if account["provider"] == "google":
-                    client = Gmail(store, account["id"])
-                    try:
-                        client.send(account, draft, original)
-                    finally:
-                        client.close()
-                else:
+            if account["provider"] == "google":
+                client = Gmail(store, account["id"])
+                try:
+                    client.send(account, draft, original)
+                finally:
+                    client.close()
+            else:
+                with engine.account_lock(account["id"]):
+                    account = store.account(account["id"], private=True)
                     mail = send_mail(account, draft, original)
                     store.upsert_message(parse_message(mail.as_bytes(), account["id"], "Milo/Sent", "local", time.time_ns(),
                                                        b"\\Seen", sent=True))
-            store.execute("DELETE FROM drafts WHERE id=?", (draft_id,))
+            # A second device may save a newer version during this explicit
+            # send. Delete only the version that was actually submitted.
+            store.execute("DELETE FROM drafts WHERE id=? AND data=?", (draft_id, saved_data))
             return {"ok": True}
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc

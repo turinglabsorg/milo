@@ -50,6 +50,10 @@ uv run milo --data .data/live
   requires the provider to expose an Archive folder and support IMAP MOVE.
 - Shared drafts and explicit SMTP sending over TLS/STARTTLS, reply headers and
   sent-mail caching. Ambiguous failures are never automatically resent.
+- Shared account names, pause/resume and encrypted IMAP credential updates.
+  Google reconnection checks that the chosen mailbox matches the original one.
+- Gmail local edits and explicit sending stay responsive during mailbox sync;
+  later queued edits and concurrently updated drafts are preserved.
 - Snooze, deterministic category filters and safe attachment downloads.
 - Ollama: structured email analysis, automatic categorization, inbox recap with
   links to source messages and proposed replies that stay drafts.
@@ -147,7 +151,8 @@ MIME parsing, attachments, rule precedence, cloud consent, AI result validation,
 SMTP TLS, IMAP flags, UIDVALIDITY resets, remote deletions, archive moves,
 OAuth state/PKCE/callback binding, token renewal persistence, Gmail labels,
 history pagination/reset, interrupted backfill, send identity, responsive layout,
-Google onboarding, font loading, search and drafts. Provider tests use deterministic doubles;
+Google onboarding, account maintenance, concurrent edits/sending, font loading,
+search and drafts. Provider tests use deterministic doubles;
 they do not establish successful interoperability with a real mailbox.
 
 MIT · [turinglabs](https://github.com/turinglabsorg)

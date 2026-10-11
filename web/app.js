@@ -29,7 +29,7 @@ async function api(path, method='GET', body) {
   if (!response.ok) {
     if (response.status === 401 && S.status?.authenticated) { S.status.authenticated=false; renderLogin(); }
     const message = Array.isArray(data.detail) ? data.detail.map(item => item.msg).join('; ') : data.detail;
-    throw new Error(message || 'Operazione non riuscita');
+    const error=new Error(message || 'Operazione non riuscita');error.status=response.status;throw error;
   }
   S.online=true;
   return data;
@@ -62,10 +62,25 @@ function renderLogin() {
   $('#app').innerHTML=`<main class="login-page"><section class="login-story">${logo()}<h1>La tua posta.<br>Un po’ più leggera.</h1><p>Meno rumore, più spazio per quello che conta. Un’unica casa per le tue email, su tutti i tuoi dispositivi.</p><div class="story-features"><span>${icon('inbox')}Tutti gli account, una sola inbox</span><span>${icon('sparkle')}Un assistente che mette ordine</span><span>${icon('shield')}Il tuo archivio, sotto il tuo controllo</span></div></section><section class="login-area"><form class="login-form" id="login-form"><h2>${setup?'Benvenuto a casa.':'Bentornato.'}</h2><p>${setup?'Scegli una passphrase per accedere al tuo archivio da Linux e dagli altri dispositivi. La configurazione ti aspetterà qui.':'Accedi al tuo archivio. Account, preferenze e bozze sono già qui, come li hai lasciati.'}</p>${setup?`<label class="field"><span>Codice del primo avvio</span><input name="bootstrap" value="${esc(bootstrap)}" required autocomplete="off" placeholder="Il codice mostrato nel terminale"></label>`:''}<label class="field"><span>La tua passphrase</span><input type="password" name="password" minlength="12" maxlength="256" required autocomplete="${setup?'new-password':'current-password'}" placeholder="Almeno 12 caratteri"></label><div class="form-error" id="login-error" role="alert"></div><button type="submit" class="primary">${setup?'Crea il tuo Milo':'Entra in Milo'}${icon('arrow')}</button><div class="fineprint">${setup?'La passphrase protegge l’accesso al servizio. Conserva una copia sicura: il recupero automatico non è ancora disponibile.':'Lo stesso servizio, la stessa passphrase. Nessun account da riconfigurare.'}</div></form></section></main>`;
 }
 
+function accountMarkup() {
+  return `<div class="nav-label">Account</div>${S.state.accounts.map(a=>`<button class="account-button ${S.account===a.id?'active':''}" data-account="${esc(a.id)}"><span class="dot" style="${a.enabled?'':'opacity:.4'}"></span>${esc(a.name)}${S.account===a.id?icon('check'):''}</button>`).join('')}<button class="account-button plus-account" data-action="add-account">${icon('plus')}Aggiungi account</button>`;
+}
+function renderChrome() {
+  const section=$('.account-section');
+  if(section && section.innerHTML!==accountMarkup()) section.innerHTML=accountMarkup();
+  document.querySelectorAll('.nav-button[data-view]').forEach(button=>{
+    const count=S.state.counts[button.dataset.view]||0;
+    let badge=button.querySelector('.count');
+    if(!count) { badge?.remove();return; }
+    if(!badge) { badge=document.createElement('span');badge.className='count';button.append(badge); }
+    badge.textContent=count;
+  });
+}
+
 function renderShell() {
   const counts=S.state.counts;
   const folders=[['inbox','inbox'],['starred','star'],['drafts','edit'],['sent','sent'],['snoozed','clock'],['archive','archive']];
-  $('#app').innerHTML=`<main class="shell ${S.selected?'has-selection':''} ${S.menu?'menu-open':''}"><aside class="sidebar">${logo()}<button class="primary compose-button" data-action="compose">${icon('plus')}Nuovo messaggio</button><div class="nav-label">La tua posta</div><nav class="nav">${folders.map(([view,name])=>`<button class="nav-button ${S.view===view?'active':''}" data-view="${view}">${icon(name)}${viewNames[view]}${counts[view]?`<span class="count">${counts[view]}</span>`:''}</button>`).join('')}</nav><div class="account-section"><div class="nav-label">Account</div>${S.state.accounts.map(a=>`<button class="account-button ${S.account===a.id?'active':''}" data-account="${esc(a.id)}"><span class="dot"></span>${esc(a.name)}${S.account===a.id?icon('check'):''}</button>`).join('')}<button class="account-button plus-account" data-action="add-account">${icon('plus')}Aggiungi account</button></div><div class="sidebar-bottom"><div class="ai-card"><div class="mini-heading">${icon('sparkle')}Un po’ di intelligenza.</div><p>Recap, priorità e meno rumore.<br>Milo ti aiuta a fare spazio.</p><button data-action="settings-ai">Scopri Milo AI ${icon('arrow')}</button></div><div class="sidebar-footer"><div class="user-avatar">${esc(initials(S.state.accounts[0]?.name || 'Tu'))}</div><span>Il tuo spazio</span><button data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div>${S.status.demo?'<div class="demo-label">DEMO · messaggi fittizi</div>':''}</div></aside><header class="topbar"><button class="icon-button mobile-menu" data-action="menu" aria-label="Apri menu">${icon('menu')}</button><div class="breadcrumbs">Il tuo spazio ${icon('arrow')}<strong>${viewNames[S.view]}</strong></div><div class="top-tools"><label class="search">${icon('search')}<input id="search-input" placeholder="Cerca nella tua posta" value="${esc(S.search)}" aria-label="Cerca nella tua posta"><kbd>/</kbd></label><button class="icon-button ${S.syncing?'spinner':''}" data-action="sync" aria-label="Sincronizza" title="Sincronizza">${icon('refresh')}</button><span class="sync-indicator ${!S.online||S.state.accounts.some(a=>a.error)?'offline':''}" title="${S.online?'Servizio connesso':'Servizio non raggiungibile'}"></span><button class="icon-button" data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div></header><section class="list-panel" id="list-panel"></section><section class="reading-panel" id="reading-panel"></section></main>`;
+  $('#app').innerHTML=`<main class="shell ${S.selected?'has-selection':''} ${S.menu?'menu-open':''}"><aside class="sidebar">${logo()}<button class="primary compose-button" data-action="compose">${icon('plus')}Nuovo messaggio</button><div class="nav-label">La tua posta</div><nav class="nav">${folders.map(([view,name])=>`<button class="nav-button ${S.view===view?'active':''}" data-view="${view}">${icon(name)}${viewNames[view]}${counts[view]?`<span class="count">${counts[view]}</span>`:''}</button>`).join('')}</nav><div class="account-section">${accountMarkup()}</div><div class="sidebar-bottom"><div class="ai-card"><div class="mini-heading">${icon('sparkle')}Un po’ di intelligenza.</div><p>Recap, priorità e meno rumore.<br>Milo ti aiuta a fare spazio.</p><button data-action="settings-ai">Scopri Milo AI ${icon('arrow')}</button></div><div class="sidebar-footer"><div class="user-avatar">${esc(initials(S.state.accounts[0]?.name || 'Tu'))}</div><span>Il tuo spazio</span><button data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div>${S.status.demo?'<div class="demo-label">DEMO · messaggi fittizi</div>':''}</div></aside><header class="topbar"><button class="icon-button mobile-menu" data-action="menu" aria-label="Apri menu">${icon('menu')}</button><div class="breadcrumbs">Il tuo spazio ${icon('arrow')}<strong>${viewNames[S.view]}</strong></div><div class="top-tools"><label class="search">${icon('search')}<input id="search-input" placeholder="Cerca nella tua posta" value="${esc(S.search)}" aria-label="Cerca nella tua posta"><kbd>/</kbd></label><button class="icon-button ${S.syncing?'spinner':''}" data-action="sync" aria-label="Sincronizza" title="Sincronizza">${icon('refresh')}</button><span class="sync-indicator ${!S.online||S.state.accounts.some(a=>a.error)?'offline':''}" title="${S.online?'Servizio connesso':'Servizio non raggiungibile'}"></span><button class="icon-button" data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div></header><section class="list-panel" id="list-panel"></section><section class="reading-panel" id="reading-panel"></section></main>`;
   renderList(); renderReading();
 }
 
@@ -140,7 +155,7 @@ function showSettings(tab=S.settingsTab) {
   const tabs=`<div class="modal-tabs">${[['accounts','Account'],['ai','Milo AI'],['rules','Filtri'],['devices','Dispositivi']].map(([id,name])=>`<button data-settings-tab="${id}" class="${id===tab?'active':''}">${name}</button>`).join('')}</div>`;
   let body='';
   if(tab==='accounts') {
-    body=`<p>Collegali una volta. Gli account sono conservati sul tuo servizio Milo e disponibili agli altri dispositivi.</p>${S.state.accounts.map(a=>`<div class="settings-account"><span class="dot"></span><div><strong>${esc(a.name)}</strong><small>${esc(a.email)}</small></div><span class="health ${a.error?'error':''}">${a.error?'Da controllare':a.last_sync?'Sincronizzato':'In attesa'}</span>${a.provider==='google' && a.error?'<button class="secondary" data-action="google-connect">Ricollega</button>':''}</div>${a.error?`<p class="form-error">${esc(a.error)}</p>`:''}`).join('')}<div class="form-actions"><button class="primary" data-action="add-account">${icon('plus')}Collega un account</button></div>${S.state.pending?.length?`<div class="notice" style="margin-top:20px">${S.state.pending.map(p=>`${p.count} modifiche ${esc(p.kind)}: ${esc(p.error||'in attesa della prossima sincronizzazione')}`).join('<br>')}</div>`:''}`;
+    body=`<p>Collegali una volta. Gli account sono conservati sul tuo servizio Milo e disponibili agli altri dispositivi.</p>${S.state.accounts.map(a=>`<div class="settings-account"><span class="dot"></span><div><strong>${esc(a.name)}</strong><small>${esc(a.email)}</small></div><span class="health ${a.error?'error':''}">${!a.enabled?'In pausa':a.error?'Da controllare':a.last_sync?'Sincronizzato':'In attesa'}</span><button class="secondary" data-edit-account="${esc(a.id)}">Gestisci</button></div>${a.error?`<p class="form-error">${esc(a.error)}</p>`:''}`).join('')}<div class="form-actions"><button class="primary" data-action="add-account">${icon('plus')}Collega un account</button></div>${S.state.pending?.length?`<div class="notice" style="margin-top:20px">${S.state.pending.map(p=>`${p.count} modifiche ${esc(p.kind)}: ${esc(p.error||'in attesa della prossima sincronizzazione')}`).join('<br>')}</div>`:''}`;
   } else if(tab==='ai') {
     const ai=S.state.ai;
     body=`<form id="ai-form"><p>Analisi, recap e risposte proposte passano da Ollama. Le risposte restano bozze da rivedere e inviare personalmente.</p><label class="field"><span>Modello Ollama</span><input name="model" value="${esc(ai.model)}" required></label><div class="notice"><strong>Mistral Large 4 usa Ollama Cloud.</strong><br>Con <code>mistral-large-4:cloud</code>, il contenuto delle email selezionate viene elaborato nel cloud di Ollama. Puoi scegliere un modello locale già installato.</div><label class="check-field"><input type="checkbox" name="cloud_consent" ${ai.cloud_consent?'checked':''}><span>Consento l’elaborazione delle email con modelli cloud.</span></label><label class="check-field"><input type="checkbox" name="automatic" ${ai.automatic?'checked':''}><span>Analizza automaticamente le nuove email e organizza l’inbox in Persone, Notifiche e Newsletter.</span></label>${S.state.ai_error?`<p class="form-error">${esc(S.state.ai_error)}</p>`:''}<div class="form-actions"><button class="primary" type="submit">Salva preferenze</button></div></form>`;
@@ -161,6 +176,14 @@ function showAccountForm() {
 
 function showIMAPForm() {
   showModal('Collega un account IMAP',`<form id="account-form"><label class="field"><span>Provider</span><select id="provider"><option value="icloud">iCloud Mail</option><option value="other">Altro account IMAP</option></select></label><div class="notice" id="provider-notice">Usa una password specifica per app generata nel tuo account Apple. Il nome utente IMAP può essere la parte prima di @icloud.com.</div><div class="form-grid"><label class="field"><span>Nome dell’account</span><input name="name" value="Personale" required maxlength="80"></label><label class="field"><span>Indirizzo email</span><input name="email" type="email" required autocomplete="email"></label><label class="field"><span>Nome utente</span><input name="username" placeholder="Di solito l’indirizzo email" required></label><label class="field"><span>Password per app</span><input name="password" type="password" required autocomplete="off"></label><label class="field"><span>Server IMAP</span><input name="imap_host" value="imap.mail.me.com" required></label><label class="field"><span>Porta IMAP (TLS)</span><input name="imap_port" type="number" value="993" min="1" max="65535" required></label><label class="field"><span>Server SMTP</span><input name="smtp_host" value="smtp.mail.me.com" required></label><label class="field"><span>Porta SMTP</span><input name="smtp_port" type="number" value="587" min="1" max="65535" required></label><label class="field full"><span>Sicurezza SMTP</span><select name="smtp_security"><option value="tls">TLS</option><option value="starttls" selected>STARTTLS</option></select></label></div><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="close-modal">Annulla</button><button class="primary" type="submit">Collega e sincronizza ${icon('arrow')}</button></div></form>`);
+}
+
+function showAccountSettings(accountId) {
+  const a=S.state.accounts.find(account=>account.id===accountId);
+  if(!a) return;
+  const imap=a.provider==='imap';
+  const connection=imap?`<div class="form-grid"><label class="field"><span>Nome utente</span><input name="username" value="${esc(a.username)}" required></label><label class="field"><span>Nuova password per app</span><input name="password" type="password" autocomplete="new-password" placeholder="Lascia vuoto per conservarla"></label><label class="field"><span>Server IMAP</span><input name="imap_host" value="${esc(a.imap_host)}" required></label><label class="field"><span>Porta IMAP (TLS)</span><input name="imap_port" type="number" value="${a.imap_port}" min="1" max="65535" required></label><label class="field"><span>Server SMTP</span><input name="smtp_host" value="${esc(a.smtp_host)}" required></label><label class="field"><span>Porta SMTP</span><input name="smtp_port" type="number" value="${a.smtp_port}" min="1" max="65535" required></label><label class="field full"><span>Sicurezza SMTP</span><select name="smtp_security"><option value="tls" ${a.smtp_security==='tls'?'selected':''}>TLS</option><option value="starttls" ${a.smtp_security==='starttls'?'selected':''}>STARTTLS</option></select></label></div>`:`<p>L’accesso Google è conservato sul servizio. Se Google lo revoca o scade, ricollega questa casella.</p><button class="secondary" type="button" data-action="google-connect" data-reconnect-account="${esc(a.id)}">Ricollega ${esc(a.email)}</button>`;
+  showModal('Gestisci account',`<form id="account-settings-form" data-account-id="${esc(a.id)}"><div class="notice">${esc(a.email)} · ${imap?'IMAP':'Google'}</div><label class="field"><span>Nome dell’account</span><input name="name" value="${esc(a.name)}" required maxlength="80"></label><label class="check-field"><input type="checkbox" name="enabled" ${a.enabled?'checked':''}><span>Sincronizza questa casella. In pausa, le email e le bozze salvate restano disponibili; le modifiche aspettano la ripresa.</span></label>${connection}<div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="close-modal">Annulla</button><button class="primary" type="submit">Salva account</button></div></form>`);
 }
 
 function showCompose(draft={}) {
@@ -211,6 +234,7 @@ document.addEventListener('click', async event => {
     if(target.dataset.account) { S.account=S.account===target.dataset.account?'':target.dataset.account; await refresh(true);renderShell();return; }
     if(target.dataset.message) { await selectMessage(target.dataset.message); return; }
     if(target.dataset.draft) { showCompose(S.drafts.find(d=>d.id===target.dataset.draft)); return; }
+    if(target.dataset.editAccount) { showAccountSettings(target.dataset.editAccount);return; }
     if(target.dataset.settingsTab) { showSettings(target.dataset.settingsTab); return; }
     if(target.dataset.deleteRule) { await api('/rules/'+target.dataset.deleteRule,'DELETE');await refresh();showSettings('rules');renderList();return; }
     if(target.dataset.recapMessage) { closeModal();await selectMessage(target.dataset.recapMessage);return; }
@@ -220,7 +244,7 @@ document.addEventListener('click', async event => {
     if(action==='settings-ai') showSettings('ai');
     if(action==='add-account') showAccountForm();
     if(action==='imap-account') showIMAPForm();
-    if(action==='google-connect') { target.disabled=true;try { const result=await api('/oauth/google/start','POST');location.assign(result.url); } catch(error) { target.disabled=false;throw error; } }
+    if(action==='google-connect') { target.disabled=true;try { const result=await api('/oauth/google/start','POST',target.dataset.reconnectAccount?{account_id:target.dataset.reconnectAccount}:undefined);location.assign(result.url); } catch(error) { target.disabled=false;throw error; } }
     if(action==='compose') showCompose();
     if(action==='menu') { S.menu=!S.menu;$('.shell').classList.toggle('menu-open',S.menu); }
     if(action==='back') { S.selected=null;$('.shell').classList.remove('has-selection');renderList();renderReading(); }
@@ -236,7 +260,7 @@ document.addEventListener('click', async event => {
     if(action==='close-modal') { if($('#compose-form')) await saveCompose();closeModal();await refresh();renderList(); }
     if(action==='sync') {
       if(S.syncing) return;S.syncing=true;target.classList.add('spinner');target.disabled=true;
-      try { const result=await api('/sync','POST');await refresh();renderShell();toast(result.results.some(r=>!r.ok)?'Sincronizzazione incompleta. Controlla gli account.':S.status.demo?'Demo aggiornata.':'Posta sincronizzata.'); }
+      try { const result=await api('/sync','POST');await refresh();renderShell();toast(result.results.some(r=>!r.ok)?'Sincronizzazione incompleta. Controlla gli account.':S.status.demo?'Demo aggiornata.':!result.results.length?'Nessuna casella attiva da sincronizzare.':'Posta sincronizzata.'); }
       finally { S.syncing=false;target.classList.remove('spinner');target.disabled=false; }
     }
     if(action==='logout') { await api('/logout','POST');S.status.authenticated=false;S.selected=null;S.messages=[];renderLogin(); }
@@ -261,6 +285,15 @@ document.addEventListener('submit', async event => {
     if(form.id==='account-form') {
       data.imap_port=Number(data.imap_port);data.smtp_port=Number(data.smtp_port);
       await api('/accounts','POST',data);closeModal();await refresh();renderShell();toast('Account salvato. La prima sincronizzazione è in corso.');
+    }
+    if(form.id==='account-settings-form') {
+      data.enabled=form.elements.enabled.checked;
+      if(form.elements.password) {
+        if(!data.password) delete data.password;
+        data.imap_port=Number(data.imap_port);data.smtp_port=Number(data.smtp_port);
+      }
+      await api('/accounts/'+encodeURIComponent(form.dataset.accountId),'PATCH',data);
+      await refresh();renderShell();showSettings('accounts');toast('Account aggiornato su Milo.');
     }
     if(form.id==='ai-form') {
       data.automatic=form.elements.automatic.checked;data.cloud_consent=form.elements.cloud_consent.checked;
@@ -325,8 +358,23 @@ async function boot() {
 }
 setInterval(async()=>{
   if(!S.status?.authenticated || S.syncing || document.hidden) return;
-  try { await refresh();renderList(); }
-  catch { S.online=false;renderList(); }
+  try {
+    await refresh();renderChrome();renderList();
+    const id=S.selected?.id;
+    if(id) {
+      try {
+        const selected=await api('/messages/'+encodeURIComponent(id));
+        if(S.selected?.id===id && JSON.stringify(selected)!==JSON.stringify(S.selected)) {
+          S.selected=selected;renderReading();
+        }
+      } catch(error) {
+        if(error.status===404 && S.selected?.id===id) {
+          S.selected=null;$('.shell')?.classList.remove('has-selection');renderReading();
+        } else throw error;
+      }
+    }
+  }
+  catch { renderList(); }
 },30000);
 if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 boot();

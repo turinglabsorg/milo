@@ -260,3 +260,62 @@ def test_inflight_refresh_does_not_overwrite_a_new_google_grant(store, monkeypat
     client.request("GET", "profile")
     assert store.google_credentials(client.account_id)["refresh_token"] == "new-grant-refresh"
     client.close()
+
+
+def test_new_google_edit_is_not_removed_by_an_inflight_outbox_ack(store, monkeypatch):
+    client = gmail(store)
+    client.store_message(remote())
+    message_id = store.messages()[0]['id']
+    store.patch_message(message_id, {'starred': True})
+
+    def request(method, path, **kwargs):
+        # The user changes their mind while Gmail processes the first request.
+        store.patch_message(message_id, {'starred': False})
+        return {'id': 'abc'}
+
+    monkeypatch.setattr(client, 'request', request)
+    client.flush_changes()
+    pending = store.rows('SELECT * FROM outbox')
+    assert len(pending) == 1 and pending[0]['value'] == 'false'
+    assert not store.message(message_id)['starred']
+    client.close()
+
+
+def test_google_flag_reconciliation_is_atomic_with_local_edits(store, monkeypatch):
+    import threading
+
+    client = gmail(store)
+    client.store_message(remote(labels=['INBOX']))
+    message_id = store.messages()[0]['id']
+    queried, release, attempted, finished = (threading.Event() for _ in range(4))
+    rows = store.rows
+
+    def blocked_rows(query, params=()):
+        result = rows(query, params)
+        if query.startswith('SELECT kind FROM outbox'):
+            queried.set()
+            assert release.wait(3)
+        return result
+
+    monkeypatch.setattr(store, 'rows', blocked_rows)
+    updater = threading.Thread(target=lambda: client.store_message(remote(labels=['INBOX'])))
+
+    def edit():
+        attempted.set()
+        store.patch_message(message_id, {'starred': True})
+        finished.set()
+
+    editor = threading.Thread(target=edit)
+    try:
+        updater.start()
+        assert queried.wait(2)
+        editor.start()
+        assert attempted.wait(2)
+        assert not finished.wait(.1), 'A local edit must not interleave between pending-flag check and reconciliation'
+    finally:
+        release.set()
+        updater.join(timeout=3)
+        if editor.ident:
+            editor.join(timeout=3)
+    assert finished.is_set() and store.message(message_id)['starred']
+    client.close()

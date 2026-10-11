@@ -61,7 +61,7 @@ class Store:
 
     def migrate(self):
         migrations = {
-            "accounts": {"provider": "TEXT NOT NULL DEFAULT 'imap'"},
+            "accounts": {"provider": "TEXT NOT NULL DEFAULT 'imap'", "enabled": "INTEGER NOT NULL DEFAULT 1"},
             "messages": {"provider_id": "TEXT", "thread_id": "TEXT", "labels": "TEXT",
                          "hidden": "INTEGER NOT NULL DEFAULT 0"},
         }
@@ -196,11 +196,38 @@ class Store:
 
     def accounts(self, private=False):
         accounts = self.rows("SELECT * FROM accounts ORDER BY rowid")
-        for account in accounts:
-            encrypted = account.pop("secret")
-            if private and account["provider"] == "imap":
-                account["password"] = self.vault.decrypt(encrypted.encode()).decode()
-        return accounts
+        return [self.public_account(account, private) for account in accounts]
+
+    def account(self, account_id, private=False):
+        rows = self.rows("SELECT * FROM accounts WHERE id=?", (account_id,))
+        return self.public_account(rows[0], private) if rows else None
+
+    def public_account(self, account, private=False):
+        encrypted = account.pop("secret")
+        if private and account["provider"] == "imap":
+            account["password"] = self.vault.decrypt(encrypted.encode()).decode()
+        return account
+
+    def update_account(self, account_id, patch):
+        allowed = {"name", "enabled", "username", "password", "imap_host", "imap_port", "smtp_host", "smtp_port", "smtp_security"}
+        if set(patch) - allowed or any(value is None for value in patch.values()):
+            raise ValueError("Impostazioni account non valide")
+        with self.lock:
+            account = self.account(account_id)
+            if not account:
+                raise ValueError("Account non trovato")
+            connection = set(patch) - {"name", "enabled"}
+            if account["provider"] == "google" and connection:
+                raise ValueError("Per aggiornare l'accesso Google usa Ricollega")
+            values = dict(patch)
+            if "password" in values:
+                values["secret"] = self.vault.encrypt(values.pop("password").encode()).decode()
+            if connection:
+                values.update(error=None, last_sync=None)
+            if values:
+                fields = ",".join(f"{key}=?" for key in values)
+                self.execute(f"UPDATE accounts SET {fields} WHERE id=?", (*values.values(), account_id))
+            return self.account(account_id)
 
     def add_account(self, data):
         value = dict(data)

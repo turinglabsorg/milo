@@ -119,65 +119,74 @@ class SyncEngine:
             return self._locks.setdefault(account_id, threading.Lock())
 
     def sync_all(self):
-        return [self.sync_account(account) for account in self.store.accounts(private=True)]
+        return [self.sync_account(account) for account in self.store.accounts() if account["enabled"]]
 
     def sync_account(self, account):
         account_id = account["id"]
-        if account.get("provider") == "google":
-            return self.sync_google(account)
         with self.account_lock(account_id):
-            client = None
-            try:
-                client = connect(account)
-                remote_folders = folders(client)
-                self.flush_changes(client, account, remote_folders)
-                added = []
-                for folder in remote_folders:
-                    added.extend(self.sync_folder(client, account, folder))
-                self.store.execute("UPDATE accounts SET last_sync=?,error=NULL WHERE id=?", (time.time(), account_id))
-                result = {"account_id": account_id, "added": len(added), "ok": True}
-            except Exception as exc:
-                error = safe_error(exc)
-                self.store.execute("UPDATE accounts SET error=? WHERE id=?", (error, account_id))
-                return {"account_id": account_id, "ok": False, "error": error}
-            finally:
-                if client:
-                    try:
-                        client.logout()
-                    except Exception:
-                        pass
-        self.analyze_pending(account_id)
+            # A queued worker may hold a snapshot from before a credential edit
+            # or pause. Re-read only this account after acquiring its lock.
+            current = self.store.account(account_id, private=True)
+            if not current or not current["enabled"]:
+                return {"account_id": account_id, "ok": True, "paused": True, "added": 0}
+            result = self._sync_google(current) if current["provider"] == "google" else self._sync_imap(current)
+        if result["ok"]:
+            self.analyze_pending(account_id)
         return result
+
+    def _sync_imap(self, account):
+        account_id = account["id"]
+        client = None
+        try:
+            client = connect(account)
+            remote_folders = folders(client)
+            self.flush_changes(client, account, remote_folders)
+            added = []
+            for folder in remote_folders:
+                added.extend(self.sync_folder(client, account, folder))
+            self.store.execute("UPDATE accounts SET last_sync=?,error=NULL WHERE id=?", (time.time(), account_id))
+            return {"account_id": account_id, "added": len(added), "ok": True}
+        except Exception as exc:
+            error = safe_error(exc)
+            self.store.execute("UPDATE accounts SET error=? WHERE id=?", (error, account_id))
+            return {"account_id": account_id, "ok": False, "error": error}
+        finally:
+            if client:
+                try:
+                    client.logout()
+                except Exception:
+                    pass
 
     def analyze_pending(self, account_id):
         if self.ai and self.store.setting("ai").get("automatic"):
             for row in self.store.rows("SELECT id FROM messages WHERE account_id=? AND hidden=0 AND analysis IS NULL AND sent=0 "
                                        "ORDER BY date DESC LIMIT 10", (account_id,)):
+                account = self.store.account(account_id)
+                if not account or not account["enabled"]:
+                    break
                 try:
                     self.ai.analyze(row["id"])
                 except Exception as exc:
                     self.store.set_setting("ai_error", safe_error(exc))
                     break
 
-    def sync_google(self, account):
+    def _sync_google(self, account):
         from .google import Gmail
 
         account_id = account["id"]
-        with self.account_lock(account_id):
-            client = None
-            try:
-                client = Gmail(self.store, account_id)
-                result = client.sync()
-                self.store.execute("UPDATE accounts SET last_sync=?,error=NULL WHERE id=?", (time.time(), account_id))
-            except Exception as exc:
-                error = safe_error(exc)
-                self.store.execute("UPDATE accounts SET error=? WHERE id=?", (error, account_id))
-                return {"account_id": account_id, "ok": False, "error": error}
-            finally:
-                if client:
-                    client.close()
-        self.analyze_pending(account_id)
-        return result
+        client = None
+        try:
+            client = Gmail(self.store, account_id)
+            result = client.sync()
+            self.store.execute("UPDATE accounts SET last_sync=?,error=NULL WHERE id=?", (time.time(), account_id))
+            return result
+        except Exception as exc:
+            error = safe_error(exc)
+            self.store.execute("UPDATE accounts SET error=? WHERE id=?", (error, account_id))
+            return {"account_id": account_id, "ok": False, "error": error}
+        finally:
+            if client:
+                client.close()
 
     def sync_folder(self, client, account, folder):
         name = folder["name"]

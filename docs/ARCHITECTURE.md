@@ -34,7 +34,10 @@ For generic IMAP, the archive key is `(account, folder, UIDVALIDITY, UID)`, neve
 A UIDVALIDITY reset invalidates local identities and queued operations before
 importing the current folder. Sync fetches without marking mail as read. User
 flags enter a durable queue; incoming provider flags cannot overwrite pending
-user changes. An account lock serializes sync and edits. Archive moves preserve
+user changes. An account lock serializes provider sync and generic IMAP edits/moves. Gmail
+local edits use short database critical sections while network sync continues;
+each new queued edit gets its own ID, so an older acknowledgement cannot remove
+a newer operation. Archive moves preserve
 AI metadata through Message-ID while the destination receives a new UID.
 
 The worker imports up to 200 new messages per folder per pass, newest first,
@@ -108,8 +111,11 @@ to text; attachments are authenticated downloads, never inline active content.
 Cookies are HttpOnly/SameSite; cross-origin writes are rejected. Client assets
 use a restrictive CSP and no third-party fonts, images, trackers or scripts.
 
-Future work includes session/device revocation UI, account editing and removal,
+Future work includes session/device revocation UI, account removal,
 passphrase recovery, encrypted backup, Microsoft OAuth, operational supervision, full mailbox pagination, incoming attachment
-size negotiation and concurrency/load validation. Changing a provider password
-currently requires development intervention; this needs a proper UI before
-daily use. These limitations must remain visible until implemented and tested.
+size negotiation and concurrency/load validation. Account names and pause/resume settings are shared. The account management UI
+updates encrypted IMAP credentials and offers Google reconnection bound to the
+existing email address. Pausing prevents later sync passes and automatic AI
+work; an already-running provider request/pass can finish. Cached mail, drafts
+and queued edits remain available. Account deletion/revocation still needs a
+separate explicit maintenance flow. These limitations must remain visible until implemented and tested.

@@ -66,11 +66,19 @@ class GoogleOAuth:
         flow.redirect_uri = self.redirect_uri
         return flow
 
-    def start(self, session):
+    def start(self, session, account_id=None):
+        expected = None
+        if account_id:
+            account = self.store.account(account_id)
+            if not account or account["provider"] != "google":
+                raise ValueError("Account Google non trovato")
+            expected = account["email"]
         flow = self.flow(autogenerate_code_verifier=True)
-        url, state = flow.authorization_url(access_type="offline", prompt="consent select_account")
+        options = {"login_hint": expected} if expected else {}
+        url, state = flow.authorization_url(access_type="offline", prompt="consent select_account", **options)
         browser = secrets.token_urlsafe(32)
-        self.store.begin_oauth(state, {"browser": browser, "session": session, "verifier": flow.code_verifier})
+        self.store.begin_oauth(state, {"browser": browser, "session": session, "verifier": flow.code_verifier,
+                                      "expected_email": expected})
         return url, browser
 
     def finish(self, state, browser, code):
@@ -93,6 +101,8 @@ class GoogleOAuth:
             raise RuntimeError("Google non ha completato il collegamento. Controlla client OAuth, Gmail API e consenso.") from exc
         if not isinstance(address, str) or "@" not in address:
             raise RuntimeError("Google non ha restituito un indirizzo valido")
+        if pending.get("expected_email") and address.casefold() != pending["expected_email"].casefold():
+            raise ValueError("Hai scelto una casella diversa. Riprova selezionando " + pending["expected_email"] + ".")
         if not self.store.valid_session(pending["session"]):
             raise ValueError("La sessione Milo è stata revocata. Accedi e ricollega Google.")
         return self.store.google_account(address, json.loads(flow.credentials.to_json()))
@@ -217,8 +227,6 @@ class Gmail:
     def store_message(self, remote):
         remote_id = remote["id"]
         labels = set(remote.get("labelIds", []))
-        existing = self.store.rows("SELECT id FROM messages WHERE account_id=? AND provider_id=?",
-                                   (self.account_id, remote_id))
         raw = decode_raw(remote["raw"])
         if len(raw) > 100 * 1024 * 1024:
             raise RuntimeError("Messaggio Gmail oltre il limite attuale di 100 MB")
@@ -229,16 +237,19 @@ class Gmail:
                     hidden=int(bool(labels & HIDDEN_LABELS)))
         if remote.get("internalDate"):
             data["date"] = int(remote["internalDate"]) / 1000
-        if existing:
-            message_id = existing[0]["id"]
-            pending = {op["kind"] for op in self.store.rows("SELECT kind FROM outbox WHERE message_id=?", (message_id,))}
-            for key in ("read", "starred", "archived", "sent", "hidden", "labels", "thread_id"):
-                if key not in pending:
-                    self.store.execute(f"UPDATE messages SET {key}=? WHERE id=?", (data[key], message_id))
-        else:
-            self.store.upsert_message(data)
-        self.store.execute("INSERT OR IGNORE INTO gmail_scan VALUES(?,?)", (self.account_id, remote_id))
-        return int(not existing)
+        with self.store.lock:
+            existing = self.store.rows("SELECT id FROM messages WHERE account_id=? AND provider_id=?",
+                                       (self.account_id, remote_id))
+            if existing:
+                message_id = existing[0]["id"]
+                pending = {op["kind"] for op in self.store.rows("SELECT kind FROM outbox WHERE message_id=?", (message_id,))}
+                for key in ("read", "starred", "archived", "sent", "hidden", "labels", "thread_id"):
+                    if key not in pending:
+                        self.store.execute(f"UPDATE messages SET {key}=? WHERE id=?", (data[key], message_id))
+            else:
+                self.store.upsert_message(data)
+            self.store.execute("INSERT OR IGNORE INTO gmail_scan VALUES(?,?)", (self.account_id, remote_id))
+            return int(not existing)
 
     def remove_message(self, remote_id):
         self.store.execute("DELETE FROM messages WHERE account_id=? AND provider_id=?", (self.account_id, remote_id))

@@ -33,6 +33,10 @@ The imported client secret and mailbox refresh tokens are encrypted with the
 service vault key. They never appear in the browser API or public repository.
 The Google callback uses PKCE, browser binding and one-time expiring state.
 Reconnecting the same address retains its account identity and cached mail.
+Milo → Settings → Account → Manage lets you rename or pause the mailbox. Its
+Reconnect button suggests and validates that exact address, so choosing another
+Google account cannot silently change the mailbox being repaired. A paused
+account keeps its cache and drafts; pending label edits wait until it resumes.
 
 ## Consent mode and lasting access
 

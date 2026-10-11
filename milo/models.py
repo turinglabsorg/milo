@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Login(BaseModel):
@@ -33,6 +33,29 @@ class AccountInput(BaseModel):
         if any(c.isspace() or c in '/\\\x00' for c in value):
             raise ValueError("Inserisci solo il nome del server")
         return value
+
+
+class AccountUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    enabled: bool | None = None
+    username: str | None = Field(default=None, min_length=1, max_length=254)
+    password: str | None = Field(default=None, min_length=1, max_length=1024, repr=False)
+    imap_host: str | None = Field(default=None, min_length=1, max_length=253)
+    imap_port: int | None = Field(default=None, ge=1, le=65535)
+    smtp_host: str | None = Field(default=None, min_length=1, max_length=253)
+    smtp_port: int | None = Field(default=None, ge=1, le=65535)
+    smtp_security: Literal["tls", "starttls"] | None = None
+
+    @field_validator("imap_host", "smtp_host")
+    @classmethod
+    def host_valid(cls, value):
+        return AccountInput.host_valid(value) if value is not None else value
+
+
+class GoogleStart(BaseModel):
+    account_id: str | None = Field(default=None, max_length=64)
 
 
 class MessagePatch(BaseModel):

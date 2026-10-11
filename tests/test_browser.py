@@ -1,4 +1,5 @@
 import os
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -94,4 +95,48 @@ def test_real_service_onboarding_and_google_connection_ui(width, height):
         assert params["access_type"] == ["offline"]
         assert params["code_challenge_method"] == ["S256"]
         assert not errors
+        browser.close()
+
+
+@pytest.mark.skipif(not os.environ.get("MILO_LIVE_TEST_URL"), reason="Needs the isolated non-demo service")
+@pytest.mark.parametrize("width,height", [(1440, 1000), (390, 844)])
+def test_account_management_browser_ui(width, height):
+    from milo.store import Store
+
+    data = Path(os.environ['MILO_LIVE_TEST_DATA'])
+    with closing(Store(data)) as store:
+        existing = next((a for a in store.accounts() if a['email'] == 'browser-managed@example.test'), None)
+        account_id = existing['id'] if existing else store.add_account({
+            'name': 'Browser account', 'email': 'browser-managed@example.test', 'username': 'browser-managed@example.test',
+            'password': 'isolated-browser-password', 'provider': 'imap', 'enabled': 0,
+            'imap_host': 'imap.example.test', 'imap_port': 993, 'smtp_host': 'smtp.example.test',
+            'smtp_port': 465, 'smtp_security': 'tls'})
+        store.update_account(account_id, {'name': 'Browser account', 'enabled': False})
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        page = browser.new_page(viewport={'width': width, 'height': height})
+        page.goto(os.environ['MILO_LIVE_TEST_URL'])
+        if page.locator('[name="bootstrap"]').count():
+            with closing(Store(data)) as store:
+                bootstrap=store.bootstrap
+            page.locator('[name="bootstrap"]').fill(bootstrap)
+        page.locator('[name="password"]').fill('isolated browser test passphrase')
+        page.locator('#login-form button[type="submit"]').click()
+        expect(page.locator('.shell')).to_be_visible()
+        page.locator('.topbar [data-action="settings"]').click()
+        row = page.locator('.settings-account').filter(has_text='browser-managed@example.test')
+        expect(row).to_contain_text('In pausa')
+        row.get_by_role('button', name='Gestisci').click()
+        expect(page.locator('#account-settings-form')).to_be_visible()
+        expect(page.locator('[name="password"]')).to_have_value('')
+        expect(page.locator('[name="enabled"]')).not_to_be_checked()
+        name=f'Work & Personal {width}'
+        page.locator('[name="name"]').fill(name)
+        page.get_by_role('button', name='Salva account', exact=True).click()
+        expect(page.locator('.settings-account').filter(has_text='browser-managed@example.test')).to_contain_text(name)
+        expect(page.locator('#toast')).to_contain_text('Account aggiornato')
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        response=page.request.get(os.environ['MILO_LIVE_TEST_URL']+'/api/state')
+        account=next(a for a in response.json()['accounts'] if a['id']==account_id)
+        assert account['name']==name and not account['enabled'] and 'password' not in account
         browser.close()
