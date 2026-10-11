@@ -6,7 +6,7 @@ complete that goal.
 
 | Requirement | Current evidence | Remaining work |
 | --- | --- | --- |
-| New project and dedicated folder | Standalone `milo` repository | Public publication and ongoing releases |
+| New project and dedicated folder | Public [turinglabsorg/milo](https://github.com/turinglabsorg/milo) repository in its own folder | Ongoing releases |
 | Spark-inspired daily client | Responsive inbox, reading pane, compose, snooze, search, filters | Real daily-mail validation, accessibility contrast, keyboard navigation, richer reading/composition |
 | Linux availability | App launcher and running local service | Packaging, startup supervision, notifications and desktop integration |
 | Durable mail and configuration | SQLite archive; credentials vault; shared settings and drafts | Backup/recovery UX, account editing/removal, full folder/pagination support |
