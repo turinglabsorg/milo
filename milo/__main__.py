@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--data", type=Path)
     parser.add_argument("--demo", action="store_true", help="Isolated demo with fictional messages")
     parser.add_argument("--secure-cookies", action="store_true", help="Required behind an HTTPS proxy")
+    parser.add_argument("--quiet-bootstrap", action="store_true", help="Keep first-start codes out of service logs")
     parser.add_argument("--public-url", default=os.environ.get("MILO_PUBLIC_URL"), help="Stable HTTPS origin for Google OAuth")
     parser.add_argument("--google-client", type=Path, default=os.environ.get("MILO_GOOGLE_CLIENT"), help="Google web client JSON")
     args = parser.parse_args()
@@ -38,7 +39,7 @@ def main():
     app = create_app(data, args.demo, os.environ.get("MILO_OLLAMA_URL", "http://127.0.0.1:11434"),
                      args.secure_cookies, public_url, args.google_client)
     print(f"\nMilo → http://{args.host}:{args.port}", flush=True)
-    if not args.demo and app.state.store.bootstrap:
+    if not args.demo and app.state.store.bootstrap and not args.quiet_bootstrap:
         print(f"Codice di inizializzazione (solo primo avvio): {app.state.store.bootstrap}", flush=True)
     logging = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)
     logging["formatters"]["access"]["()"] = PrivateAccessFormatter
