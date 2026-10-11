@@ -14,9 +14,11 @@ jobs:
         run: |
           uv run milo --demo --data /tmp/milo-ci-demo --port 8026 > /tmp/milo-ci.log 2>&1 &
           server_pid=$!
-          trap 'kill "$server_pid"' EXIT
+          uv run milo --data /tmp/milo-ci-live --port 8027 > /tmp/milo-ci-live.log 2>&1 &
+          live_pid=$!
+          trap 'kill "$server_pid" "$live_pid"' EXIT
           for attempt in $(seq 1 40); do
-            if curl --fail --silent http://127.0.0.1:8026/api/status > /dev/null; then break; fi
+            if curl --fail --silent http://127.0.0.1:8026/api/status > /dev/null && curl --fail --silent http://127.0.0.1:8027/api/status > /dev/null; then break; fi
             sleep 0.25
           done
-          MILO_TEST_URL=http://127.0.0.1:8026 uv run pytest tests/test_browser.py -q
+          MILO_TEST_URL=http://127.0.0.1:8026 MILO_LIVE_TEST_URL=http://127.0.0.1:8027 MILO_LIVE_TEST_DATA=/tmp/milo-ci-live uv run pytest tests/test_browser.py -q

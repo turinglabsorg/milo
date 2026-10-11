@@ -15,6 +15,8 @@ flowchart LR
     Mobile[Responsive web client] --> API
     API --> SQLite[(Persistent archive)]
     Worker[Sync worker] --> SQLite
+    Worker <--> Gmail[Gmail API with OAuth]
+    API --> Gmail
     Worker <--> IMAP[Provider IMAP over TLS]
     API --> SMTP[Provider SMTP over TLS]
     API --> Ollama[Ollama API]
@@ -24,11 +26,11 @@ flowchart LR
 
 Python/FastAPI provides a same-origin API and static client. SQLite runs in WAL
 mode; threads share one connection behind a reentrant lock. Fernet encrypts
-provider passwords, using a host-side key. Sessions store only token hashes.
+provider passwords, OAuth client credentials and Google refresh tokens, using a host-side key. Sessions store only token hashes.
 The initial setup requires a random, one-time bootstrap code, printed locally;
 the Linux launcher passes it in an immediately removed URL fragment.
 
-The archive key is `(account, folder, UIDVALIDITY, UID)`, never a sequence number.
+For generic IMAP, the archive key is `(account, folder, UIDVALIDITY, UID)`, never a sequence number.
 A UIDVALIDITY reset invalidates local identities and queued operations before
 importing the current folder. Sync fetches without marking mail as read. User
 flags enter a durable queue; incoming provider flags cannot overwrite pending
@@ -40,6 +42,23 @@ then backfills older mail. It currently scans the UID/flags set rather than usin
 CONDSTORE/QRESYNC or IDLE. Inbox queries return the most recent 500 messages;
 the archive continues to backfill beyond that UI limit. General custom folders,
 large mailbox pagination and provider-specific labels need further work.
+
+Google mail uses `(account, Gmail message ID)` and retains thread IDs and label
+IDs. Gmail sync imports 100 messages per pass and uses paginated `history.list`
+for changes; cursors advance only after a complete page is saved. A history 404
+starts a full scan while retaining the old cache until scanning completes.
+Read/star/archive operations modify native labels. Draft/trash/spam messages
+are excluded from client lists and automatic AI analysis. Custom label browsing
+and mailbox UI pagination remain future work.
+
+Google authorization uses the official Python library, PKCE and one-time state
+stored encrypted for ten minutes. A separate HttpOnly/SameSite=Lax cookie binds
+the browser returning from Google; the original Milo session must still be
+valid. The main session remains Strict. Refreshes persist in the vault and
+cannot overwrite newer reconnect credentials. Google sending uses Gmail API,
+retaining the canonical message ID and thread ID without a second local copy.
+Access logs strip query strings so OAuth codes are not logged by Milo. The
+external HTTPS proxy must also avoid logging callback query strings.
 
 Sent mail is cached locally after SMTP acknowledgement. The generic adapter
 does not append a second copy into a provider's Sent folder because some
@@ -90,8 +109,7 @@ Cookies are HttpOnly/SameSite; cross-origin writes are rejected. Client assets
 use a restrictive CSP and no third-party fonts, images, trackers or scripts.
 
 Future work includes session/device revocation UI, account editing and removal,
-passphrase recovery, encrypted backup, Google/Microsoft OAuth, OAuth refresh
-tokens, operational supervision, full mailbox pagination, incoming attachment
+passphrase recovery, encrypted backup, Microsoft OAuth, operational supervision, full mailbox pagination, incoming attachment
 size negotiation and concurrency/load validation. Changing a provider password
 currently requires development intervention; this needs a proper UI before
 daily use. These limitations must remain visible until implemented and tested.

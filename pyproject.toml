@@ -3,7 +3,7 @@ name = "milo-mail"
 version = "0.1.0"
 description = "A thoughtful email client, powered by Ollama. Linux first, your inbox everywhere."
 requires-python = ">=3.11"
-dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "cryptography>=44", "httpx>=0.28,<1"]
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "cryptography>=44", "httpx>=0.28,<1", "google-auth-oauthlib>=1.2,<2", "requests>=2.32,<3"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "playwright>=1.50", "ruff>=0.11"]

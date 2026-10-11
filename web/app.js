@@ -140,7 +140,7 @@ function showSettings(tab=S.settingsTab) {
   const tabs=`<div class="modal-tabs">${[['accounts','Account'],['ai','Milo AI'],['rules','Filtri'],['devices','Dispositivi']].map(([id,name])=>`<button data-settings-tab="${id}" class="${id===tab?'active':''}">${name}</button>`).join('')}</div>`;
   let body='';
   if(tab==='accounts') {
-    body=`<p>Collegali una volta. Gli account sono conservati sul tuo servizio Milo e disponibili agli altri dispositivi.</p>${S.state.accounts.map(a=>`<div class="settings-account"><span class="dot"></span><div><strong>${esc(a.name)}</strong><small>${esc(a.email)}</small></div><span class="health ${a.error?'error':''}">${a.error?'Da controllare':a.last_sync?'Sincronizzato':'In attesa'}</span></div>${a.error?`<p class="form-error">${esc(a.error)}</p>`:''}`).join('')}<div class="form-actions"><button class="primary" data-action="add-account">${icon('plus')}Collega un account</button></div>${S.state.pending?.length?`<div class="notice" style="margin-top:20px">${S.state.pending.map(p=>`${p.count} modifiche ${esc(p.kind)}: ${esc(p.error||'in attesa della prossima sincronizzazione')}`).join('<br>')}</div>`:''}`;
+    body=`<p>Collegali una volta. Gli account sono conservati sul tuo servizio Milo e disponibili agli altri dispositivi.</p>${S.state.accounts.map(a=>`<div class="settings-account"><span class="dot"></span><div><strong>${esc(a.name)}</strong><small>${esc(a.email)}</small></div><span class="health ${a.error?'error':''}">${a.error?'Da controllare':a.last_sync?'Sincronizzato':'In attesa'}</span>${a.provider==='google' && a.error?'<button class="secondary" data-action="google-connect">Ricollega</button>':''}</div>${a.error?`<p class="form-error">${esc(a.error)}</p>`:''}`).join('')}<div class="form-actions"><button class="primary" data-action="add-account">${icon('plus')}Collega un account</button></div>${S.state.pending?.length?`<div class="notice" style="margin-top:20px">${S.state.pending.map(p=>`${p.count} modifiche ${esc(p.kind)}: ${esc(p.error||'in attesa della prossima sincronizzazione')}`).join('<br>')}</div>`:''}`;
   } else if(tab==='ai') {
     const ai=S.state.ai;
     body=`<form id="ai-form"><p>Analisi, recap e risposte proposte passano da Ollama. Le risposte restano bozze da rivedere e inviare personalmente.</p><label class="field"><span>Modello Ollama</span><input name="model" value="${esc(ai.model)}" required></label><div class="notice"><strong>Mistral Large 4 usa Ollama Cloud.</strong><br>Con <code>mistral-large-4:cloud</code>, il contenuto delle email selezionate viene elaborato nel cloud di Ollama. Puoi scegliere un modello locale già installato.</div><label class="check-field"><input type="checkbox" name="cloud_consent" ${ai.cloud_consent?'checked':''}><span>Consento l’elaborazione delle email con modelli cloud.</span></label><label class="check-field"><input type="checkbox" name="automatic" ${ai.automatic?'checked':''}><span>Analizza automaticamente le nuove email e organizza l’inbox in Persone, Notifiche e Newsletter.</span></label>${S.state.ai_error?`<p class="form-error">${esc(S.state.ai_error)}</p>`:''}<div class="form-actions"><button class="primary" type="submit">Salva preferenze</button></div></form>`;
@@ -153,8 +153,14 @@ function showSettings(tab=S.settingsTab) {
 }
 
 function showAccountForm() {
-  if(S.status.demo) { toast('La demo usa messaggi fittizi. Avvia Milo senza --demo per collegare la tua posta.'); return; }
-  showModal('Una nuova casa per il tuo account',`<form id="account-form"><label class="field"><span>Provider</span><select id="provider"><option value="gmail">Gmail / Google Workspace</option><option value="icloud">iCloud Mail</option><option value="other">Altro account IMAP</option></select></label><div class="notice" id="provider-notice">Per questa versione serve una password per app Google con verifica in due passaggi. Il collegamento OAuth è ancora da implementare.</div><div class="form-grid"><label class="field"><span>Nome dell’account</span><input name="name" value="Personale" required maxlength="80"></label><label class="field"><span>Indirizzo email</span><input name="email" type="email" required autocomplete="email"></label><label class="field"><span>Nome utente</span><input name="username" placeholder="Di solito l’indirizzo email" required></label><label class="field"><span>Password per app</span><input name="password" type="password" required autocomplete="off"></label><label class="field"><span>Server IMAP</span><input name="imap_host" value="imap.gmail.com" required></label><label class="field"><span>Porta IMAP (TLS)</span><input name="imap_port" type="number" value="993" min="1" max="65535" required></label><label class="field"><span>Server SMTP</span><input name="smtp_host" value="smtp.gmail.com" required></label><label class="field"><span>Porta SMTP</span><input name="smtp_port" type="number" value="465" min="1" max="65535" required></label><label class="field full"><span>Sicurezza SMTP</span><select name="smtp_security"><option value="tls">TLS</option><option value="starttls">STARTTLS</option></select></label></div><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="close-modal">Annulla</button><button class="primary" type="submit">Collega e sincronizza ${icon('arrow')}</button></div></form>`);
+  if(S.status.demo) { toast('Apri il servizio Milo per collegare la tua posta.'); return; }
+  const google=S.state.google;
+  const setup=google?.configured?'':`<details class="oauth-help" open><summary>Configura Google una volta per il tuo servizio</summary><ol><li>In <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noopener">Google Cloud</a> abilita Gmail API e configura il consenso OAuth per Milo.</li><li>Crea un client di tipo <strong>Applicazione web</strong> con questo URI di reindirizzamento:<div class="notice callback-url">${esc(google?.redirect_uri||'')}</div></li><li>Scarica il JSON delle credenziali e importalo qui. Se l’app è in Testing, aggiungi i tuoi indirizzi come utenti di test.</li></ol><form id="google-config-form"><label class="field"><span>Credenziali OAuth Google (.json)</span><input type="file" name="credentials" accept=".json,application/json" required></label><div class="form-error" role="alert"></div><div class="form-actions"><button class="primary" type="submit">Configura Google</button></div></form></details>`;
+  showModal('Collega la tua posta',`<p>Accedi al tuo account Google e autorizza Milo a leggere, organizzare e inviare la tua posta. Il collegamento resta sul servizio e vale per tutti i tuoi dispositivi.</p><button class="primary google-connect" data-action="google-connect" ${google?.configured?'':'disabled'}>Continua con Google ${icon('arrow')}</button>${setup}<div class="form-actions"><button class="secondary" data-action="imap-account">Collega iCloud o un account IMAP</button></div>`);
+}
+
+function showIMAPForm() {
+  showModal('Collega un account IMAP',`<form id="account-form"><label class="field"><span>Provider</span><select id="provider"><option value="icloud">iCloud Mail</option><option value="other">Altro account IMAP</option></select></label><div class="notice" id="provider-notice">Usa una password specifica per app generata nel tuo account Apple. Il nome utente IMAP può essere la parte prima di @icloud.com.</div><div class="form-grid"><label class="field"><span>Nome dell’account</span><input name="name" value="Personale" required maxlength="80"></label><label class="field"><span>Indirizzo email</span><input name="email" type="email" required autocomplete="email"></label><label class="field"><span>Nome utente</span><input name="username" placeholder="Di solito l’indirizzo email" required></label><label class="field"><span>Password per app</span><input name="password" type="password" required autocomplete="off"></label><label class="field"><span>Server IMAP</span><input name="imap_host" value="imap.mail.me.com" required></label><label class="field"><span>Porta IMAP (TLS)</span><input name="imap_port" type="number" value="993" min="1" max="65535" required></label><label class="field"><span>Server SMTP</span><input name="smtp_host" value="smtp.mail.me.com" required></label><label class="field"><span>Porta SMTP</span><input name="smtp_port" type="number" value="587" min="1" max="65535" required></label><label class="field full"><span>Sicurezza SMTP</span><select name="smtp_security"><option value="tls">TLS</option><option value="starttls" selected>STARTTLS</option></select></label></div><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="close-modal">Annulla</button><button class="primary" type="submit">Collega e sincronizza ${icon('arrow')}</button></div></form>`);
 }
 
 function showCompose(draft={}) {
@@ -213,6 +219,8 @@ document.addEventListener('click', async event => {
     if(action==='settings') showSettings('accounts');
     if(action==='settings-ai') showSettings('ai');
     if(action==='add-account') showAccountForm();
+    if(action==='imap-account') showIMAPForm();
+    if(action==='google-connect') { target.disabled=true;try { const result=await api('/oauth/google/start','POST');location.assign(result.url); } catch(error) { target.disabled=false;throw error; } }
     if(action==='compose') showCompose();
     if(action==='menu') { S.menu=!S.menu;$('.shell').classList.toggle('menu-open',S.menu); }
     if(action==='back') { S.selected=null;$('.shell').classList.remove('has-selection');renderList();renderReading(); }
@@ -244,6 +252,12 @@ document.addEventListener('submit', async event => {
     if(form.id==='login-form') {
       await api(S.status.initialized?'/login':'/setup','POST',data);S.status=await api('/status');await refresh();renderShell();
     }
+    if(form.id==='google-config-form') {
+      const file=form.elements.credentials.files[0];
+      if(!file || file.size>16000) throw new Error('Seleziona il JSON OAuth Google (massimo 16 KB).');
+      let config;try { config=JSON.parse(await file.text()); } catch { throw new Error('Il file non contiene un JSON valido.'); }
+      await api('/settings/google','PUT',config);await refresh();showAccountForm();toast('Google configurato. Ora collega la tua casella.');
+    }
     if(form.id==='account-form') {
       data.imap_port=Number(data.imap_port);data.smtp_port=Number(data.smtp_port);
       await api('/accounts','POST',data);closeModal();await refresh();renderShell();toast('Account salvato. La prima sincronizzazione è in corso.');
@@ -272,9 +286,9 @@ document.addEventListener('change', async event => {
   if(event.target.id==='message-category') { try{await mutate({category:event.target.value});}catch(error){toast(error.message);} }
   if(event.target.id==='provider') {
     const form=$('#account-form'), provider=event.target.value;
-    const presets={gmail:['imap.gmail.com','smtp.gmail.com',465,'tls'],icloud:['imap.mail.me.com','smtp.mail.me.com',587,'starttls'],other:['','',465,'tls']};
+    const presets={icloud:['imap.mail.me.com','smtp.mail.me.com',587,'starttls'],other:['','',465,'tls']};
     const [imap,smtp,port,security]=presets[provider];form.elements.imap_host.value=imap;form.elements.smtp_host.value=smtp;form.elements.smtp_port.value=port;form.elements.smtp_security.value=security;
-    $('#provider-notice').textContent={gmail:'Serve una password per app Google con verifica in due passaggi. Il collegamento OAuth è ancora da implementare.',icloud:'Usa una password specifica per app generata nel tuo account Apple. Il nome utente IMAP può essere la parte prima di @icloud.com.',other:'Inserisci i parametri del tuo provider. IMAP usa TLS; SMTP può usare TLS oppure STARTTLS.'}[provider];
+    $('#provider-notice').textContent={icloud:'Usa una password specifica per app generata nel tuo account Apple. Il nome utente IMAP può essere la parte prima di @icloud.com.',other:'Inserisci i parametri del tuo provider. IMAP usa TLS; SMTP può usare TLS oppure STARTTLS.'}[provider];
   }
 });
 document.addEventListener('keydown', async event => {
@@ -298,7 +312,12 @@ document.addEventListener('keydown', async event => {
 
 async function boot() {
   try {
+    const oauth=new URLSearchParams(location.hash.slice(1));
+    const oauthError=oauth.get('google_error'),connected=oauth.has('google_connected');
+    if(oauthError || connected) history.replaceState(null,'',location.pathname);
     S.status=await api('/status');
+    if(oauthError) toast(oauthError);
+    if(connected) toast('Casella Google collegata. Sto sincronizzando la tua posta.');
     if(!S.status.authenticated) { renderLogin();return; }
     await refresh();renderShell();
     if(S.status.demo && S.messages.length && innerWidth>900) await selectMessage(S.messages[0].id,false);

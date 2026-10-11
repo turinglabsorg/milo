@@ -1,5 +1,5 @@
-const CACHE = 'milo-shell-v1';
-const SHELL = ['/', '/static/style.css', '/static/app.js', '/static/icon.svg'];
+const CACHE = 'milo-shell-v2';
+const SHELL = ['/', '/static/style.css', '/static/app.js', '/static/icon.svg', '/static/fonts/Geist.woff2'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
   self.skipWaiting();

@@ -9,20 +9,23 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .ai import AI
 from .demo import seed_demo
+from .google import Gmail, GoogleOAuth
 from .mail import SyncEngine, parse_message, safe_error, send_mail
 from .models import AccountInput, AISettings, DraftInput, Login, MessagePatch, RuleInput
 from .store import Store
 
 
-def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434", secure_cookies=False):
+def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434", secure_cookies=False,
+               public_url="http://127.0.0.1:8025", google_client=None):
     store = Store(directory)
     ai = AI(store, ollama_url)
     engine = SyncEngine(store, ai)
+    google = GoogleOAuth(store, public_url, google_client)
     sync_lock = asyncio.Lock()
     stop_worker = asyncio.Event()
     attempts = {}
@@ -53,7 +56,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         store.close()
 
     app = FastAPI(title="Milo", version="0.1.0", lifespan=lifespan, docs_url=None, redoc_url=None)
-    app.state.store, app.state.engine, app.state.ai = store, engine, ai
+    app.state.store, app.state.engine, app.state.ai, app.state.google = store, engine, ai, google
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -126,16 +129,56 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         response.delete_cookie("milo_session")
         return {"ok": True}
 
+    @app.put("/api/settings/google", dependencies=[Depends(auth)])
+    def settings_google(data: dict):
+        live()
+        if len(json.dumps(data)) > 16000:
+            raise HTTPException(422, "File OAuth troppo grande")
+        try:
+            google.configure(data)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise HTTPException(422, "Importa il JSON OAuth Google di tipo Applicazione web") from exc
+        return google.status()
+
+    @app.post("/api/oauth/google/start", dependencies=[Depends(auth)])
+    def google_start(request: Request, response: Response):
+        live()
+        try:
+            url, browser = google.start(request.cookies.get("milo_session"))
+        except RuntimeError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        # Google returns via a cross-site top-level navigation. Keep the main
+        # session Strict; this short-lived Lax nonce binds only the OAuth flow.
+        response.set_cookie("milo_oauth", browser, httponly=True, secure=secure_cookies,
+                            samesite="lax", max_age=600, path="/api/oauth/google")
+        return {"url": url}
+
+    @app.get("/api/oauth/google/callback")
+    def google_callback(request: Request, background: BackgroundTasks, state="", code="", error=""):
+        live()
+        try:
+            account_id = google.finish(state, request.cookies.get("milo_oauth"), "" if error else code)
+        except (ValueError, RuntimeError) as exc:
+            response = RedirectResponse(google.public_url + "/#google_error=" + quote(str(exc), safe=""), 303)
+        else:
+            response = RedirectResponse(google.public_url + "/#google_connected=1", 303)
+            issue_session(response)
+            account = next(a for a in store.accounts(private=True) if a["id"] == account_id)
+            background.add_task(engine.sync_account, account)
+        response.delete_cookie("milo_oauth", path="/api/oauth/google")
+        return response
+
     @app.get("/api/state", dependencies=[Depends(auth)])
     def state():
-        inbox = store.rows("SELECT COUNT(*) AS count,SUM(read=0) AS unread FROM messages WHERE archived=0 AND sent=0 "
+        inbox = store.rows("SELECT COUNT(*) AS count,SUM(read=0) AS unread FROM messages WHERE hidden=0 AND archived=0 AND sent=0 "
                            "AND (snoozed_until IS NULL OR snoozed_until<=?)", (time.time(),))[0]
         return {"accounts": store.accounts(), "ai": store.setting("ai"), "ai_error": store.setting("ai_error"),
-                "rules": store.rules(), "pending": store.rows("SELECT kind,error,COUNT(*) AS count FROM outbox GROUP BY kind,error"),
+                "google": google.status(), "rules": store.rules(),
+                "pending": store.rows("SELECT kind,error,COUNT(*) AS count FROM outbox GROUP BY kind,error"),
                 "counts": {"inbox": inbox["count"], "unread": inbox["unread"] or 0,
-                           "starred": store.rows("SELECT COUNT(*) AS count FROM messages WHERE starred=1")[0]["count"],
+                           "starred": store.rows("SELECT COUNT(*) AS count FROM messages WHERE hidden=0 AND starred=1")[0]["count"],
                            "drafts": store.rows("SELECT COUNT(*) AS count FROM drafts")[0]["count"],
-                           "snoozed": store.rows("SELECT COUNT(*) AS count FROM messages WHERE snoozed_until>?",
+                           "snoozed": store.rows("SELECT COUNT(*) AS count FROM messages WHERE hidden=0 AND snoozed_until>?",
                                                  (time.time(),))[0]["count"]}}
 
     @app.post("/api/accounts", dependencies=[Depends(auth)])
@@ -271,9 +314,17 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             sending.add(draft_id)
         try:
             original = store.message(draft["reply_to_id"]) if draft.get("reply_to_id") else None
-            mail = send_mail(account, draft, original)
-            store.upsert_message(parse_message(mail.as_bytes(), account["id"], "Milo/Sent", "local", time.time_ns(),
-                                               b"\\Seen", sent=True))
+            with engine.account_lock(account["id"]):
+                if account["provider"] == "google":
+                    client = Gmail(store, account["id"])
+                    try:
+                        client.send(account, draft, original)
+                    finally:
+                        client.close()
+                else:
+                    mail = send_mail(account, draft, original)
+                    store.upsert_message(parse_message(mail.as_bytes(), account["id"], "Milo/Sent", "local", time.time_ns(),
+                                                       b"\\Seen", sent=True))
             store.execute("DELETE FROM drafts WHERE id=?", (draft_id,))
             return {"ok": True}
         except ValueError as exc:

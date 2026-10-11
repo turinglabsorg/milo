@@ -10,6 +10,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
 DEMO = "--demo" in sys.argv
@@ -29,7 +30,41 @@ def running():
         return False
 
 
+def shared_server():
+    if DEMO:
+        return None
+    url = os.environ.get("MILO_SERVER_URL")
+    config = ROOT / ".data/server.json"
+    if not url and config.exists():
+        try:
+            url = json.loads(config.read_text())["url"]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise RuntimeError("The shared server configuration is invalid.") from exc
+    if not url:
+        return None
+    parsed = urlsplit(url)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or parsed.path not in {"", "/"}):
+        raise RuntimeError("The shared Milo server must use an HTTPS origin.")
+    return url.rstrip("/")
+
+
+def open_window(url):
+    browser = next((shutil.which(name) for name in ("chromium", "chromium-browser", "google-chrome")
+                    if shutil.which(name)), None)
+    if browser:
+        subprocess.Popen([browser, "--app=" + url, "--class=Milo", "--new-window"], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    else:
+        subprocess.Popen(["xdg-open", url], start_new_session=True)
+
+
 def main():
+    server = shared_server()
+    if server:
+        open_window(server)
+        print(f"Milo is connected to {server}")
+        return
     python = ROOT / ".venv/bin/python"
     if not python.exists():
         raise RuntimeError("Run 'uv sync' in the Milo folder first.")
@@ -57,14 +92,7 @@ def main():
     url = URL
     if bootstrap and json.loads(bootstrap[0]) and not DEMO:
         url += "#setup=" + json.loads(bootstrap[0])
-    browser = next((shutil.which(name) for name in ("chromium", "chromium-browser", "google-chrome")
-                    if shutil.which(name)), None)
-    if browser:
-        # --password-store=basic is intentionally not used: no weakening the browser's credential storage.
-        subprocess.Popen([browser, "--app=" + url, "--class=Milo", "--new-window"], stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True)
-    else:
-        subprocess.Popen(["xdg-open", url], start_new_session=True)
+    open_window(url)
     print(f"Milo is running at {URL}")
 
 

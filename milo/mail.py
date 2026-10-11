@@ -123,6 +123,8 @@ class SyncEngine:
 
     def sync_account(self, account):
         account_id = account["id"]
+        if account.get("provider") == "google":
+            return self.sync_google(account)
         with self.account_lock(account_id):
             client = None
             try:
@@ -144,14 +146,37 @@ class SyncEngine:
                         client.logout()
                     except Exception:
                         pass
+        self.analyze_pending(account_id)
+        return result
+
+    def analyze_pending(self, account_id):
         if self.ai and self.store.setting("ai").get("automatic"):
-            for row in self.store.rows("SELECT id FROM messages WHERE account_id=? AND analysis IS NULL AND sent=0 "
+            for row in self.store.rows("SELECT id FROM messages WHERE account_id=? AND hidden=0 AND analysis IS NULL AND sent=0 "
                                        "ORDER BY date DESC LIMIT 10", (account_id,)):
                 try:
                     self.ai.analyze(row["id"])
                 except Exception as exc:
                     self.store.set_setting("ai_error", safe_error(exc))
                     break
+
+    def sync_google(self, account):
+        from .google import Gmail
+
+        account_id = account["id"]
+        with self.account_lock(account_id):
+            client = None
+            try:
+                client = Gmail(self.store, account_id)
+                result = client.sync()
+                self.store.execute("UPDATE accounts SET last_sync=?,error=NULL WHERE id=?", (time.time(), account_id))
+            except Exception as exc:
+                error = safe_error(exc)
+                self.store.execute("UPDATE accounts SET error=? WHERE id=?", (error, account_id))
+                return {"account_id": account_id, "ok": False, "error": error}
+            finally:
+                if client:
+                    client.close()
+        self.analyze_pending(account_id)
         return result
 
     def sync_folder(self, client, account, folder):
@@ -256,7 +281,7 @@ def safe_error(exc):
     return "Operazione non riuscita. Controlla la configurazione del provider."
 
 
-def send_mail(account, draft, original=None):
+def build_message(account, draft, original=None):
     recipients = [address for _, address in getaddresses([draft["to"]])]
     if not recipients or any("@" not in address or any(c in address for c in "\r\n") for address in recipients):
         raise ValueError("Inserisci destinatari validi")
@@ -270,6 +295,12 @@ def send_mail(account, draft, original=None):
         message["In-Reply-To"] = original["message_id"]
         message["References"] = original["message_id"]
     message.set_content(draft["body"])
+    return message
+
+
+def send_mail(account, draft, original=None):
+    message = build_message(account, draft, original)
+    recipients = [address for _, address in getaddresses([draft["to"]])]
     context = ssl.create_default_context()
     if account["smtp_security"] == "tls":
         client = smtplib.SMTP_SSL(account["smtp_host"], account["smtp_port"], timeout=20, context=context)

@@ -49,6 +49,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY, data TEXT, updated REAL);
             CREATE TABLE IF NOT EXISTS rules(id TEXT PRIMARY KEY, data TEXT);
         """)
+        self.migrate()
         (directory / "mail.sqlite").chmod(0o600)
         self.bootstrap = self.setting("bootstrap")
         if not self.setting("password") and not self.bootstrap:
@@ -57,6 +58,92 @@ class Store:
         if not self.setting("ai"):
             self.set_setting("ai", {"model": "mistral-large-4:cloud", "automatic": False,
                                     "cloud_consent": False})
+
+    def migrate(self):
+        migrations = {
+            "accounts": {"provider": "TEXT NOT NULL DEFAULT 'imap'"},
+            "messages": {"provider_id": "TEXT", "thread_id": "TEXT", "labels": "TEXT",
+                         "hidden": "INTEGER NOT NULL DEFAULT 0"},
+        }
+        with self.lock, self.db:
+            for table, columns in migrations.items():
+                existing = {row["name"] for row in self.db.execute(f"PRAGMA table_info({table})")}
+                for name, definition in columns.items():
+                    if name not in existing:
+                        self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+            self.db.executescript("""
+                CREATE UNIQUE INDEX IF NOT EXISTS messages_provider_id ON messages(account_id,provider_id)
+                    WHERE provider_id IS NOT NULL;
+                CREATE TABLE IF NOT EXISTS oauth_states(state TEXT PRIMARY KEY, data TEXT, expires REAL);
+                CREATE TABLE IF NOT EXISTS gmail_sync(
+                    account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+                    history_id TEXT, history_page TEXT, backfill_page TEXT,
+                    backfill_complete INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS gmail_scan(
+                    account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
+                    provider_id TEXT, PRIMARY KEY(account_id,provider_id));
+            """)
+
+    def encrypt_json(self, value):
+        return self.vault.encrypt(json.dumps(value).encode()).decode()
+
+    def decrypt_json(self, value):
+        return json.loads(self.vault.decrypt(value.encode()).decode())
+
+    def begin_oauth(self, state, data):
+        with self.lock:
+            self.execute("DELETE FROM oauth_states WHERE expires<?", (time.time(),))
+            self.execute("INSERT INTO oauth_states VALUES(?,?,?)",
+                         (hashlib.sha256(state.encode()).hexdigest(), self.encrypt_json(data), time.time()+600))
+
+    def consume_oauth(self, state, browser):
+        with self.lock:
+            key = hashlib.sha256(state.encode()).hexdigest()
+            rows = self.rows("SELECT * FROM oauth_states WHERE state=? AND expires>?", (key, time.time()))
+            if not rows:
+                return None
+            data = self.decrypt_json(rows[0]["data"])
+            if not secrets.compare_digest(data.get("browser", ""), browser or ""):
+                return None
+            self.execute("DELETE FROM oauth_states WHERE state=?", (key,))
+            return data
+
+    def google_account(self, address, credentials):
+        with self.lock:
+            existing = self.rows("SELECT id,provider,secret FROM accounts WHERE lower(email)=lower(?)", (address,))
+            if existing and existing[0]["provider"] != "google":
+                raise RuntimeError("Questo indirizzo è già collegato via IMAP.")
+            if existing:
+                account_id = existing[0]["id"]
+                previous = self.decrypt_json(existing[0]["secret"])
+                if not credentials.get("refresh_token"):
+                    credentials["refresh_token"] = previous.get("refresh_token")
+                if not credentials.get("refresh_token"):
+                    raise RuntimeError("Google non ha fornito l'accesso persistente. Ricollega l'account.")
+                self.execute("UPDATE accounts SET secret=?,error=NULL WHERE id=?",
+                             (self.encrypt_json(credentials), account_id))
+            else:
+                if not credentials.get("refresh_token"):
+                    raise RuntimeError("Google non ha fornito l'accesso persistente. Ricollega l'account concedendo l'accesso.")
+                account_id = self.add_account({"name": address.split("@")[0], "email": address, "username": address,
+                    "password": json.dumps(credentials), "provider": "google", "color": "#7770c8"})
+            return account_id
+
+    def google_credentials(self, account_id):
+        rows = self.rows("SELECT secret FROM accounts WHERE id=? AND provider='google'", (account_id,))
+        if not rows:
+            raise RuntimeError("Account Google non trovato")
+        return self.decrypt_json(rows[0]["secret"])
+
+    def save_google_credentials(self, account_id, credentials, expected_secret=None):
+        secret = self.encrypt_json(credentials)
+        query = "UPDATE accounts SET secret=? WHERE id=? AND provider='google'"
+        params = (secret, account_id)
+        if expected_secret is not None:
+            query += " AND secret=?"
+            params += (expected_secret,)
+        cursor = self.execute(query, params)
+        return secret if cursor.rowcount else None
 
     def rows(self, query, params=()):
         with self.lock:
@@ -111,7 +198,7 @@ class Store:
         accounts = self.rows("SELECT * FROM accounts ORDER BY rowid")
         for account in accounts:
             encrypted = account.pop("secret")
-            if private:
+            if private and account["provider"] == "imap":
                 account["password"] = self.vault.decrypt(encrypted.encode()).decode()
         return accounts
 
@@ -139,7 +226,7 @@ class Store:
         return row
 
     def messages(self, view="inbox", category=None, account=None, search="", limit=500):
-        clauses, params = [], []
+        clauses, params = ["hidden=0"], []
         if view == "inbox":
             clauses.extend(["archived=0", "sent=0", "(snoozed_until IS NULL OR snoozed_until<=?)"])
             params.append(time.time())

@@ -11,8 +11,6 @@ client runs on Linux in a dedicated Chromium window. Native iOS comes next.
 for an established email client. A real mailbox and a physical iPhone still need
 end-to-end validation. See [the roadmap](docs/ROADMAP.md).
 
-![Milo's Linux inbox with fictional demo messages](docs/inbox.png)
-
 ## Run on Linux
 
 Requires Python 3.11+, [uv](https://docs.astral.sh/uv/) and, for the dedicated
@@ -39,19 +37,12 @@ To run the service in the foreground:
 uv run milo --data .data/live
 ```
 
-For an isolated demo with **fictional mail**, without contacting an email provider:
-
-```sh
-uv run python scripts/launch.py --demo
-# Or: uv run milo --demo --data .data/demo --port 8026
-```
-
-The demo disables real account connections, sending and AI calls. Demo state is
-separate from your real archive. The first version includes Italian UI copy.
-
 ## What works
 
 - A responsive three-column inbox, search, categories and account filtering.
+- Google OAuth with PKCE, encrypted refresh tokens and native Gmail API sync.
+  Read/unread, stars and archive changes use Gmail labels; expired history
+  cursors trigger a fresh scan while retaining cached mail.
 - IMAP over TLS: import inbox, sent and archive folders, with UIDVALIDITY-aware
   identities, bounded backfill, flag reconciliation and remote deletion detection.
 - Durable queues for read/unread, stars and archive operations. Pending operations
@@ -65,10 +56,13 @@ separate from your real archive. The first version includes Italian UI copy.
 - Persistent sessions and settings, encrypted account credentials, a protected
   data directory and an installable web app shell.
 
-Connect generic IMAP accounts, or Gmail/iCloud accounts with provider-issued app
-passwords when available. Google/Microsoft OAuth is **not implemented yet**.
-Gmail's All Mail/label semantics and Exchange need dedicated provider adapters;
-the generic adapter does not claim full support for them.
+Google accounts use **Continue with Google**, not an app password. Create a
+Google web OAuth client once for your Milo service, then authorize each mailbox.
+See [Google setup](docs/GOOGLE.md). Other accounts use IMAP/SMTP; iCloud requires
+an Apple app-specific password. Microsoft OAuth/Graph remains unfinished.
+
+The interface bundles [Geist](https://vercel.com/font), with readable type sizes
+and no external font requests. Its license is included in `web/fonts/OFL.txt`.
 
 ## Ollama and Mistral Large 4
 
@@ -113,6 +107,9 @@ encrypted at rest; use disk encryption for the host. A passphrase authenticates
 access to the service, it does not encrypt the mailbox. There is no automatic
 passphrase recovery yet. Do not commit or share `.data`, logs, backups or keys.
 
+For the permanent Mac Pro service with a static Grog domain, see
+[deployment](docs/DEPLOYMENT.md).
+
 The CLI without `--data` uses `$XDG_DATA_HOME/milo` (normally
 `~/.local/share/milo`). The launcher always passes `.data/live` explicitly.
 
@@ -124,13 +121,15 @@ uv run ruff check milo tests scripts install.py
 uv run pytest -q
 ```
 
-Browser tests need an isolated running demo:
+Browser tests use two isolated temporary services (never your real archive):
 
 ```sh
 uv run playwright install chromium
 uv run milo --demo --data /tmp/milo-browser-demo --port 8026
-# In another terminal:
-MILO_TEST_URL=http://127.0.0.1:8026 uv run pytest tests/test_browser.py -q
+uv run milo --data /tmp/milo-browser-live --port 8027
+# Run each service in a separate terminal, then:
+MILO_TEST_URL=http://127.0.0.1:8026 MILO_LIVE_TEST_URL=http://127.0.0.1:8027 \
+MILO_LIVE_TEST_DATA=/tmp/milo-browser-live uv run pytest tests/test_browser.py -q
 ```
 
 For an explicit live model check with **only fictional email content**:
@@ -146,7 +145,9 @@ also receive the native schema parameter. See [Ollama's structured output docume
 Tests cover authentication, credential secrecy, multiple clients, persistence,
 MIME parsing, attachments, rule precedence, cloud consent, AI result validation,
 SMTP TLS, IMAP flags, UIDVALIDITY resets, remote deletions, archive moves,
-responsive layout, search and drafts. Provider tests use deterministic doubles;
+OAuth state/PKCE/callback binding, token renewal persistence, Gmail labels,
+history pagination/reset, interrupted backfill, send identity, responsive layout,
+Google onboarding, font loading, search and drafts. Provider tests use deterministic doubles;
 they do not establish successful interoperability with a real mailbox.
 
 MIT · [turinglabs](https://github.com/turinglabsorg)
