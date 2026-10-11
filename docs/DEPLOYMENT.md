@@ -2,8 +2,15 @@
 
 Milo is a server on the owner's Mac Pro. It stores email, accounts, preferences
 and drafts there; Linux and iPhone connect to the same HTTPS service. Tailscale
-can be used to reach the Mac for administration. **The instructions below are
-prepared activation, not evidence of a completed deployment or reserved domain.**
+can be used to reach the Mac for administration.
+
+The owner's deployment was activated on 2026-10-11 at
+`https://milo.grooooog.space`. HTTPS returned the real, non-demo Milo status,
+and unauthenticated `/api/state` returned 401. The Mac's Grog launch agent is
+loaded with `KeepAlive`; the archive exists at
+`~/Library/Application Support/Milo`. The served JavaScript, CSS and Geist font
+match this checkout. Initial passphrase setup and real Google authorization
+remain pending; see [validation](VALIDATION.md) for the limits of these checks.
 
 ## Prepare the host
 

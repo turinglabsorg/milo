@@ -41,16 +41,22 @@ Verified locally on the Linux development machine:
   private API access. The demo has been stopped in the normal user session; fictional fixtures
   remain only for isolated development tests.
 
-Mac Pro deployment is prepared but not performed: Tailscale SSH requires an
-interactive session check, and no authorized shell has been obtained. No
-Google web-client credentials or real mailbox authorization have been provided.
+Mac Pro deployment was activated through the owner's authorized desktop session
+on 2026-10-11. The permanent Grog launch agent is loaded with `KeepAlive`; Milo's
+archive exists at `~/Library/Application Support/Milo`, outside the checkout.
+`https://milo.grooooog.space/api/status` reports the real service (`demo: false`)
+and unauthenticated `/api/state` returns 401. The deployed JavaScript, CSS and
+bundled Geist font match this checkout. The Linux launcher is configured to use
+this same HTTPS origin. Initial passphrase setup is pending. No Google web-client
+credentials or real mailbox authorization have been provided.
 
 The tests do **not** prove:
 
 - Live interoperability with Gmail, iCloud, Exchange or another real provider.
 - Quality or safety of AI output across a real private mailbox.
 - Offline mailbox reading, large mailbox performance or every IMAP extension.
-- Access through a deployed HTTPS service or two physical devices.
+- Authenticated mailbox use across two physical devices, or persistence of real
+  email across a production service restart.
 - A working native iOS build, background delivery or push notifications.
 
 The overall product goal remains active. These are explicit future validation
