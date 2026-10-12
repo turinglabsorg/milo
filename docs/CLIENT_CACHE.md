@@ -44,7 +44,11 @@ stored MIME content. Cached content remains reusable when only flags change.
 
 The normalized conversation catalogue is refreshed in background through the
 authenticated, chronological `/api/client/messages` metadata feed. Pages contain
-200 conversations, without MIME or bodies. Folder membership includes both
+200 conversations, without MIME or bodies. A partial SQLite index selects each
+page before aggregating its thread details, so pagination does not repeatedly
+materialize the complete archive. The client defers this background backfill
+behind initial reading and spaces page requests; catalogue refreshes are bounded
+to once per two minutes. Folder membership includes both
 incoming messages and sent replies. Missing rows are verified through
 `/api/client/thread` before removal; the same lookup recovers queued edits when
 an IMAP message identity changes while its conversation survives. The visible

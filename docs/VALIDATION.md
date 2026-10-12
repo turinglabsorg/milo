@@ -96,7 +96,11 @@ after offline restart, local draft save/delete and identity persistence followed
 by reconnection. A rejected preference remains visible without blocking mail
 edits; correcting it synchronizes successfully. Provider identity changes recover
 through authenticated, account-scoped thread lookup. Metadata snapshot tests
-verify 200-item chronological pagination remains stable when pins change.
+verify 200-item chronological pagination remains stable when pins change. The
+performance regression now uses 21,000 synthetic messages and checks catalogue
+page latency and use of the dedicated SQLite index, alongside reading and typing
+budgets. Page membership is selected before wide thread aggregation; background
+backfill yields between requests and starts behind initial reading.
 
 Measured cached inbox/reader/favorites navigation in the held-server fixture was
 approximately 40/81/70 ms. These are synthetic samples on the development laptop,

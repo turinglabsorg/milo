@@ -10,10 +10,12 @@ from test_responsive_inbox import service
 
 
 def test_large_archive_api_and_client_latency(tmp_path):
-    count = 10000
+    count = 21000
+    app_store=[]
 
     def prepare(app, received, sent):
         store = app.state.store
+        app_store.append(store)
         account = store.accounts()[0]['id']
         with store.lock, store.db:
             store.db.executemany('INSERT INTO messages(id,account_id,folder,uidvalidity,uid,message_id,thread_id,'
@@ -26,12 +28,27 @@ def test_large_archive_api_and_client_latency(tmp_path):
                                  for i in range(count)])
 
     with service(tmp_path, prepare) as (url, sent), httpx.Client(base_url=url) as client, sync_playwright() as p:
+        snapshot_start = perf_counter()
+        snapshot = client.get('/api/client/messages')
+        snapshot_ms = (perf_counter() - snapshot_start) * 1000
+        assert snapshot.status_code == 200 and len(snapshot.json()['messages']) == 200
+        assert snapshot_ms < 300, f'Catalogue page: {snapshot_ms:.1f}ms'
         durations = []
         for _ in range(20):
             start = perf_counter()
             response = client.get('/api/messages')
             durations.append((perf_counter() - start) * 1000)
             assert response.status_code == 200
+        query_plans=[]
+        original=app_store[0].rows
+        def explain(query, params=()):
+            if 'WITH latest AS' in query:
+                query_plans.extend(row[3] for row in app_store[0].db.execute('EXPLAIN QUERY PLAN '+query,params))
+            return original(query,params)
+        app_store[0].rows=explain
+        app_store[0].conversations(view='all',limit=201,chronological=True)
+        app_store[0].rows=original
+        assert any('messages_client_catalogue' in plan for plan in query_plans)
         rows = response.json()['messages']
         assert len(rows) == 100 and len(response.content) < 100000
         p95 = sorted(durations)[-2]
@@ -66,7 +83,7 @@ def test_large_archive_api_and_client_latency(tmp_path):
         assert not errors
         report = {'test_messages': count, 'list_p50_ms': round(median(durations), 1), 'list_p95_ms': round(p95, 1),
                   'inbox_visible_ms': round(startup, 1), 'reader_max_ms': round(max(readers), 1),
-                  'large_draft_typing_ms': round(typing, 1), 'list_bytes': len(response.content)}
+                  'large_draft_typing_ms': round(typing, 1), 'list_bytes': len(response.content), 'catalogue_page_ms': round(snapshot_ms,1)}
         Path('test-results').mkdir(exist_ok=True)
         Path('test-results/performance.json').write_text(json.dumps(report, indent=2) + '\n')
         print(json.dumps(report))

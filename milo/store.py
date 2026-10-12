@@ -86,6 +86,9 @@ class Store:
                     provider_id TEXT, PRIMARY KEY(account_id,provider_id));
                 CREATE INDEX IF NOT EXISTS messages_thread ON messages(account_id,thread_id);
                 CREATE INDEX IF NOT EXISTS messages_conversation ON messages(account_id,COALESCE(thread_id,id));
+                CREATE INDEX IF NOT EXISTS messages_client_catalogue
+                    ON messages(account_id,COALESCE(thread_id,id),date DESC,id)
+                    WHERE hidden=0 AND trashed=0;
             """)
 
     def encrypt_json(self, value):
@@ -409,11 +412,22 @@ class Store:
         ordering = "date DESC,id DESC" if chronological else "pinned DESC,date DESC"
         if before:
             params.extend((before[0], before[0], before[1]))
-        rows = self.rows("""
-            WITH eligible AS (
-                SELECT account_id,COALESCE(thread_id,id) AS thread FROM messages WHERE """ + " AND ".join(clauses) + """
-                GROUP BY account_id,COALESCE(thread_id,id)
-            ), ranked AS (
+        eligible = """WITH eligible AS (
+            SELECT account_id,COALESCE(thread_id,id) AS thread FROM messages WHERE """ + " AND ".join(clauses) + """
+            GROUP BY account_id,COALESCE(thread_id,id)
+        ), ranked AS ("""
+        if chronological and view == "all" and not any((category, account, search, thread)):
+            eligible = """WITH latest AS (
+                SELECT id,account_id,COALESCE(thread_id,id) AS thread,date,
+                       ROW_NUMBER() OVER (PARTITION BY account_id,COALESCE(thread_id,id) ORDER BY date DESC,id) AS rank
+                FROM messages WHERE hidden=0 AND trashed=0
+            ), eligible AS MATERIALIZED (
+                SELECT account_id,thread FROM latest WHERE rank=1""" + cursor + """
+                ORDER BY date DESC,id DESC LIMIT ?
+            ), ranked AS ("""
+            params.append(limit)
+            cursor = ""
+        rows = self.rows(eligible + """
                 SELECT m.id,m.account_id,m.thread_id,m.sender,m.sender_email,m.subject,m.preview,m.date,
                        m.read,m.content_version,MAX(m.starred) OVER w AS starred,m.archived,m.sent,m.category,
                        MAX(m.snoozed_until) OVER w AS snoozed_until,

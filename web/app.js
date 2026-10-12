@@ -268,9 +268,13 @@ async function refresh(resetSelection=false,showLoading=false){
   const cached=await deviceCache.get('api:/drafts');if(cached)S.cachedDrafts=cached.drafts;
   paintLocal();revalidateView();
 }
-let feeding=false,lastFeed=0;
+let feeding=false,lastFeed=0,feedTimer;
+function queueCatalogue(){
+  if(feedTimer||feeding||Date.now()-lastFeed<120000)return;
+  feedTimer=setTimeout(()=>{feedTimer=null;refreshCatalogue();},1500);
+}
 async function refreshCatalogue(){
-  if(feeding||!S.online||!S.status?.authenticated||Date.now()-lastFeed<20000)return;
+  if(feeding||!S.online||!S.status?.authenticated||Date.now()-lastFeed<120000)return;
   feeding=true;lastFeed=Date.now();
   try{
     let cursor;const previous=replica.keys(),seen=new Set();
@@ -278,7 +282,7 @@ async function refreshCatalogue(){
       const started=replica.revision,ticket=++S.remoteTicket;
       const data=await api('/client/messages'+(cursor?'?'+new URLSearchParams(cursor):''));
       if(!S.status?.authenticated)return;
-      replica.merge(data.messages,'all',started,ticket);for(const row of data.messages)seen.add(threadKey(row));paintLocal();cursor=data.next;
+      replica.merge(data.messages,'all',started,ticket);for(const row of data.messages)seen.add(threadKey(row));paintLocal();cursor=data.next;if(cursor)await new Promise(resolve=>setTimeout(resolve,50));
     }while(cursor&&S.online);
     for(const id of previous.filter(id=>!seen.has(id))){
       const row=replica.find(id),started=replica.revision,ticket=++S.remoteTicket;try{const data=await api('/client/thread?'+new URLSearchParams({account:row.account_id,thread:row.thread_id||row.id}));if(S.status?.authenticated)replica.merge([data.message],'all',started,ticket);}
@@ -667,7 +671,7 @@ document.addEventListener('submit', async event => {
       const previous=S.state.accounts.find(a=>a.id===form.dataset.accountId),patch=Object.fromEntries(Object.entries(data).filter(([key,value])=>value!==previous?.[key]));
       if(Object.keys(patch).every(key=>['name','enabled','color'].includes(key)))await savePreference(null,patch,form.dataset.accountId);
       else await api('/accounts/'+encodeURIComponent(form.dataset.accountId),'PATCH',patch);
-      S.loadingList=true;renderShell();await refresh(false,true);revalidateView().then(()=>{refreshCatalogue();if(S.status.demo&&S.messages.length&&innerWidth>900)selectMessage(S.messages[0].id,false).catch(()=>{});});renderList();showSettings('accounts');toast('Account aggiornato su Milo.');
+      S.loadingList=true;renderShell();await refresh(false,true);revalidateView().then(()=>{queueCatalogue();if(S.status.demo&&S.messages.length&&innerWidth>900)selectMessage(S.messages[0].id,false).catch(()=>{});});renderList();showSettings('accounts');toast('Account aggiornato su Milo.');
     }
     if(form.id==='identity-form') {
       data.aliases=data.aliases.split(',').map(name=>name.trim()).filter(Boolean);
@@ -745,7 +749,7 @@ async function boot() {
     for(const operation of await deviceCache.get('pending-operations')||[]){if(operation.error)S.queueErrors.set(operation.id,operation);replica.apply(operation);if(operation.kind==='setting')S.pendingSettings.set(operation.key,operation);else if(!operation.kind)S.optimistic.set(operation.key,{patch:{...S.optimistic.get(operation.key)?.patch,...operation.patch},deleted:operation.deleted,operationId:operation.id});}
     if(cachedStatus?.authenticated&&cachedState){
       S.status=cachedStatus;S.state=cachedState;S.online=navigator.onLine;applyState(cachedState);renderShell();await refresh();
-      api('/status').then(status=>{S.status=status;if(!status.authenticated)renderLogin();else{flushClientQueue().catch(()=>{});refreshCatalogue();}}).catch(error=>{if(temporarilyUnavailable(error)){S.online=false;renderChrome();}});
+      api('/status').then(status=>{S.status=status;if(!status.authenticated)renderLogin();else{flushClientQueue().catch(()=>{});queueCatalogue();}}).catch(error=>{if(temporarilyUnavailable(error)){S.online=false;renderChrome();}});
       return;
     }
     try{S.status=await api('/status');}catch(error){if(!temporarilyUnavailable(error))throw error;if(!cachedStatus?.authenticated)throw error;S.status=cachedStatus;S.online=false;}
@@ -760,7 +764,7 @@ async function boot() {
     if(oauthError) toast(oauthError);
     if(connected) toast('Casella Google collegata. Sto sincronizzando la tua posta.');
     if(!S.status.authenticated) { renderLogin();return; }
-    S.loadingList=true;renderShell();await refresh(false,true);revalidateView().then(()=>{refreshCatalogue();if(S.status.demo&&S.messages.length&&innerWidth>900)selectMessage(S.messages[0].id,false).catch(()=>{});});renderList();
+    S.loadingList=true;renderShell();await refresh(false,true);revalidateView().then(()=>{queueCatalogue();if(S.status.demo&&S.messages.length&&innerWidth>900)selectMessage(S.messages[0].id,false).catch(()=>{});});renderList();
 
   } catch(error) { $('#app').innerHTML=`<div class="empty" style="min-height:100vh">${icon('mail')}<h3>Milo non è raggiungibile.</h3><p>${esc(error.message)}</p></div>`; }
 }
@@ -796,7 +800,7 @@ async function runClientQueue(){
 }
 async function poll(){
   if(S.status?.authenticated&&!document.hidden){
-    await refresh();flushClientQueue().catch(()=>{});refreshCatalogue();
+    await refresh();flushClientQueue().catch(()=>{});queueCatalogue();
     if(S.recapOpen&&S.recapSignature!==JSON.stringify(S.state.recap))api('/recap').then(result=>{if(S.recapOpen)showRecap(result);}).catch(()=>{});
     for(const draft of S.pendingDrafts.values())if(!S.draftWrites.has(draft.id)&&S.compose?.id!==draft.id)persistDraft(draft).catch(()=>{});
     if(S.readerAnchor&&S.threadSync.phase==='downloading'&&!S.loadingMessage)loadThread(S.readerAnchor).catch(()=>{});
@@ -804,7 +808,7 @@ async function poll(){
   setTimeout(poll,3000);
 }
 setTimeout(poll,1500);
-addEventListener('online',()=>{S.online=true;queueRetryAt=0;flushClientQueue().catch(()=>{});revalidateView();refreshCatalogue();});
+addEventListener('online',()=>{S.online=true;queueRetryAt=0;flushClientQueue().catch(()=>{});revalidateView();queueCatalogue();});
 addEventListener('offline',()=>{S.online=false;renderChrome();});
 addEventListener('pagehide',()=>{const draft=captureCompose();if(draft)rememberDraft(draft);else storePendingDrafts();});
 if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js',{type:'module'}).catch(()=>{});
