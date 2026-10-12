@@ -148,3 +148,51 @@ def test_downloaded_inline_image_remains_available_offline(tmp_path):
         expect(image).to_be_visible()
         assert image.evaluate('(el)=>el.complete&&el.naturalWidth===1')
         browser.close()
+
+
+def test_server_restart_503_preserves_downloaded_inbox_and_body(tmp_path):
+    import base64
+
+    from starlette.responses import JSONResponse
+
+    state = {}
+
+    def prepare(app, received, sent):
+        state['app'] = app
+        png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA1cAAAAASUVORK5CYII=')
+        mail = EmailMessage()
+        mail.set_content('Server restart fixture')
+        mail.add_alternative('<p>HTML reply</p><img src="cid:image" alt="restart image">', subtype='html')
+        mail.get_payload()[1].add_related(png, maintype='image', subtype='png', cid='<image>')
+        app.state.store.execute('UPDATE messages SET raw=? WHERE id=?', (mail.as_bytes(), sent))
+        app.state.outage = False
+
+        @app.middleware('http')
+        async def temporary_outage(request, call_next):
+            if app.state.outage and request.url.path.startswith('/api/'):
+                return JSONResponse({'detail': 'Temporary restart'}, status_code=503)
+            return await call_next(request)
+
+    with service(tmp_path, prepare) as (url, sent), sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(url)
+        page.evaluate('()=>navigator.serviceWorker.ready.then(()=>new Promise(resolve=>navigator.serviceWorker.controller?resolve():navigator.serviceWorker.addEventListener("controllerchange",resolve,{once:true})))')
+        page.locator(f'[data-message="{sent}"]').click()
+        expect(page.frame_locator('.email-html').get_by_text('HTML reply', exact=True)).to_be_visible()
+        image = page.frame_locator('.email-html').get_by_alt_text('restart image')
+        expect(image).to_be_visible()
+        path = image.get_attribute('src')
+        page.wait_for_function('async path=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.getAsset(path));}', arg=path)
+        state['app'].state.outage = True
+        page.reload()
+        expect(page.locator('.message-row')).to_have_count(2)
+        page.locator(f'[data-message="{sent}"]').click()
+        expect(page.frame_locator('.email-html').get_by_text('HTML reply', exact=True)).to_be_visible()
+        image = page.frame_locator('.email-html').get_by_alt_text('restart image')
+        expect(image).to_be_visible()
+        assert image.evaluate('(el)=>el.complete&&el.naturalWidth===1')
+        state['app'].state.outage = False
+        page.reload()
+        expect(page.locator('.message-row')).to_have_count(2)
+        browser.close()

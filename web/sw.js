@@ -1,5 +1,5 @@
 import {deviceCache} from '/static/cache.js';
-const CACHE = 'milo-shell-v7';
+const CACHE = 'milo-shell-v8';
 const SHELL = ['/', '/static/style.css', '/static/app.js', '/static/cache.js', '/static/icon.svg', '/static/fonts/Geist.woff2'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
@@ -12,8 +12,9 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if(url.origin===self.location.origin&&/^\/api\/messages\/[^/]+\/attachments\/\d+$/.test(url.pathname)&&event.request.method==='GET'){
-    event.respondWith(fetch(event.request).then(response=>{
+    event.respondWith(fetch(event.request).then(async response=>{
       if(response.ok)event.waitUntil(deviceCache.setAsset(url.pathname,response.clone()).catch(()=>{}));
+      if(response.status>=500||response.status===429)return await deviceCache.getAsset(url.pathname)||response;
       return response;
     }).catch(async()=>await deviceCache.getAsset(url.pathname)||Response.error()));
     return;

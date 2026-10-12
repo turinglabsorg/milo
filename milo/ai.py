@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -38,8 +39,8 @@ class AI:
 
     def permitted(self):
         settings = self.store.setting("ai")
-        cloud = "cloud" in settings["model"].lower() or not self.endpoint.startswith(
-            ("http://127.0.0.1:", "http://localhost:"))
+        cloud = "cloud" in settings["model"].lower() or urlsplit(self.endpoint).hostname not in {
+            "127.0.0.1", "localhost", "::1", "host.docker.internal", "host.lima.internal"}
         return not cloud or settings.get("cloud_consent", False)
 
     def chat(self, prompt, schema, system=SYSTEM):

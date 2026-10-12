@@ -188,3 +188,11 @@ def test_recipient_metadata_does_not_load_message_body(logged_in, account_data, 
     assert result['reply_to_addresses'] == [{'name': 'Support', 'email': 'support@example.com'}]
     assert not {'body', 'raw', 'html'} & result.keys()
     assert logged_in.get('/api/messages/missing/recipients').status_code == 404
+
+
+def test_container_host_ollama_remains_local_but_cloud_models_require_consent(store):
+    store.set_setting('ai', {'model': 'local-model', 'cloud_consent': False, 'automatic': False})
+    assert AI(store, 'http://host.docker.internal:11434').permitted()
+    assert not AI(store, 'https://external.example.com').permitted()
+    store.set_setting('ai', {'model': 'mistral-large-4:cloud', 'cloud_consent': False, 'automatic': False})
+    assert not AI(store, 'http://host.docker.internal:11434').permitted()

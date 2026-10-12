@@ -46,6 +46,7 @@ function syncMarkup() {
   return `<span class="sync-status ${active.length||S.syncing?'working':''}" role="status">${icon(active.length||S.syncing?'refresh':'check')}<span>${esc(text)}</span></span>`;
 }
 
+const temporarilyUnavailable=error=>!error.status||error.status>=500||[408,429].includes(error.status);
 async function api(path, method='GET', body) {
   let response;
   try { response = await fetch('/api' + path, {method, signal:AbortSignal.timeout(method==='GET'?12000:60000), credentials:'same-origin', headers:body ? {'Content-Type':'application/json'} : {}, body:body ? JSON.stringify(body) : undefined}); }
@@ -54,7 +55,7 @@ async function api(path, method='GET', body) {
   if (!response.ok) {
     if ((response.status === 401 || response.status===404&&['/status','/state'].includes(path)) && S.status?.authenticated) { await deviceCache.clear(); S.status.authenticated=false; renderLogin(); }
     const message = Array.isArray(data.detail) ? data.detail.map(item => item.msg).join('; ') : data.detail;
-    const error=new Error(message || 'Operazione non riuscita');error.status=response.status;throw error;
+    const error=new Error(message || 'Operazione non riuscita');error.status=response.status;if(temporarilyUnavailable(error))S.online=false;throw error;
   }
   S.online=true;
   if(method==='GET'&&(/^(?:\/status|\/state|\/recap|\/messages(?:[/?]|$)|\/drafts)/.test(path)))deviceCache.set('api:'+path,data).then(saved=>{if(!saved&&!S.cacheWarning){S.cacheWarning=true;toast('Cache locale non disponibile. I messaggi restano sul server, ma non saranno disponibili offline su questo dispositivo.');}});
@@ -227,7 +228,7 @@ async function refresh(resetSelection=false,showLoading=false) {
   }
   try {
     const path=view==='drafts'?'/drafts':'/messages?'+params;
-    const [state,list]=await Promise.all([api('/state').catch(async error=>{if(error.status)throw error;return await deviceCache.get('api:/state')||Promise.reject(error);}),api(path).catch(async error=>{if(error.status)throw error;return await deviceCache.get('api:'+path)||(view==='drafts'&&S.pendingDrafts.size?{drafts:[]}:Promise.reject(error));})]);
+    const [state,list]=await Promise.all([api('/state').catch(async error=>{if(!temporarilyUnavailable(error))throw error;return await deviceCache.get('api:/state')||Promise.reject(error);}),api(path).catch(async error=>{if(!temporarilyUnavailable(error))throw error;return await deviceCache.get('api:'+path)||(view==='drafts'&&S.pendingDrafts.size?{drafts:[]}:Promise.reject(error));})]);
     if(version!==S.listVersion)return;
     S.state=state;if(!$('#appearance-form'))applyTheme(state.appearance?.theme||S.theme);
     if(view==='drafts'){const drafts=new Map(list.drafts.map(d=>[d.id,d]));for(const draft of S.pendingDrafts.values())drafts.set(draft.id,{...draft,pending:true});S.drafts=[...drafts.values()].filter(d=>!S.discardedDrafts.has(d.id));S.messages=[];}
@@ -288,7 +289,7 @@ async function loadThread(id,version=S.readerVersion){
   const cached=await deviceCache.get('api:'+path);
   if(cached)await applyThread(cached,id,version);
   try{await applyThread(await api(path),id,version);}
-  catch(error){if(!cached||error.status)throw error;S.online=false;renderChrome();}
+  catch(error){if(!cached||!temporarilyUnavailable(error))throw error;S.online=false;renderChrome();}
 }
 async function selectMessage(id,markRead=true) {
   warmingVersion++;const version=++S.readerVersion;
@@ -320,7 +321,7 @@ async function mutate(patch,deleted=false) {
     S.listVersion++;await refresh();renderList();renderChrome();
     if(deleted)toast('Conversazione eliminata. Sincronizzo il cestino in background.');
   }catch(error){
-    if(!error.status&&!S.online){
+    if(temporarilyUnavailable(error)&&!S.online){
       const operation={id:crypto.randomUUID(),key,message_id:id,patch,deleted};token.operationId=operation.id;
       await deviceCache.enqueue(operation);await deviceCache.set('api:/messages?view=inbox&search=',{messages:S.messages});
       renderChrome();toast('Modifica salvata sul dispositivo. Verrà sincronizzata quando torni online.');return;
@@ -646,7 +647,7 @@ async function boot() {
     const cachedStatus=await deviceCache.get('api:/status'),cachedState=await deviceCache.get('api:/state'),cachedList=await deviceCache.get('api:/messages?view=inbox&search=');
     for(const operation of await deviceCache.get('pending-operations')||[])S.optimistic.set(operation.key,{patch:{...S.optimistic.get(operation.key)?.patch,...operation.patch},deleted:operation.deleted,operationId:operation.id});
     if(cachedStatus?.authenticated&&cachedState&&cachedList){S.status=cachedStatus;S.state=cachedState;S.messages=cachedList.messages.filter(m=>!S.optimistic.get(threadKey(m))?.deleted).map(m=>({...m,...S.optimistic.get(threadKey(m))?.patch}));S.online=navigator.onLine;renderShell();renderList();}
-    try{S.status=await api('/status');}catch(error){if(error.status){await deviceCache.clear();throw error;}if(!cachedStatus?.authenticated)throw error;S.status=cachedStatus;S.online=false;}
+    try{S.status=await api('/status');}catch(error){if(!temporarilyUnavailable(error))throw error;if(!cachedStatus?.authenticated)throw error;S.status=cachedStatus;S.online=false;}
 
     if(!S.status.initialized&&!S.status.authenticated) {
       if(ownerToken) {

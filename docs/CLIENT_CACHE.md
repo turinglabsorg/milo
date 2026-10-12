@@ -54,3 +54,9 @@ The current shared browser client caches downloaded binary assets up to 16 MiB
 per item. Larger explicit attachment downloads remain ordinary device files,
 rather than being silently duplicated in IndexedDB. Native iOS must implement
 its own cache budget and storage-pressure UX under the same retention contract.
+
+Temporary server/gateway failures (including 5xx during a restart) retain cached
+API data and binary assets. They are connectivity failures, not authorization
+revocations. Pending idempotent metadata operations remain durable; sending still
+requires explicit action. Only an actual authorization rejection clears access
+state automatically.

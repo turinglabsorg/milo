@@ -96,3 +96,13 @@ Keep Google's registered redirect URI on the static public domain:
 only bounded state/code/error values to the fixed private callback. PKCE,
 one-time state and browser nonce are checked by the private backend. Both
 surfaces exclude OAuth query parameters from access logs.
+
+## Updating a running Docker deployment
+
+Build the tested image before replacing the container. During replacement, stop
+only `space.grooooog.milo.server` in the system launchd domain, leave the shared
+Grog service and Docker engine alone, run Compose, then bootstrap that same boot
+job from its saved plist. This prevents the availability supervisor from trying
+to restart a container while Compose is replacing it. Restore the job even if an
+update fails. The client retains downloaded content during temporary gateway
+failures; authorization denials remain distinct from server unavailability.
