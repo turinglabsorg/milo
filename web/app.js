@@ -456,6 +456,13 @@ async function openRecap() {
   try{const result=await api('/recap');if(S.recapOpen)showRecap(result);}
   catch(error){if(!cached)toast(error.message);}
 }
+async function recipientContext(message){
+  if('to_addresses' in message)return message;
+  const path='/messages/'+encodeURIComponent(message.id)+'/recipients';
+  const [body,cached]=await Promise.all([deviceCache.get('api:'+bodyPath(message.id)),deviceCache.get('api:'+path)]);
+  const reusable=[body,cached].find(value=>value&&'to_addresses' in value&&(!message.content_version||value.content_version===message.content_version));
+  return {...message,...(reusable||await api(path))};
+}
 async function runAI(action,button) {
   if(action==='recap'){await openRecap();return;}
   if(S.status.demo) { toast('Le funzioni AI si attivano sulla tua posta reale. Questa demo non simula analisi.'); return; }
@@ -464,12 +471,14 @@ async function runAI(action,button) {
   const id=action==='ai-reply'?source?.id:S.selected?.id;
   if(button){button.disabled=true;button.classList.add('is-loading');if(action==='analyze'){S.analyzing=true;renderReading();}}
   let generatedDraft;
+  const readerVersion=S.readerVersion;
+  try {
   if(action==='ai-reply'){
-    showCompose({account_id:source.account_id,to:source.sender_email,subject:'Re: '+subjectCore(source.subject),reply_to_id:id});
+    const original=await recipientContext(source);if(readerVersion!==S.readerVersion)return;
+    showCompose({account_id:original.account_id,...replyRecipients(original),subject:'Re: '+subjectCore(original.subject),reply_to_id:id});
     generatedDraft={id:S.compose.id,revision:S.compose.revision};
     $('#compose-form .compose-heading').insertAdjacentHTML('afterend',`<div class="reply-generation">${skeleton(3,'block','Milo prepara una risposta…')}</div>`);
   }
-  try {
     if(action==='analyze') {
       await api('/messages/'+id+'/analyze','POST');
       S.analyzing=false;if(S.selected?.id===id)await loadThread(S.readerAnchor);
@@ -528,7 +537,7 @@ document.addEventListener('click', async event => {
     if(action==='archive') { await mutate({archived:!S.selected.archived});toast('Modifica salvata. Milo la sincronizza con il provider.'); }
     if(action==='snooze') showModal('Un momento migliore.',`<p>La conversazione torna nella tua inbox quando arriva il momento.</p><div class="form-actions"><button class="secondary" data-snooze="${Date.now()/1000+3600}">Tra un’ora</button><button class="primary" data-snooze="${Date.now()/1000+86400}">Domani</button></div>`);
     if(target.dataset.snooze) { await mutate({snoozed_until:Number(target.dataset.snooze)});closeModal();toast('Email messa da parte.'); }
-    if(action==='reply'||action==='reply-all') {target.disabled=true;target.classList.add('is-loading');try{const source=S.thread.findLast(message=>!message.sent)||S.selected,m=await ensureBody(source.id);if(m)showCompose({account_id:m.account_id,...replyRecipients(m,action==='reply-all'),mode:action==='reply-all'?'reply_all':'reply',subject:'Re: '+subjectCore(m.subject),reply_to_id:m.id});}finally{target.disabled=false;target.classList.remove('is-loading');}}
+    if(action==='reply'||action==='reply-all') {target.disabled=true;target.classList.add('is-loading');const version=S.readerVersion;try{const source=S.thread.findLast(message=>!message.sent)||S.selected,m=await recipientContext(source);if(version===S.readerVersion)showCompose({account_id:m.account_id,...replyRecipients(m,action==='reply-all'),mode:action==='reply-all'?'reply_all':'reply',subject:'Re: '+subjectCore(m.subject),reply_to_id:m.id});}finally{target.disabled=false;target.classList.remove('is-loading');}}
     if(action==='forward') { const m=await ensureBody(S.selected.id);if(!m)return;showCompose({account_id:m.account_id,mode:'forward',context_message_id:m.id,subject:'Fwd: '+subjectCore(m.subject),body:`\n\n---------- Messaggio inoltrato ----------\nDa: ${m.sender} <${m.sender_email}>\nOggetto: ${m.subject}\n\n${m.body}`}); }
     if(action==='save-draft') { if(await saveCompose()) { await refresh();renderList();toast('Bozza salvata nel tuo archivio.'); } }
     if(action==='delete-draft')await discardCompose();

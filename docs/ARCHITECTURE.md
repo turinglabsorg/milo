@@ -165,3 +165,9 @@ header is accepted only from loopback or the explicitly configured dedicated
 Docker gateway, with forwarded-client-IP processing disabled. The container has
 no mailbox credentials in its image and keeps the existing host archive as its
 only persistent bind mount.
+
+Reply composers fetch authenticated recipient metadata separately through
+`/api/messages/{id}/recipients`, reading bounded MIME headers instead of a complete
+body. This includes Reply-To, To and Cc and is cached on the device; a large quoted
+message no longer blocks opening a reply editor. AI composition uses this same
+recipient selection and preserves user edits while generation continues.

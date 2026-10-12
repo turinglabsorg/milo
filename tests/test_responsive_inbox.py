@@ -127,6 +127,10 @@ def test_ai_reply_stays_inline_and_does_not_replace_user_edits(tmp_path):
     def prepare(app, received, sent):
         context['bootstrap'] = app.state.store.bootstrap
         app.state.ai.reply = lambda message_id: {'body': 'Generated suggestion'}
+        mail = EmailMessage()
+        mail['Reply-To'] = 'Support <support@example.com>'
+        mail.set_content('Original incoming text')
+        app.state.store.execute('UPDATE messages SET raw=? WHERE id=?', (mail.as_bytes(), received))
         app.state.store.set_setting('ai', {'model': 'local', 'cloud_consent': False, 'automatic': False})
 
     with service(tmp_path, prepare, live=True) as (url, sent), sync_playwright() as p:
@@ -157,6 +161,7 @@ def test_ai_reply_stays_inline_and_does_not_replace_user_edits(tmp_path):
         expect(page.locator('#compose-form')).to_have_count(0)
         page.get_by_role('button', name='Aiutami a rispondere', exact=True).click()
         expect(page.locator('[name="body"]')).to_have_value('Generated suggestion')
+        expect(page.locator('[name="to"]')).to_have_value('support@example.com')
         expect(page.get_by_role('dialog')).to_have_count(0)
         browser.close()
 

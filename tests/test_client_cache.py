@@ -20,6 +20,8 @@ def test_reply_all_includes_cc_excludes_self_and_retains_draft(tmp_path):
         browser = p.chromium.launch()
         page = browser.new_page(service_workers='block')
         page.goto(url)
+        received = page.request.get(url + '/api/messages/' + sent + '/thread?lazy=true').json()['messages'][0]['id']
+        page.route('**/api/messages/' + received, lambda route: route.abort())
         page.locator(f'[data-message="{sent}"]').click()
         page.get_by_role('button', name='Rispondi a tutti', exact=True).click()
         expect(page.locator('#inline-composer #compose-form')).to_be_visible()

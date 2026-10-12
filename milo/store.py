@@ -351,6 +351,20 @@ class Store:
             params)]
         return list(reversed(result)) if limit else result
 
+    def message_headers(self, message_id):
+        size = 65536
+        while True:
+            rows = self.rows("SELECT substr(raw,1,?) AS headers FROM messages WHERE id=?", (size, message_id))
+            headers = rows[0]["headers"] or b"" if rows else b""
+            for separator in (b"\r\n\r\n", b"\n\n"):
+                if separator in headers:
+                    return headers.split(separator, 1)[0] + separator
+            if len(headers) < size:
+                return headers
+            if size >= 1048576:
+                raise ValueError("Intestazioni del messaggio troppo grandi")
+            size *= 2
+
     def patch_conversation(self, message_id, patch):
         with self.lock, self.db:
             messages = self.conversation(message_id)

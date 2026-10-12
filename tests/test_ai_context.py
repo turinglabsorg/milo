@@ -162,3 +162,29 @@ def test_background_recap_respects_cloud_consent(store, account_data, monkeypatc
     worker.refresh()
     assert worker.snapshot()['status']['phase'] == 'disabled'
     assert not store.setting('recap')
+
+
+def test_recipient_metadata_does_not_load_message_body(logged_in, account_data, monkeypatch):
+    store = logged_in.app.state.store
+    account = store.add_account(account_data)
+    mail = EmailMessage()
+    mail['From'] = 'Other <other@example.com>'
+    mail['To'] = 'Owner <you@example.com>, Colleague <colleague@example.com>'
+    mail['Cc'] = 'Copy <copy@example.com>'
+    mail['Reply-To'] = 'Support <support@example.com>'
+    mail.set_content('A very large body. ' * 500000)
+    message_id = store.upsert_message(parse_message(mail.as_bytes(), account, 'INBOX', '1', 1))
+    original = store.message
+
+    def only_metadata(message_id, raw=False, metadata=False):
+        assert metadata and not raw
+        return original(message_id, metadata=True)
+
+    monkeypatch.setattr(store, 'message', only_metadata)
+    response = logged_in.get('/api/messages/' + message_id + '/recipients')
+    assert response.status_code == 200 and len(response.content) < 2000
+    result = response.json()
+    assert result['cc_addresses'] == [{'name': 'Copy', 'email': 'copy@example.com'}]
+    assert result['reply_to_addresses'] == [{'name': 'Support', 'email': 'support@example.com'}]
+    assert not {'body', 'raw', 'html'} & result.keys()
+    assert logged_in.get('/api/messages/missing/recipients').status_code == 404

@@ -6,6 +6,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from email import policy
+from email.parser import BytesHeaderParser
 from email.utils import getaddresses
 from ipaddress import ip_address
 from pathlib import Path
@@ -320,6 +321,20 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     @app.get("/api/messages", dependencies=[Depends(auth)])
     def messages(view="inbox", category: str | None = None, account: str | None = None, search=""):
         return {"messages": store.conversations(view, category, account, search[:300])}
+
+    @app.get("/api/messages/{message_id}/recipients", dependencies=[Depends(auth)])
+    def message_recipients(message_id: str):
+        message = message_or_404(message_id, metadata=True)
+        try:
+            headers = store.message_headers(message_id)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        mail = BytesHeaderParser(policy=policy.default).parsebytes(headers)
+        result = {key: message[key] for key in ("id", "account_id", "sender_email", "subject", "content_version")}
+        for header, field in (("To", "to_addresses"), ("Cc", "cc_addresses"), ("Reply-To", "reply_to_addresses")):
+            result[field] = [{"name": name, "email": address} for name, address in getaddresses(
+                [str(value) for value in mail.get_all(header, [])]) if address]
+        return result
 
     @app.get("/api/messages/{message_id}", dependencies=[Depends(auth)])
     def get_message(message_id: str, load_images: bool = False):
