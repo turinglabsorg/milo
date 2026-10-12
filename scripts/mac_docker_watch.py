@@ -15,15 +15,16 @@ STOP = threading.Event()
 
 def main():
     docker = shutil.which('docker')
-    node = shutil.which('node')
+    node = os.environ.get('MILO_NODE') or shutil.which('node')
     grog = HOME_DIR / '.claude/tools/grog/index.js'
     grog_cli = shutil.which('grog')
-    if not docker or not (grog_cli or node and grog.is_file()):
+    if not docker or not node or not (grog_cli or grog.is_file()):
         raise SystemExit('Docker, Node and the existing owner Grog installation are required.')
     context = os.environ.get('MILO_DOCKER_CONTEXT', 'desktop-linux')
     base = [docker, '--context', context]
     environment = {**os.environ, 'MILO_ARCHIVE': str(ARCHIVE), 'MILO_UID': str(os.getuid()),
-                   'MILO_GID': str(os.getgid()), 'GROG_SITES': str(ARCHIVE / 'grog-sites.json')}
+                   'MILO_GID': str(os.getgid()), 'GROG_SITES': str(ARCHIVE / 'grog-sites.json'),
+                   'GROG_BOARD_DB': str(ARCHIVE / 'grog-board.sqlite')}
     compose = base + ['compose', '-f', str(ROOT / 'compose.yaml'), '-p', 'milo']
     backend = Path('/Applications/Docker.app/Contents/MacOS/com.docker.backend')
     engine = None
@@ -59,7 +60,7 @@ def main():
                 if not health or health.returncode or health.stdout.strip() == 'running unhealthy':
                     run(compose + ['restart', 'server'])
             if relay is None or relay.poll() is not None:
-                relay = subprocess.Popen([grog_cli, 'serve'] if grog_cli else [node, str(grog), 'serve'], cwd=HOME_DIR, env=environment,
+                relay = subprocess.Popen([node, grog_cli or str(grog), 'serve'], cwd=HOME_DIR, env=environment,
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             STOP.wait(15)
     finally:

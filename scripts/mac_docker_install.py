@@ -14,7 +14,10 @@ ROOT = Path(__file__).resolve().parent.parent
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--user', required=True)
+    parser.add_argument('--node', type=Path, required=True)
     args = parser.parse_args()
+    if not args.node.is_file() or not os.access(args.node, os.X_OK):
+        raise SystemExit('Supply the existing Node executable.')
     if os.getuid() != 0:
         raise SystemExit('Run with sudo to install the system boot service.')
     account = pwd.getpwnam(args.user)
@@ -35,14 +38,19 @@ def main():
     payload = {'Label': LABEL, 'UserName': args.user, 'RunAtLoad': True, 'KeepAlive': True,
                'ThrottleInterval': 20, 'WorkingDirectory': str(ROOT),
                'ProgramArguments': [str(ROOT / '.venv/bin/python'), str(ROOT / 'scripts/mac_docker_watch.py')],
-               'EnvironmentVariables': {'HOME': str(home), 'PATH': '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+               'EnvironmentVariables': {'HOME': str(home), 'PATH': f'{ROOT / ".venv/bin"}:{args.node.parent}:{home / ".local/bin"}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+                                        'MILO_NODE': str(args.node),
                                         'MILO_DOCKER_CONTEXT': 'desktop-linux'},
                'StandardOutPath': str(log), 'StandardErrorPath': str(log)}
     target = Path('/Library/LaunchDaemons') / (LABEL + '.plist')
     data = plistlib.dumps(payload)
     if target.exists() and target.read_bytes() != data:
-        raise SystemExit('An existing different Milo boot service will not be replaced.')
-    if not target.exists():
+        current = plistlib.loads(target.read_bytes())
+        if any(current.get(key) != payload[key] for key in ('Label', 'UserName', 'ProgramArguments')):
+            raise SystemExit('An existing different Milo boot service will not be replaced.')
+        subprocess.run(['launchctl', 'bootout', 'system/' + LABEL], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+    if not target.exists() or target.read_bytes() != data:
         temporary = target.with_suffix('.tmp')
         temporary.write_bytes(data)
         temporary.chmod(0o644)

@@ -59,8 +59,11 @@ old Python listeners to stop before starting Docker against the same archive.
 
 ```sh
 MILO_ARCHIVE="$HOME/Library/Application Support/Milo" docker compose up -d --no-build --wait
-sudo .venv/bin/python scripts/mac_docker_install.py --user "$(id -un)"
+sudo .venv/bin/python scripts/mac_docker_install.py --user "$(id -un)" --node "$(command -v node)"
 ```
+
+The explicit Node path and project Python path are retained in the boot environment;
+it does not depend on interactive shell or NVM activation.
 
 The system LaunchDaemon `space.grooooog.milo.server` runs as the non-root archive
 owner, independently of the Omarchy window and GUI login. Its supervisor checks
