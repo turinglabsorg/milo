@@ -17,6 +17,7 @@ class Store:
         directory.chmod(0o700)
         self.directory = directory
         self.lock = threading.RLock()
+        self.on_mail_change = lambda: None
         key_path = directory / "vault.key"
         if not key_path.exists():
             fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -315,6 +316,7 @@ class Store:
             columns = list(data)
             self.execute(f"INSERT INTO messages({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
                          tuple(data.values()))
+            self.on_mail_change()
             return data["id"]
 
     def patch_message(self, message_id, patch):
@@ -329,16 +331,25 @@ class Store:
                                     (uuid.uuid4().hex, message_id, key, json.dumps(value), time.time()))
             return True
 
-    def conversation(self, message_id, raw=False, metadata=False):
+    def conversation(self, message_id, raw=False, metadata=False, limit=None, body_limit=None):
         message = self.message(message_id, metadata=True)
         if not message:
             return []
         if not message.get("thread_id"):
             return [self.message(message_id, raw=raw, metadata=metadata)]
         fields = self.message_fields(metadata, raw)
-        return [self.public_message(row, raw=raw) for row in self.rows(
-            f"SELECT {fields} FROM messages WHERE account_id=? AND thread_id=? AND hidden=0 AND trashed=0 ORDER BY date,id",
-            (message["account_id"], message["thread_id"]))]
+        params = []
+        if body_limit is not None and not metadata and not raw:
+            fields = fields.replace(",body,", ",substr(body,1,?) AS body,")
+            params.append(body_limit)
+        params.extend((message["account_id"], message["thread_id"]))
+        order = "date DESC,id DESC LIMIT ?" if limit else "date,id"
+        if limit:
+            params.append(limit)
+        result = [self.public_message(row, raw=raw) for row in self.rows(
+            f"SELECT {fields} FROM messages WHERE account_id=? AND thread_id=? AND hidden=0 AND trashed=0 ORDER BY {order}",
+            params)]
+        return list(reversed(result)) if limit else result
 
     def patch_conversation(self, message_id, patch):
         with self.lock, self.db:

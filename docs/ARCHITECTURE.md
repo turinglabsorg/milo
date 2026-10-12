@@ -89,12 +89,12 @@ retries remaining messages on later passes. Cloud processing requires consent.
 
 ## Linux
 
-`scripts/launch.py` starts a detached loopback service and opens a Chromium app
-window. `install.py` adds a user-local launcher. This is a web-rendered Linux
-client, not a Qt/Tauri binary. Service logs and the archive live in `.data/live`;
-closing the window keeps synchronization alive until the service exits. The
-service currently needs restarting after reboot; a user service/package comes
-later. Only run one service process against a given archive.
+The installed Omarchy launcher opens a dedicated Chromium app window connected
+only to the verified private Mac service. The client executes on the laptop;
+its encrypted IndexedDB cache, downloaded bodies and pending operations persist
+there. The Mac owns provider synchronization, credentials and the authoritative
+archive. Local loopback/demo servers remain isolated development modes.
+
 
 ## Deployment and iOS
 
@@ -140,3 +140,28 @@ existing email address. Pausing prevents later sync passes and automatic AI
 work; an already-running provider request/pass can finish. Cached mail, drafts
 and queued edits remain available. Account deletion/revocation still needs a
 separate explicit maintenance flow. These limitations must remain visible until implemented and tested.
+
+## Identity and recap lifecycle
+
+A validated server setting contains the editable owner name, aliases, role/context
+and reply language. Connected account addresses are supplied separately, without
+provider secrets. AI receives this identity and a trusted current UTC timestamp.
+Reply generation receives a bounded recent thread with explicit owner/other-author
+roles and the target incoming message; analysis/recap UI language is separate
+from the language used for the draft.
+
+A dedicated background recap worker coalesces new-mail notifications and checks
+bounded inbox sources. Its fingerprint includes recent incoming/sent content,
+identity, model and UTC day; unchanged snapshots are reused. It persists the
+result and generated time, retries failures with backoff and preserves the last
+valid result. GET/POST `/api/recap` read that snapshot and never invoke the model.
+The worker is separate from synchronization and HTTP request handling, so model
+latency does not block the inbox or provider receipt. Consent is checked before
+cloud generation, and shutdown waits for active storage users before closing
+SQLite.
+
+The Docker service publishes only host loopback ports. Tailscale's attested owner
+header is accepted only from loopback or the explicitly configured dedicated
+Docker gateway, with forwarded-client-IP processing disabled. The container has
+no mailbox credentials in its image and keeps the existing host archive as its
+only persistent bind mount.

@@ -95,6 +95,27 @@ class AISettings(BaseModel):
     cloud_consent: bool = False
 
 
+class Identity(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(default="", max_length=120)
+    aliases: list[str] = Field(default_factory=list, max_length=20)
+    context: str = Field(default="", max_length=2000)
+    reply_language: Literal["auto", "en", "it", "fr", "de", "es", "pt"] = "auto"
+
+    @field_validator("aliases")
+    @classmethod
+    def aliases_valid(cls, values):
+        result = []
+        for value in values:
+            value = value.strip()
+            if not value or len(value) > 80 or any(c in value for c in "\r\n\x00"):
+                raise ValueError("Inserisci nomi brevi, separati da virgole")
+            if value.casefold() not in {name.casefold() for name in result}:
+                result.append(value)
+        return result
+
+
 class RuleInput(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     field: Literal["sender", "subject", "body"]

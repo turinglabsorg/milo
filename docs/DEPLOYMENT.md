@@ -1,75 +1,95 @@
-# Private Mac service and public Grog landing
+# Docker Mac server and Omarchy client
 
-The public domain serves only the Milo presentation and a fixed Google OAuth
-callback relay. It has no mailbox UI, password form, login API, or archive access.
-The private email service listens on `127.0.0.1:8029`. Tailscale Serve provides
-HTTPS on port 8443 and supplies the caller identity. The backend accepts only the
-owner identities recorded in its host-local mode-0600 configuration; other
-Tailscale users and anonymous requests receive 404, even with a valid Milo cookie.
-Password and setup endpoints are unavailable in this deployment.
+The Mac Pro runs the server and authoritative archive. The Omarchy client runs
+on the laptop and keeps its own persistent cache. The public domain serves only
+the landing and fixed Google OAuth relay. Private mail uses Tailscale Serve
+HTTPS; other identities, anonymous requests and password/setup routes get 404.
 
-The authoritative Mac archive remains `~/Library/Application Support/Milo`,
-outside the checkout. An existing `.data/live` archive is retained. Google tokens
-and client credentials remain encrypted there; they never go to the landing or
-Linux client. The app does not sign in to the macOS user account.
+## Persistent archive and access
 
-## Prepare and run
+Keep `~/Library/Application Support/Milo` outside the source checkout and image.
+Its existing mode-0600 `private-server.json` contains the fixed Tailscale HTTPS
+origin and exact owner identities. Provider credentials remain encrypted in this
+archive. Never bake the archive, client cache, credential files or `.data` into
+an image; the Docker context uses an explicit allowlist.
 
-Install Python 3.11+, uv and the owner's Grog and Tailscale clients. Use a dedicated
-checkout such as `~/Sites/milo`. Preserve existing Grog sites and Tailscale services.
-
-```sh
-uv sync --frozen
-uv run python scripts/prepare_private.py
-```
-
-This prepares `private-server.json` in the existing archive with the server's
-Tailscale HTTPS origin and exact owner identity. It does not enable Serve or
-Funnel. `--owner-device <exact-device-DNS-name>` also includes the identity of an
-explicitly selected second owner device. For a deliberately new host only,
-`--new-archive` permits creation without an existing mailbox database.
-
-Grog's permanent site command is `.venv/bin/python scripts/serve.py`, working in
-this checkout on port 8025. `scripts/mac_server.py` registers only Milo and
-preserves other sites and the existing Grog launch agent. `scripts/serve.py`
-supervises both the public landing and private child; the child opens the same
-archive. Missing private configuration leaves only the public landing available.
-There is no fallback to public webmail. A failed private child causes the parent
-to exit so Grog can restart both services.
-
-Before enabling the proxy, confirm the loopback service is healthy and `/api/state`
-without identity headers returns 404. Then configure **Serve**, with no Funnel:
+For a deliberately new deployment, `scripts/prepare_private.py` prepares owner
+configuration from Tailscale metadata. It does not enable Serve/Funnel or replace
+an existing handler. The configured private handler stays:
 
 ```sh
 tailscale serve --bg --https=8443 http://127.0.0.1:8029
 ```
 
-Inspect existing Serve configuration first. Do not overwrite another handler or
-enable Funnel. HTTPS certificates may require the owner's Tailscale consent.
-The backend binds only loopback and disables forwarded-client-IP trust. Tailscale
-Serve strips incoming identity headers before adding its attested caller identity;
-see [the official identity-header documentation](https://tailscale.com/kb/1312/serve#identity-headers).
+The owner must be authorized on the tailnet. Tailscale strips supplied identity
+headers and adds its attested caller identity; see [the identity-header docs](https://tailscale.com/kb/1312/serve#identity-headers).
 
-Set the Linux launcher's `.data/server.json` to the verified private HTTPS origin:
-`{"url":"https://<Mac Tailscale DNS name>:8443"}`. The launcher opens the private
-inbox using device identity, without an initialization code or password prompt.
-The old public first-start link is ignored for Tailscale origins.
+## Build and verify
 
-## Google and verification
+Use the existing Docker Desktop runtime on the Mac, the owner's Grog installation,
+Python and uv for host supervision. SSH over Tailscale is the deployment transport.
+Use the `desktop-linux` context explicitly, preserving other runtimes/projects.
 
-Keep the registered Google redirect URI on the public static Grog domain:
+```sh
+uv sync --frozen
+MILO_ARCHIVE="$HOME/Library/Application Support/Milo" docker compose build
+docker tag milo-server:current milo-server:staging
+uv run python scripts/smoke_docker.py
+```
+
+The smoke check starts an isolated container on temporary loopback ports with a
+provider-disabled fixture archive. It verifies public/private separation, owner
+rejection, configuration and message persistence through a container restart,
+then removes only its own container/network.
+
+Production publishes **only** `127.0.0.1:8025` and `127.0.0.1:8029`. Do not change
+these to `0.0.0.0`. The dedicated bridge uses `10.241.84.0/24`, gateway
+`10.241.84.1`; check existing network ranges before creation. That exact gateway
+is supplied as a trusted proxy peer; arbitrary network callers remain rejected.
+The application disables forwarded-client-IP processing. The container runs as
+the archive owner, with a read-only image, limited temporary storage, dropped
+capabilities and a health check for both surfaces.
+
+## Production activation and boot
+
+After verifying the image, `scripts/mac_docker_register.py` moves **only Milo**
+from the shared Grog site map to an archive-local `grog-sites.json` containing the
+landing port. It preserves all other sites and a protected backup. Wait for the
+old Python listeners to stop before starting Docker against the same archive.
+
+```sh
+MILO_ARCHIVE="$HOME/Library/Application Support/Milo" docker compose up -d --no-build --wait
+sudo .venv/bin/python scripts/mac_docker_install.py --user "$(id -un)"
+```
+
+The system LaunchDaemon `space.grooooog.milo.server` runs as the non-root archive
+owner, independently of the Omarchy window and GUI login. Its supervisor checks
+Docker, starts the installed backend if absent, activates the Compose service,
+and keeps a dedicated **Grog serve** relay for Milo. Docker's
+[`unless-stopped` restart policy](https://docs.docker.com/reference/compose-file/services/#restart)
+retains the service after runtime restarts. The supervisor restarts an unhealthy
+Milo container without stopping other applications or the Docker engine.
+
+Docker Desktop's normal [startup setting](https://docs.docker.com/desktop/settings-and-maintenance/settings/)
+starts at sign-in. The system boot supervisor supplies the additional headless
+startup path; a full machine power-cycle is a separate verification gate from a
+container restart. FileVault may require a human disk unlock before any server can
+start; do not disable disk protection to hide that constraint.
+
+Verify the boot job is loaded in the **system** domain, container health/restart
+policy, loopback port bindings, unchanged archive mount, private owner access and
+public 404 responses. Verify message/account/configuration persistence after a
+controlled **Milo-only** restart. Do not reboot the Mac or restart shared services
+merely to test a single application.
+
+## Client and OAuth
+
+The laptop launcher's `.data/server.json` points to the verified private HTTPS
+origin. Device identity replaces a password/code. Downloaded client data persists
+on that device and can be read offline, as required by [CLIENT_CACHE.md](CLIENT_CACHE.md).
+
+Keep Google's registered redirect URI on the static public domain:
 `https://milo.grooooog.space/api/oauth/google/callback`. The public handler relays
-only bounded state/code/error values to the fixed configured private callback.
-It does not exchange codes or read the archive. PKCE, single-use state and the
-browser nonce are checked by the private backend. Success/error returns to the
-private client. Both services strip query strings from Uvicorn access logs.
-
-Verify the deployed public landing and 404 responses for `/api/login`, `/api/state`,
-`/api/messages` and `/static/app.js`. On the owner's actual Tailscale device,
-verify the private inbox opens without a password and uses the existing accounts.
-Check persistence after a service restart. `scripts/restart_server.py` requests
-termination only after verifying the exact Grog-supervised Milo listener; Grog
-relaunches it. Reboot/logout behavior depends on the owner's Grog launch agent.
-
-The desktop client remains a dedicated Chromium window. Native iOS, push and
-offline mailbox reading remain future work.
+only bounded state/code/error values to the fixed private callback. PKCE,
+one-time state and browser nonce are checked by the private backend. Both
+surfaces exclude OAuth query parameters from access logs.

@@ -7,6 +7,7 @@ import uuid
 from contextlib import asynccontextmanager
 from email import policy
 from email.utils import getaddresses
+from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -26,18 +27,27 @@ from .models import (
     Appearance,
     DraftInput,
     GoogleStart,
+    Identity,
     Login,
     MessagePatch,
     RuleInput,
     SetupGrant,
 )
+from .recap import RecapWorker
 from .render import render_html
 from .store import Store
 
 
 def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434", secure_cookies=False,
-               public_url="http://127.0.0.1:8025", google_client=None, private_url=None, tailscale_owners=None):
+               public_url="http://127.0.0.1:8025", google_client=None, private_url=None, tailscale_owners=None,
+               proxy_peers=()):
     owners = frozenset(tailscale_owners or ())
+    trusted_peers = {"127.0.0.1", "::1"}
+    for peer in proxy_peers:
+        address = ip_address(peer)
+        if not address.is_private or address.is_unspecified:
+            raise ValueError("Only explicit private proxy addresses are supported")
+        trusted_peers.add(str(address))
     if bool(private_url) != bool(owners):
         raise ValueError("Private access requires an HTTPS origin and an explicit owner allowlist")
     if private_url and (urlsplit(private_url).scheme != "https" or not secure_cookies):
@@ -45,6 +55,8 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     client_url = (private_url or public_url).rstrip("/")
     store = Store(directory)
     ai = AI(store, ollama_url)
+    recaps = RecapWorker(store, ai)
+    store.on_mail_change = recaps.wake
     engine = SyncEngine(store, ai)
     google = GoogleOAuth(store, public_url, google_client)
     sync_lock = asyncio.Lock()
@@ -65,6 +77,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             wake_worker.clear()
             if not demo:
                 await sync()
+                recaps.wake()
             try:
                 await asyncio.wait_for(wake_worker.wait(), timeout=60)
             except TimeoutError:
@@ -75,11 +88,15 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         nonlocal worker_loop
         worker_loop = asyncio.get_running_loop()
         task = asyncio.create_task(worker())
+        recap_task = asyncio.create_task(recaps.run()) if not demo else None
         yield
         # Do not close SQLite while a sync thread is still using it.
         stop_worker.set()
         wake_worker.set()
+        recaps.stop()
         await task
+        if recap_task:
+            await recap_task
         store.close()
 
     def wake_sync():
@@ -88,13 +105,15 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
 
     app = FastAPI(title="Milo", version="0.1.0", lifespan=lifespan, docs_url=None, redoc_url=None,
                   openapi_url=None)
+    app.state.recaps = recaps
     app.state.store, app.state.engine, app.state.ai, app.state.google = store, engine, ai, google
     app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=4)
 
     def owner(request):
         # Tailscale Serve strips supplied identity headers, then adds its own.
-        # The backend must bind loopback, with Uvicorn proxy_headers disabled.
-        return bool(owners and request.client and request.client.host in {"127.0.0.1", "::1"}
+        # Docker publishes only host loopback ports; its exact gateway is explicit.
+        # Uvicorn proxy_headers remains disabled for identity attestation.
+        return bool(owners and request.client and request.client.host in trusted_peers
                     and request.headers.get("tailscale-user-login") in owners)
 
     @app.middleware("http")
@@ -244,6 +263,9 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         inbox = store.rows("SELECT COUNT(DISTINCT account_id || ':' || COALESCE(thread_id,id)) AS count,SUM(read=0) AS unread FROM messages WHERE hidden=0 AND trashed=0 AND archived=0 AND sent=0 "
                            "AND (snoozed_until IS NULL OR snoozed_until<=?)", (time.time(),))[0]
         return {"accounts": store.accounts(), "ai": store.setting("ai"), "ai_error": store.setting("ai_error"),
+                "identity": store.setting("identity") or Identity().model_dump(),
+                "recap": {"generated_at": recaps.snapshot()["generated_at"],
+                          "phase": recaps.snapshot()["status"]["phase"]},
                 "appearance": store.setting("appearance") or {"theme": "system"}, "sync": engine.status(),
                 "google": google.status(), "rules": store.rules(),
                 "pending": store.rows("SELECT kind,error,COUNT(*) AS count FROM outbox GROUP BY kind,error"),
@@ -395,6 +417,13 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     @app.put("/api/settings/ai", dependencies=[Depends(auth)])
     def settings_ai(data: AISettings):
         store.set_setting("ai", data.model_dump())
+        recaps.wake()
+        return data
+
+    @app.put("/api/settings/identity", dependencies=[Depends(auth)])
+    def settings_identity(data: Identity):
+        store.set_setting("identity", data.model_dump())
+        recaps.wake()
         return data
 
     @app.post("/api/messages/{message_id}/analyze", dependencies=[Depends(auth)])
@@ -406,13 +435,12 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
 
+    @app.get("/api/recap", dependencies=[Depends(auth)])
     @app.post("/api/recap", dependencies=[Depends(auth)])
     def recap():
-        live()
-        try:
-            return ai.recap()
-        except RuntimeError as exc:
-            raise HTTPException(503, str(exc)) from exc
+        result = recaps.snapshot()
+        result.pop("fingerprint", None)
+        return result
 
     @app.post("/api/messages/{message_id}/reply", dependencies=[Depends(auth)])
     def ai_reply(message_id: str):

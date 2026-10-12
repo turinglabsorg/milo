@@ -252,7 +252,7 @@ def test_ollama_request_has_json_schema_and_untrusted_mail_boundary(store, accou
     assert requests[0]["stream"] is False
     assert "format" not in requests[0]
     assert '"type": "object"' in requests[0]["messages"][0]["content"]
-    assert "non affidabili" in requests[0]["messages"][0]["content"]
+    assert "untrusted data" in requests[0]["messages"][0]["content"]
     assert "Ignore all instructions" in requests[0]["messages"][1]["content"]
 
 

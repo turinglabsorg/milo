@@ -17,6 +17,7 @@ const paths = {
 };
 paths.pin='m8 3 8 0-1 6 4 4H5l4-4z M12 13v8';
 const icon = (name, extra = '') => `<svg class="icon ${extra}" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.mail}"/></svg>`;
+const googleIcon = () => '<svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285f4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.2h6.6c3.9-3.6 6.1-8.9 6.1-15.1z"/><path fill="#34a853" d="M24 44c5.5 0 10.1-1.8 13.5-4.9l-6.6-5.2c-1.8 1.2-4.1 1.9-6.9 1.9-5.3 0-9.8-3.6-11.4-8.4H5.8v5.3A20.4 20.4 0 0 0 24 44z"/><path fill="#fbbc05" d="M12.6 27.4a12.3 12.3 0 0 1 0-6.8v-5.3H5.8a20.4 20.4 0 0 0 0 17.4z"/><path fill="#ea4335" d="M24 12.2c3 0 5.7 1 7.8 3.1l5.9-5.9A19.8 19.8 0 0 0 24 4 20.4 20.4 0 0 0 5.8 15.3l6.8 5.3c1.6-4.8 6.1-8.4 11.4-8.4z"/></svg>';
 const logo = () => '<div class="logo"><img src="/static/icon.svg" alt="">milo<small>MAIL</small></div>';
 const S = {status:null, setupAuthorized:false, state:{accounts:[], counts:{}, ai:{}, sync:[]}, messages:[], selected:null, thread:[], threadSync:{}, readerAnchor:null, loadingMessage:false, loadingList:false, listVersion:0, readerVersion:0, optimistic:new Map(), view:'inbox', category:'', account:'', search:'', settingsTab:'accounts', menu:false, syncing:false, online:true, compose:null, theme:'system', images:false};
 const categoryNames = {people:'Persone', updates:'Notifiche', newsletters:'Newsletter'};
@@ -56,7 +57,7 @@ async function api(path, method='GET', body) {
     const error=new Error(message || 'Operazione non riuscita');error.status=response.status;throw error;
   }
   S.online=true;
-  if(method==='GET'&&(/^(?:\/status|\/state|\/messages(?:[/?]|$)|\/drafts)/.test(path)))deviceCache.set('api:'+path,data).then(saved=>{if(!saved&&!S.cacheWarning){S.cacheWarning=true;toast('Cache locale non disponibile. I messaggi restano sul server, ma non saranno disponibili offline su questo dispositivo.');}});
+  if(method==='GET'&&(/^(?:\/status|\/state|\/recap|\/messages(?:[/?]|$)|\/drafts)/.test(path)))deviceCache.set('api:'+path,data).then(saved=>{if(!saved&&!S.cacheWarning){S.cacheWarning=true;toast('Cache locale non disponibile. I messaggi restano sul server, ma non saranno disponibili offline su questo dispositivo.');}});
   return data;
 }
 
@@ -74,12 +75,13 @@ function dateLabel(timestamp, long=false) {
 }
 function isToday(timestamp) { return new Date(timestamp*1000).toDateString() === new Date().toDateString(); }
 function showModal(title, content, wide=false) {
+  S.recapOpen=false;
   if($('#overlay #compose-form'))closeCompose().catch(error=>toast(error.message));
   S.menu=false;$('.shell')?.classList.remove('menu-open');
   $('#overlay').innerHTML=`<div class="modal-backdrop"><section class="modal ${wide?'wide':''}" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal-header"><h2>${esc(title)}</h2><button class="icon-button" data-action="close-modal" aria-label="Chiudi">${icon('close')}</button></div>${content}</section></div>`;
   setTimeout(() => $('#overlay input, #overlay select, #overlay button')?.focus(), 0);
 }
-function closeModal(){if($('#overlay #compose-form')){closeCompose().catch(error=>toast(error.message));return;}$('#overlay').innerHTML='';}
+function closeModal(){ S.recapOpen=false;if($('#overlay #compose-form')){closeCompose().catch(error=>toast(error.message));return;}$('#overlay').innerHTML='';}
 
 function renderLogin() {
   closeModal();
@@ -111,7 +113,7 @@ function renderChrome() {
 function renderShell() {
   const counts=S.state.counts;
   const folders=[['inbox','inbox'],['starred','star'],['drafts','edit'],['sent','sent'],['snoozed','clock'],['archive','archive']];
-  $('#app').innerHTML=`<main class="shell ${S.selected?'has-selection':''} ${S.menu?'menu-open':''}"><aside class="sidebar">${logo()}<button class="primary compose-button" data-action="compose">${icon('plus')}Nuovo messaggio</button><div class="nav-label">La tua posta</div><nav class="nav">${folders.map(([view,name])=>`<button class="nav-button ${S.view===view?'active':''}" data-view="${view}">${icon(name)}${viewNames[view]}${counts[view]?`<span class="count">${counts[view]}</span>`:''}</button>`).join('')}</nav><div class="account-section">${accountMarkup()}</div><div class="sidebar-bottom"><div class="ai-card"><div class="mini-heading">${icon('sparkle')}Milo AI</div><p>Recap, priorità e meno rumore.<br>Milo ti aiuta a fare spazio.</p><button data-action="settings-ai">Scopri Milo AI ${icon('arrow')}</button></div><div class="sidebar-footer"><div class="user-avatar">${esc(initials(S.state.accounts[0]?.name || 'Tu'))}</div><span>Il tuo spazio</span><button data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div>${S.status.demo?'<div class="demo-label">DEMO · messaggi fittizi</div>':''}</div></aside><header class="topbar"><button class="icon-button mobile-menu" data-action="menu" aria-label="Apri menu">${icon('menu')}</button><div class="breadcrumbs">Il tuo spazio ${icon('arrow')}<strong>${viewNames[S.view]}</strong></div><div class="top-tools"><div id="sync-status">${syncMarkup()}</div><label class="search">${icon('search')}<input id="search-input" placeholder="Cerca nella tua posta" value="${esc(S.search)}" aria-label="Cerca nella tua posta"><kbd>/</kbd></label><button class="icon-button ${S.syncing?'spinner':''}" data-action="sync" aria-label="Sincronizza" title="Sincronizza">${icon('refresh')}</button><span class="sync-indicator ${!S.online||S.state.accounts.some(a=>a.error)?'offline':''}" title="${S.online?'Servizio connesso':'Servizio non raggiungibile'}"></span><button class="icon-button" data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div></header><section class="list-panel" id="list-panel"></section><section class="reading-panel" id="reading-panel"></section></main>`;
+  $('#app').innerHTML=`<main class="shell ${S.selected?'has-selection':''} ${S.menu?'menu-open':''}"><aside class="sidebar">${logo()}<button class="primary compose-button" data-action="compose">${icon('plus')}Nuovo messaggio</button><div class="nav-label">La tua posta</div><nav class="nav">${folders.map(([view,name])=>`<button class="nav-button ${S.view===view?'active':''}" data-view="${view}">${icon(name)}${viewNames[view]}${counts[view]?`<span class="count">${counts[view]}</span>`:''}</button>`).join('')}</nav><div class="account-section">${accountMarkup()}</div><div class="sidebar-bottom"><div class="sidebar-footer"><div class="user-avatar">${esc(initials(S.state.identity?.name || S.state.accounts[0]?.name || 'Tu'))}</div><span>${esc(S.state.identity?.name||'Il tuo spazio')}</span><button data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div>${S.status.demo?'<div class="demo-label">DEMO · messaggi fittizi</div>':''}</div></aside><header class="topbar"><button class="icon-button mobile-menu" data-action="menu" aria-label="Apri menu">${icon('menu')}</button><div class="breadcrumbs">Il tuo spazio ${icon('arrow')}<strong>${viewNames[S.view]}</strong></div><div class="top-tools"><div id="sync-status">${syncMarkup()}</div><label class="search">${icon('search')}<input id="search-input" placeholder="Cerca nella tua posta" value="${esc(S.search)}" aria-label="Cerca nella tua posta"><kbd>/</kbd></label><button class="icon-button ${S.syncing?'spinner':''}" data-action="sync" aria-label="Sincronizza" title="Sincronizza">${icon('refresh')}</button><span class="sync-indicator ${!S.online||S.state.accounts.some(a=>a.error)?'offline':''}" title="${S.online?'Servizio connesso':'Servizio non raggiungibile'}"></span><button class="icon-button" data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div></header><section class="list-panel" id="list-panel"></section><section class="reading-panel" id="reading-panel"></section></main>`;
   renderList(); renderReading();
 }
 
@@ -119,7 +121,7 @@ function renderList() {
   if (!$('#list-panel')) return;
   const inbox = S.view==='inbox';
   const count = S.messages.length;
-  $('#list-panel').innerHTML=`<div class="list-heading"><div class="eyebrow">${new Date().toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'})}</div><div class="title-row"><h1>${viewNames[S.view]}</h1><span class="badge">${S.view==='drafts'?S.drafts?.length||0:count} ${S.view==='drafts'?'bozze':count===1?'conversazione':'conversazioni'}</span></div><p class="subheading">${inbox?`${S.state.counts.unread||0} email da leggere. Facciamo un po’ di spazio.`:({starred:'Le conversazioni a cui vuoi tornare.',drafts:'Le parole giuste, con i tuoi tempi.',sent:'I messaggi che hai inviato.',snoozed:'Al momento giusto, di nuovo nella tua inbox.',archive:'Tutto conservato, niente in mezzo.'}[S.view])}</p></div>${inbox?`<button class="recap-card" data-action="recap"><span class="recap-symbol">${icon('sparkle')}</span><span><strong>La tua inbox, in un minuto.</strong><p>Lascia che Milo prepari il tuo recap.</p></span>${icon('arrow')}</button><div class="tabs">${[['','Tutte'],['people','Persone'],['updates','Notifiche'],['newsletters','Newsletter']].map(([category,name])=>`<button class="tab ${S.category===category?'active':''}" data-category="${category}">${name}</button>`).join('')}</div>`:''}${!S.online?'<div class="offline-note">Sei offline. Mostro la posta salvata su questo dispositivo.</div>':''}${S.state.accounts.some(a=>a.error)?`<div class="error-banner">${esc(S.state.accounts.find(a=>a.error).error)} <button data-action="settings">Apri account</button></div>`:''}${S.state.pending?.some(p=>p.error)?'<div class="error-banner">Le modifiche sono salvate in Milo. La sincronizzazione con la casella verrà riprovata. <button data-action="settings">Dettagli</button></div>':''}<div id="message-list"></div>`;
+  $('#list-panel').innerHTML=`<div class="list-heading"><div class="eyebrow">${new Date().toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'})}</div><div class="title-row"><h1>${viewNames[S.view]}</h1><span class="badge">${S.view==='drafts'?S.drafts?.length||0:count} ${S.view==='drafts'?'bozze':count===1?'conversazione':'conversazioni'}</span></div><p class="subheading">${inbox?`${S.state.counts.unread||0} email da leggere. Facciamo un po’ di spazio.`:({starred:'Le conversazioni a cui vuoi tornare.',drafts:'Le parole giuste, con i tuoi tempi.',sent:'I messaggi che hai inviato.',snoozed:'Al momento giusto, di nuovo nella tua inbox.',archive:'Tutto conservato, niente in mezzo.'}[S.view])}</p></div>${inbox?`<button class="recap-card" data-action="recap"><span class="recap-symbol">${icon('sparkle')}</span><span><strong>La tua inbox, in un minuto.</strong><p>${S.state.recap?.phase==='updating'?'Si aggiorna in background…':S.state.recap?.generated_at?'Aggiornato alle '+dateLabel(S.state.recap.generated_at):'Si aggiorna quando arriva nuova posta.'}</p></span>${icon('arrow')}</button><div class="tabs">${[['','Tutte'],['people','Persone'],['updates','Notifiche'],['newsletters','Newsletter']].map(([category,name])=>`<button class="tab ${S.category===category?'active':''}" data-category="${category}">${name}</button>`).join('')}</div>`:''}${!S.online?'<div class="offline-note">Sei offline. Mostro la posta salvata su questo dispositivo.</div>':''}${S.state.accounts.some(a=>a.error)?`<div class="error-banner">${esc(S.state.accounts.find(a=>a.error).error)} <button data-action="settings">Apri account</button></div>`:''}${S.state.pending?.some(p=>p.error)?'<div class="error-banner">Le modifiche sono salvate in Milo. La sincronizzazione con la casella verrà riprovata. <button data-action="settings">Dettagli</button></div>':''}<div id="message-list"></div>`;
   const container=$('#message-list');
   if (S.loadingList) { container.innerHTML=skeleton(9,'list','Carico le conversazioni…');return; }
   if (S.view==='drafts') {
@@ -135,7 +137,7 @@ function renderList() {
     const day=m.pinned?'In evidenza':isToday(m.date)?'Oggi':new Date(m.date*1000).toLocaleDateString('it-IT',{day:'numeric',month:'long'});
     const heading=day!==lastDay?`<div class="day-heading">${esc(day)}<span class="right">${S.search?'Risultati di ricerca':'Le tue conversazioni'}</span></div>`:'';
     lastDay=day;
-    return heading+`<button class="message-row ${m.read?'':'unread'} ${S.selected?.id===m.id?'selected':''}" data-message="${esc(m.id)}" style="--account-color:${accountColor(m.account_id)}">${avatar(m)}<span class="message-content"><span class="sender-line"><strong>${esc(m.sender)}</strong>${m.message_count>1?`<span class="thread-count">${m.message_count}</span>`:''}${!m.read?'<span class="unread-dot"></span>':''}<time>${dateLabel(m.date)}</time></span><span class="row-subject">${esc(subjectCore(m.subject))}</span><span class="row-preview">${m.sent?'Tu: ':''}${esc(m.preview)}</span><span class="row-markers"><span class="dot account-dot" title="${esc(S.state.accounts.find(a=>a.id===m.account_id)?.name||'Account')}"></span>${m.pinned?`<span class="row-pin" aria-label="Conversazione fissata" title="Fissata in alto">${icon('pin')}</span>`:''}${m.analyzed_count?`<span class="row-analysis" aria-label="${m.analyzed_count} messaggi analizzati" title="${m.analyzed_count} messaggi analizzati da Milo AI">${icon('sparkle')}</span>`:''}${m.replied?`<span class="reply-badge">${icon('reply')}Hai risposto</span>`:''}</span></span>${m.starred?`<span class="row-star">${icon('star')}</span>`:''}</button>`;
+    return heading+`<button class="message-row ${m.read?'':'unread'} ${S.selected?.id===m.id?'selected':''}" data-message="${esc(m.id)}" style="--account-color:${accountColor(m.account_id)}">${avatar(m)}<span class="message-content"><span class="sender-line"><strong>${esc(m.sender)}</strong>${m.message_count>1?`<span class="thread-count">${m.message_count}</span>`:''}${!m.read?'<span class="unread-dot"></span>':''}<span class="row-markers"><span class="dot account-dot" title="${esc(S.state.accounts.find(a=>a.id===m.account_id)?.name||'Account')}"></span>${m.pinned?`<span class="row-pin" aria-label="Conversazione fissata" title="Fissata in alto">${icon('pin')}</span>`:''}${m.analyzed_count?`<span class="row-analysis" aria-label="${m.analyzed_count} messaggi analizzati" title="${m.analyzed_count} messaggi analizzati da Milo AI">${icon('sparkle')}</span>`:''}</span><time>${dateLabel(m.date)}</time></span><span class="row-subject">${esc(subjectCore(m.subject))}</span><span class="row-preview">${m.sent?'Tu: ':''}${esc(m.preview)}</span>${m.replied?`<span class="reply-badge">${icon('reply')}Hai risposto</span>`:''}</span>${m.starred?`<span class="row-star">${icon('star')}</span>`:''}</button>`;
   }).join('');
 }
 function emptyMarkup(symbol,title,description,add=false) {
@@ -332,10 +334,13 @@ async function mutate(patch,deleted=false) {
 
 function showSettings(tab=S.settingsTab) {
   S.settingsTab=tab;
-  const tabs=`<div class="modal-tabs">${[['accounts','Account'],['ai','Milo AI'],['rules','Filtri'],['appearance','Aspetto'],['devices','Dispositivi']].map(([id,name])=>`<button data-settings-tab="${id}" class="${id===tab?'active':''}">${name}</button>`).join('')}</div>`;
+  const tabs=`<div class="modal-tabs">${[['accounts','Account'],['identity','Identità'],['ai','Milo AI'],['rules','Filtri'],['appearance','Aspetto'],['devices','Dispositivi']].map(([id,name])=>`<button data-settings-tab="${id}" class="${id===tab?'active':''}">${name}</button>`).join('')}</div>`;
   let body='';
   if(tab==='accounts') {
     body=`<p>Collegali una volta. Gli account sono conservati sul tuo servizio Milo e disponibili agli altri dispositivi.</p>${S.state.accounts.map(a=>`<div class="settings-account"><span class="dot" style="background:${accountColor(a.id)}"></span><div><strong>${esc(a.name)}</strong><small>${esc(a.email)}</small></div><span class="health ${a.error?'error':''}">${!a.enabled?'In pausa':a.error?'Da controllare':a.last_sync?'Sincronizzato':'In attesa'}</span><button class="secondary" data-edit-account="${esc(a.id)}">Gestisci</button></div>${a.error?`<p class="form-error">${esc(a.error)}</p>`:''}`).join('')}<div class="form-actions"><button class="primary" data-action="add-account">${icon('plus')}Collega un account</button></div>${S.state.pending?.length?`<div class="notice" style="margin-top:20px">${S.state.pending.map(p=>`${p.count} modifiche ${esc(p.kind)}: ${esc(p.error||'in attesa della prossima sincronizzazione')}`).join('<br>')}</div>`:''}`;
+  } else if(tab==='identity') {
+    const identity=S.state.identity||{};
+    body=`<form id="identity-form"><p>Aiuta Milo a riconoscere quando si parla di te e a scrivere dalla tua prospettiva.</p><label class="field"><span>Il tuo nome</span><input name="name" value="${esc(identity.name)}" maxlength="120" placeholder="Il nome con cui ti presenti"></label><label class="field"><span>Come ti chiamano</span><input name="aliases" value="${esc((identity.aliases||[]).join(', '))}" maxlength="1600" placeholder="Nomi e soprannomi, separati da virgole"></label><label class="field"><span>Contesto su di te</span><textarea name="context" maxlength="2000" placeholder="Ruolo, team e informazioni utili per capire chi è chi">${esc(identity.context)}</textarea></label><label class="field"><span>Lingua delle risposte</span><select name="reply_language">${[['auto','Segui la conversazione'],['en','Inglese'],['it','Italiano'],['fr','Francese'],['de','Tedesco'],['es','Spagnolo'],['pt','Portoghese']].map(([value,label])=>`<option value="${value}" ${(identity.reply_language||'auto')===value?'selected':''}>${label}</option>`).join('')}</select></label><p class="fineprint">Gli indirizzi delle caselle collegate sono già riconosciuti come tuoi. Questa identità è condivisa con tutti i tuoi dispositivi.</p><div class="form-error" role="alert"></div><button class="primary" type="submit">Salva identità</button></form>`;
   } else if(tab==='appearance') {
     body=`<form id="appearance-form"><p>Scegli come vedere Milo. La preferenza è condivisa con i tuoi dispositivi.</p><label class="field"><span>Tema</span><select name="theme">${[['system','Segui il sistema'],['light','Chiaro'],['dark','Scuro']].map(([value,label])=>`<option value="${value}" ${S.theme===value?'selected':''}>${label}</option>`).join('')}</select></label><div class="notice">Puoi scegliere il colore di ogni casella da Account → Gestisci.</div><div class="form-error" role="alert"></div><button class="primary" type="submit">Salva aspetto</button></form>`;
   } else if(tab==='ai') {
@@ -353,7 +358,7 @@ function showAccountForm() {
   if(S.status.demo) { toast('Apri il servizio Milo per collegare la tua posta.'); return; }
   const google=S.state.google;
   const setup=google?.configured?'':`<details class="oauth-help" open><summary>Configura Google una volta per il tuo servizio</summary><ol><li>In <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noopener">Google Cloud</a> abilita Gmail API e configura il consenso OAuth per Milo.</li><li>Crea un client di tipo <strong>Applicazione web</strong> con questo URI di reindirizzamento:<div class="notice callback-url">${esc(google?.redirect_uri||'')}</div></li><li>Scarica il JSON delle credenziali e importalo qui. Se l’app è in Testing, aggiungi i tuoi indirizzi come utenti di test.</li></ol><form id="google-config-form"><label class="field"><span>Credenziali OAuth Google (.json)</span><input type="file" name="credentials" accept=".json,application/json" required></label><div class="form-error" role="alert"></div><div class="form-actions"><button class="primary" type="submit">Configura Google</button></div></form></details>`;
-  showModal('Collega la tua posta',`<p>Accedi al tuo account Google e autorizza Milo a leggere, organizzare e inviare la tua posta. Il collegamento resta sul servizio e vale per tutti i tuoi dispositivi.</p><button class="primary google-connect" data-action="google-connect" ${google?.configured?'':'disabled'}>Continua con Google ${icon('arrow')}</button>${setup}<div class="form-actions"><button class="secondary" data-action="imap-account">Collega iCloud o un account IMAP</button></div>`);
+  showModal('Collega la tua posta',`<p>Accedi al tuo account Google e autorizza Milo a leggere, organizzare e inviare la tua posta. Il collegamento resta sul servizio e vale per tutti i tuoi dispositivi.</p>${setup}<div class="account-connect-actions"><button class="primary google-connect" data-action="google-connect" ${google?.configured?'':'disabled'}>${googleIcon()}Continua con Google ${icon('arrow')}</button><button class="secondary" data-action="imap-account">Collega iCloud o un account IMAP</button></div>`);
 }
 
 function showIMAPForm() {
@@ -438,13 +443,26 @@ async function discardCompose(){
   await refresh();renderList();toast('Bozza eliminata.');
 }
 
+function showRecap(result) {
+  const scroll=S.recapOpen?$('.modal')?.scrollTop||0:0,phase=result.status?.phase||'pending';
+  const status=phase==='updating'?'Aggiornamento in background…':phase==='disabled'?'Attiva l’AI nelle impostazioni per ricevere il recap automatico.':phase==='error'?'Aggiornamento in pausa. Milo riproverà in background.':result.generated_at?'Aggiornato '+dateLabel(result.generated_at,true):'Il primo recap arriverà in background.';
+  const priorities=result.priorities||[];
+  showModal('Il punto della tua inbox',`<div class="recap-meta" role="status">${icon('sparkle')}<span>${esc(status)}</span></div>${result.overview?`<p class="recap-overview">${esc(result.overview)}</p>`:'<p class="recap-empty">Quando sarà pronto, troverai qui il riepilogo della tua posta.</p>'}${priorities.length?`<h3 class="recap-section-title">Da tenere d’occhio</h3><div class="recap-priorities">${priorities.map((item,index)=>`<button class="priority-item" data-recap-message="${esc(item.message_id)}"><span class="priority-number">${index+1}</span><span>${esc(item.action)}</span>${icon('arrow')}</button>`).join('')}</div>`:''}${result.generated_at?`<p class="fineprint recap-source">${result.message_ids?.length||0} conversazioni · Verifica i dettagli nelle email originali.</p>`:''}`);
+  S.recapOpen=true;S.recapSignature=JSON.stringify(S.state.recap);$('.modal').scrollTop=scroll;
+}
+async function openRecap() {
+  const cached=await deviceCache.get('api:/recap');
+  showRecap(cached||{status:{phase:S.state.recap?.phase||'pending'}});
+  try{const result=await api('/recap');if(S.recapOpen)showRecap(result);}
+  catch(error){if(!cached)toast(error.message);}
+}
 async function runAI(action,button) {
+  if(action==='recap'){await openRecap();return;}
   if(S.status.demo) { toast('Le funzioni AI si attivano sulla tua posta reale. Questa demo non simula analisi.'); return; }
   if(!S.state.ai.cloud_consent && S.state.ai.model?.includes('cloud')) { showSettings('ai'); toast('Scegli come elaborare la tua posta prima di attivare l’AI.'); return; }
   const source=S.thread.findLast(message=>!message.sent)||S.selected;
   const id=action==='ai-reply'?source?.id:S.selected?.id;
-  if(action==='recap') showModal('La tua inbox, in un minuto.',`${skeleton(6,'block','Milo prepara il recap…')}`);
-  else if(button){button.disabled=true;button.classList.add('is-loading');if(action==='analyze'){S.analyzing=true;renderReading();}}
+  if(button){button.disabled=true;button.classList.add('is-loading');if(action==='analyze'){S.analyzing=true;renderReading();}}
   let generatedDraft;
   if(action==='ai-reply'){
     showCompose({account_id:source.account_id,to:source.sender_email,subject:'Re: '+subjectCore(source.subject),reply_to_id:id});
@@ -452,10 +470,7 @@ async function runAI(action,button) {
     $('#compose-form .compose-heading').insertAdjacentHTML('afterend',`<div class="reply-generation">${skeleton(3,'block','Milo prepara una risposta…')}</div>`);
   }
   try {
-    if(action==='recap') {
-      const result=await api('/recap','POST');
-      showModal('Il punto della tua inbox',`<p class="recap-overview">${esc(result.overview)}</p>${result.priorities.map(p=>`<button class="priority-item" data-recap-message="${esc(p.message_id)}">${icon('check')}<span>${esc(p.action)}</span>${icon('arrow')}</button>`).join('')}<p class="fineprint">${result.message_ids.length} email recenti · ${esc(result.model||'')} · Verifica sempre le indicazioni sulle email originali.</p>`);
-    } else if(action==='analyze') {
+    if(action==='analyze') {
       await api('/messages/'+id+'/analyze','POST');
       S.analyzing=false;if(S.selected?.id===id)await loadThread(S.readerAnchor);
       await refresh();renderList();
@@ -557,6 +572,10 @@ document.addEventListener('submit', async event => {
       await api('/accounts/'+encodeURIComponent(form.dataset.accountId),'PATCH',data);
       S.loadingList=true;renderShell();await refresh(false,true);renderList();showSettings('accounts');toast('Account aggiornato su Milo.');
     }
+    if(form.id==='identity-form') {
+      data.aliases=data.aliases.split(',').map(name=>name.trim()).filter(Boolean);
+      S.state.identity=await api('/settings/identity','PUT',data);await refresh();closeModal();toast('Identità salvata. Milo la userà nelle prossime risposte.');
+    }
     if(form.id==='appearance-form'){applyTheme(data.theme);await api('/settings/appearance','PUT',data);S.state.appearance=data;closeModal();toast('Aspetto salvato.');}
     if(form.id==='ai-form') {
       data.automatic=form.elements.automatic.checked;data.cloud_consent=form.elements.cloud_consent.checked;
@@ -651,6 +670,7 @@ async function poll() {
     if(S.status?.authenticated&&!document.hidden){
       const before=JSON.stringify(S.messages);
       await refresh();await flushClientQueue();renderChrome();if(before!==JSON.stringify(S.messages))renderList();
+      if(S.recapOpen&&S.recapSignature!==JSON.stringify(S.state.recap)){const result=await api('/recap');if(S.recapOpen)showRecap(result);}
       for(const draft of S.pendingDrafts.values())if(!S.draftWrites.has(draft.id)&&S.compose?.id!==draft.id)persistDraft(draft).catch(()=>{});
       if(S.readerAnchor&&(S.threadSync.phase==='downloading'||before!==JSON.stringify(S.messages))&&!S.loadingMessage)await loadThread(S.readerAnchor);
     }

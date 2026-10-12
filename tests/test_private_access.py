@@ -72,3 +72,25 @@ def test_identity_header_from_network_connection_is_untrusted(tmp_path):
     app.state.engine.sync_all = lambda: []
     with TestClient(app, base_url=PRIVATE, client=('100.100.1.2', 40000)) as client:
         assert client.get('/api/state', headers=OWNER).status_code == 404
+
+
+def test_container_trusts_only_explicit_published_gateway(tmp_path):
+    from ipaddress import AddressValueError
+
+    gateway = '172.29.184.1'
+    app = create_app(tmp_path / 'container', private_url=PRIVATE, tailscale_owners=['owner@example.com'],
+                     secure_cookies=True, proxy_peers=[gateway])
+    app.state.engine.sync_all = lambda: []
+    with TestClient(app, client=(gateway, 43210)) as client:
+        assert client.get('/api/state').status_code == 404
+        assert client.get('/api/state', headers=OWNER).status_code == 200
+        assert client.get('/api/state', headers={'Tailscale-User-Login': 'other@example.com'}).status_code == 404
+        assert client.post('/api/login', headers=OWNER, json={'password': 'guess'}).status_code == 404
+    app = create_app(tmp_path / 'other', private_url=PRIVATE, tailscale_owners=['owner@example.com'],
+                     secure_cookies=True, proxy_peers=[gateway])
+    app.state.engine.sync_all = lambda: []
+    with TestClient(app, client=('172.29.184.2', 43210)) as client:
+        assert client.get('/api/state', headers=OWNER).status_code == 404
+    for invalid in ('0.0.0.0', '8.8.8.8', '172.29.184.0/24'):
+        with pytest.raises((ValueError, AddressValueError)):
+            create_app(tmp_path / invalid.replace('/', '_'), proxy_peers=[invalid])

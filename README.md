@@ -174,3 +174,22 @@ search and drafts. Provider tests use deterministic doubles;
 they do not establish successful interoperability with a real mailbox.
 
 MIT · [turinglabs](https://github.com/turinglabsorg)
+
+### Identity and automatic recap
+
+Settings → Identity stores the owner's name, aliases, optional context and reply
+language on the server. No personal identity is embedded in the application.
+Connected mailbox addresses identify the owner automatically. AI reply drafts
+use recent incoming and sent messages and follow the conversation's language by
+default; an explicit language preference overrides that choice.
+
+The inbox recap is computed and persisted in a background worker after new mail
+arrives. Opening it reads an existing snapshot, without starting generation.
+Previous results remain available during updates or temporary model errors.
+Cloud processing still requires the configured consent. AI output remains a
+draft to review, not a factual or delivery guarantee.
+
+The production server runs in Docker on the Mac Pro with the existing archive
+bind-mounted outside the image. Its boot supervisor and restart checks are in
+[DEPLOYMENT.md](docs/DEPLOYMENT.md). The Omarchy client executes on the laptop and
+retains its own device cache.

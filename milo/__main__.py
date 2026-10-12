@@ -32,9 +32,13 @@ def main():
     parser.add_argument("--public-url", default=os.environ.get("MILO_PUBLIC_URL"), help="Stable HTTPS origin for Google OAuth")
     parser.add_argument("--google-client", type=Path, default=os.environ.get("MILO_GOOGLE_CLIENT"), help="Google web client JSON")
     parser.add_argument("--private-config", type=Path, help="Owner-only Tailscale access configuration (0600)")
+    parser.add_argument("--proxy-peer", action="append", default=[], help="Explicit loopback-published Docker gateway")
     args = parser.parse_args()
     config = private_config(args.private_config) if args.private_config else None
-    if config and args.host not in {"127.0.0.1", "::1"}:
+    container = os.environ.get("MILO_CONTAINER") == "1" and Path("/.dockerenv").exists()
+    if args.proxy_peer and not container:
+        parser.error("Additional proxy peers are available only in the loopback-published Docker deployment")
+    if config and args.host not in {"127.0.0.1", "::1"} and not (container and args.proxy_peer):
         parser.error("A Tailscale-authenticated backend must listen only on loopback")
     if config and (not args.secure_cookies or args.demo):
         parser.error("Private production access requires secure cookies and a real archive")
@@ -45,7 +49,7 @@ def main():
         parser.error("An HTTPS public URL requires --secure-cookies")
     app = create_app(data, args.demo, os.environ.get("MILO_OLLAMA_URL", "http://127.0.0.1:11434"),
                      args.secure_cookies, public_url, args.google_client,
-                     config["url"] if config else None, config["owners"] if config else None)
+                     config["url"] if config else None, config["owners"] if config else None, args.proxy_peer)
     print(f"\nMilo → http://{args.host}:{args.port}", flush=True)
     if not args.demo and app.state.store.bootstrap and not args.quiet_bootstrap:
         print("Apri Milo dall'app installata per scegliere la tua password.", flush=True)
