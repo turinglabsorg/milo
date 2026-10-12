@@ -36,7 +36,7 @@ spacing, header account/analysis indicators, no sidebar AI promotion, editable
 identity, readable recap priorities and matching full-width Google/IMAP buttons
 with the Google icon.
 
-The local suite passes **128 tests**; nine opt-in browser flows pass separately.
+The local suite passes **129 tests**; nine opt-in browser flows pass separately.
 This includes lightweight recipient-header extraction without body
 loading, Reply all owner-address exclusion, and encrypted inbox/body/inline-image
 reuse through a temporary HTTP 503 and app reload. Local Docker-host Ollama
@@ -99,7 +99,9 @@ through authenticated, account-scoped thread lookup. Metadata snapshot tests
 verify 200-item chronological pagination remains stable when pins change. The
 performance regression now uses 21,000 synthetic messages and checks catalogue
 page latency and use of the dedicated SQLite index, alongside reading and typing
-budgets. Page membership is selected before wide thread aggregation; background
+budgets. Its catalogue page measured about 43 ms in that sample. A service-worker
+regression proves old shell versions are retired and updated client resources
+replace the cached copy without blocking the current load. Page membership is selected before wide thread aggregation; background
 backfill yields between requests and starts behind initial reading.
 
 Measured cached inbox/reader/favorites navigation in the held-server fixture was

@@ -33,7 +33,8 @@ the complete archive; a server-side archive alone does not satisfy this requirem
 
 The shared client uses an origin-isolated IndexedDB database with AES-GCM payloads
 and a persisted non-extractable CryptoKey. Its private service worker retains the
-app shell. API data is managed explicitly; OAuth/provider credentials are never
+app shell, retires previous shell versions and refreshes client resources in
+background while serving the current cached copy immediately. API data is managed explicitly; OAuth/provider credentials are never
 cached. Browser profile and device access remain the local trust boundary. Cache
 storage encryption is not a separate owner password or an end-to-end encryption
 claim. Revoked online authorization and explicit logout clear cached API state.

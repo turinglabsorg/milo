@@ -1,5 +1,5 @@
 import {deviceCache} from '/static/cache.js';
-const CACHE = 'milo-shell-v10';
+const CACHE = 'milo-shell-v11';
 const SHELL = ['/', '/static/style.css', '/static/app.js', '/static/cache.js', '/static/replica.js', '/static/search-worker.js', '/static/icon.svg', '/static/fonts/Geist.woff2'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
@@ -25,6 +25,7 @@ self.addEventListener('fetch', event => {
   event.respondWith(caches.match(event.request).then(cached=>{
     const fresh=fetch(event.request).then(async response=>{
       if(response.status===401||response.status===404)await caches.delete(CACHE);
+      else if(response.ok&&SHELL.includes(url.pathname)){const cache=await caches.open(CACHE);await cache.put(event.request,response.clone());}
       return response;
     });
     if(cached){event.waitUntil(fresh.catch(()=>{}));return cached;}

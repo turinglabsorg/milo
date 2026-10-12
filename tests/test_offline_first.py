@@ -77,16 +77,26 @@ def test_cached_navigation_edits_and_reload_work_with_all_server_responses_held(
 
 
 def test_stale_metadata_and_delayed_ack_preserve_latest_favorite(tmp_path):
-    with service(tmp_path, read_mail) as (url, sent), sync_playwright() as p:
+    applied=[]
+
+    def prepare(app, received, sent):
+        read_mail(app, received, sent)
+        original=app.state.store.patch_conversation
+        def track(message, patch):
+            result=original(message,patch)
+            applied.append(patch.copy())
+            return result
+        app.state.store.patch_conversation=track
+
+    with service(tmp_path, prepare) as (url, sent), sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
         warm(page, url, sent)
-        held, blocked, writes = [], [], []
-
-        page.on('request', lambda request: writes.append(request.post_data_json) if request.method == 'PATCH' else None)
+        held, blocked = [], []
+        delay_state={'hold_lists':True}
 
         def delay(route):
-            if route.request.method == 'GET' and '/api/messages?' in route.request.url:
+            if delay_state['hold_lists'] and route.request.method == 'GET' and '/api/messages?' in route.request.url:
                 response = route.fetch()
                 held.append((route, response))
             elif route.request.method == 'PATCH' and not blocked:
@@ -105,16 +115,17 @@ def test_stale_metadata_and_delayed_ack_preserve_latest_favorite(tmp_path):
         page.get_by_role('button', name='Aggiungi ai preferiti', exact=True).click()
         wait_for_async(page, 'async()=>{const {deviceCache}=await import("/static/cache.js");return (await deviceCache.get("pending-operations"))?.length===3;}')
         assert held and blocked
+        delay_state['hold_lists']=False
         for route, response in list(held):
             route.fulfill(response=response)
         expect(page.get_by_role('button', name='Rimuovi dai preferiti', exact=True)).to_be_visible()
         for route, response in blocked:
             route.fulfill(response=response)
-        page.unroute('**/api/**', delay)
         wait_for_async(page, 'async id=>(await (await fetch("/api/messages/"+id+"/thread")).json()).messages.every(m=>m.starred)', arg=sent)
         wait_for_async(page, 'async()=>{const {deviceCache}=await import("/static/cache.js");return !(await deviceCache.get("pending-operations"))?.length;}', timeout=10000)
         thread = page.request.get(url + '/api/messages/' + sent + '/thread').json()['messages']
-        assert writes == [{'starred': True}, {'starred': False}, {'starred': True}], writes
+        page.unroute('**/api/**', delay)
+        assert applied == [{'starred': True}, {'starred': False}, {'starred': True}], applied
         assert all(m['starred'] for m in thread)
         assert page.request.get(url + '/api/state').json()['counts']['starred'] == 1
         expect(page.locator('[data-view="starred"] .count')).to_have_text('1')
@@ -266,3 +277,30 @@ def test_thread_lookup_is_authenticated_and_scoped_to_account(logged_in, account
     assert logged_in.get('/api/client/thread', params={'account': 'other', 'thread': 'conversation'}).status_code == 404
     logged_in.cookies.clear()
     assert logged_in.get('/api/client/thread', params={'account': account, 'thread': 'conversation'}).status_code == 401
+
+
+def test_service_worker_retires_old_shell_and_refreshes_cached_client_assets(tmp_path):
+    from fastapi.responses import Response
+    from fastapi.routing import APIRoute
+
+    version = {'name': 'original'}
+    source = (Path(__file__).resolve().parent.parent / 'web/app.js').read_text()
+
+    def prepare(app, received, sent):
+        read_mail(app, received, sent)
+        app.router.routes.insert(0, APIRoute('/static/app.js',
+            lambda: Response(source + '\n// shell-version-' + version['name'], media_type='text/javascript'),
+            methods=['GET']))
+
+    with service(tmp_path, prepare) as (url, sent), sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(url + '/static/icon.svg')
+        page.evaluate('()=>caches.open("milo-shell-v10").then(cache=>cache.put("/static/app.js",new Response("// obsolete-client")))')
+        warm(page, url, sent)
+        wait_for_async(page, 'async()=>{const keys=await caches.keys();return keys.includes("milo-shell-v11")&&!keys.includes("milo-shell-v10");}')
+        version['name'] = 'updated'
+        old = page.evaluate('()=>fetch("/static/app.js").then(response=>response.text())')
+        assert 'shell-version-original' in old
+        wait_for_async(page, 'async()=>{const response=await caches.match("/static/app.js");return (await response.text()).includes("shell-version-updated");}')
+        browser.close()
