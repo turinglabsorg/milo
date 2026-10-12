@@ -20,7 +20,9 @@ paths.pin='m8 3 8 0-1 6 4 4H5l4-4z M12 13v8';
 const icon = (name, extra = '') => `<svg class="icon ${extra}" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.mail}"/></svg>`;
 const googleIcon = () => '<svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285f4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.2h6.6c3.9-3.6 6.1-8.9 6.1-15.1z"/><path fill="#34a853" d="M24 44c5.5 0 10.1-1.8 13.5-4.9l-6.6-5.2c-1.8 1.2-4.1 1.9-6.9 1.9-5.3 0-9.8-3.6-11.4-8.4H5.8v5.3A20.4 20.4 0 0 0 24 44z"/><path fill="#fbbc05" d="M12.6 27.4a12.3 12.3 0 0 1 0-6.8v-5.3H5.8a20.4 20.4 0 0 0 0 17.4z"/><path fill="#ea4335" d="M24 12.2c3 0 5.7 1 7.8 3.1l5.9-5.9A19.8 19.8 0 0 0 24 4 20.4 20.4 0 0 0 5.8 15.3l6.8 5.3c1.6-4.8 6.1-8.4 11.4-8.4z"/></svg>';
 const logo = () => '<div class="logo"><img src="/static/icon.svg" alt="">milo<small>MAIL</small></div>';
-const S = {status:null, setupAuthorized:false, state:{accounts:[], counts:{}, ai:{}, sync:[]}, messages:[], selected:null, thread:[], threadSync:{}, readerAnchor:null, loadingMessage:false, loadingList:false, listVersion:0, readerVersion:0, optimistic:new Map(), view:'inbox', category:'', account:'', search:'', settingsTab:'accounts', menu:false, syncing:false, online:true, compose:null, theme:'system', images:false};
+const S = {status:null, setupAuthorized:false, state:{accounts:[], counts:{}, ai:{}, sync:[]}, messages:[], selected:null, thread:[], threadSync:{}, readerAnchor:null, loadingMessage:false, loadingList:false, listVersion:0, readerVersion:0, optimistic:new Map(), view:'inbox', category:'', account:'', search:'', settingsTab:'accounts', menu:false, syncing:false, online:true, serverErrors:0, compose:null, theme:'system', images:false};
+const MAX_SERVER_ERRORS=3;
+function updateOnlineState(){const wasOnline=S.online;S.online=navigator.onLine&&S.serverErrors<MAX_SERVER_ERRORS;if(wasOnline&&!S.online)renderChrome();}
 const categoryNames = {people:'Persone', updates:'Notifiche', newsletters:'Newsletter'};
 const viewNames = {inbox:'Smart inbox', starred:'Preferiti', drafts:'Bozze', sent:'Posta inviata', snoozed:'Per dopo', archive:'Archivio'};
 let toastTimer, searchTimer, autosaveTimer, localDraftTimer;
@@ -50,18 +52,20 @@ function syncMarkup() {
 }
 
 const temporarilyUnavailable=error=>!error.status||error.status>=500||[408,429].includes(error.status);
+function recordServerError(){S.serverErrors++;updateOnlineState();}
+function recordServerSuccess(){S.serverErrors=0;if(!S.online&&navigator.onLine){S.online=true;renderChrome();}}
 async function api(path, method='GET', body) {
   const started=replica.revision;
   let response;
   try { response = await fetch('/api' + path, {method, signal:AbortSignal.timeout(method==='GET'?12000:60000), credentials:'same-origin', headers:body ? {'Content-Type':'application/json'} : {}, body:body ? JSON.stringify(body) : undefined}); }
-  catch { S.online=false; throw new Error('Connessione a Milo interrotta. I dati salvati restano sul servizio.'); }
+  catch { recordServerError(); throw new Error('Connessione a Milo interrotta. I dati salvati restano sul servizio.'); }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     if ((response.status === 401 || response.status===404&&['/status','/state'].includes(path)) && S.status?.authenticated) { replica.clear();await deviceCache.clear();S.optimistic.clear();S.pendingSettings.clear();S.queueErrors.clear();S.readerVersion++;S.readerAnchor=null;S.selected=null;S.thread=[];S.status.authenticated=false;renderLogin(); }
     const message = Array.isArray(data.detail) ? data.detail.map(item => item.msg).join('; ') : data.detail;
-    const error=new Error(message || 'Operazione non riuscita');error.status=response.status;if(temporarilyUnavailable(error))S.online=false;throw error;
+    const error=new Error(message || 'Operazione non riuscita');error.status=response.status;if(temporarilyUnavailable(error))recordServerError();throw error;
   }
-  S.online=true;
+  recordServerSuccess();
   const immutable=/^\/messages\/[^/?]+(?:\?.*)?$/.test(path)||/^\/messages\/[^/]+\/recipients$/.test(path);
   if(method==='GET'&&(started===replica.revision||immutable&&S.status?.authenticated)&&(/^(?:\/status|\/state|\/recap|\/messages(?:[/?]|$)|\/drafts)/.test(path)))deviceCache.set('api:'+path,data).then(saved=>{if(!saved&&S.status?.authenticated&&!S.cacheWarning){S.cacheWarning=true;toast('Cache locale non disponibile. I messaggi restano sul server, ma non saranno disponibili offline su questo dispositivo.');}});
   return data;
@@ -179,7 +183,7 @@ function quotedText(body) {
 }
 function htmlDocument(html) {
   const images=S.images?"'self' https:":"'self'";
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${images}; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style>html{color-scheme:light}body{margin:0;height:auto!important;font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;overflow-wrap:anywhere}.milo-email-document{display:flow-root;padding:16px;box-sizing:border-box}img,table{max-width:100%!important}img{height:auto}pre{white-space:pre-wrap}a{color:#2563eb}table{border-collapse:collapse}.milo-quoted-history{margin:16px 0;border-top:1px solid #dfe7f2;padding-top:10px}.milo-quoted-history>summary{cursor:pointer;color:#64748b;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.milo-quoted-history blockquote{margin-left:12px!important;padding-left:12px!important;border-left:2px solid #dfe7f2}.milo-quoted-history:not([open])>*:not(summary){display:none!important}</style></head><body><div class="milo-email-document">${quotedHTML(html)}</div></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${images}; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style>html{color-scheme:light}body{margin:0;min-height:100%;font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased}.milo-email-document{display:flow-root;padding:16px;box-sizing:border-box;contain:layout style}.milo-email-document img{opacity:0;transition:opacity .2s}.milo-email-document img[data-loaded]{opacity:1}img,table{max-width:100%!important}img{height:auto}pre{white-space:pre-wrap}a{color:#2563eb}table{border-collapse:collapse}.milo-quoted-history{margin:16px 0;border-top:1px solid #dfe7f2;padding-top:10px}.milo-quoted-history>summary{cursor:pointer;color:#64748b;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.milo-quoted-history blockquote{margin-left:12px!important;padding-left:12px!important;border-left:2px solid #dfe7f2}.milo-quoted-history:not([open])>*:not(summary){display:none!important}</style></head><body><div class="milo-email-document">${quotedHTML(html)}</div><script>document.querySelectorAll('img').forEach(img=>{if(img.complete){img.dataset.loaded='1';}else{img.addEventListener('load',()=>{img.dataset.loaded='1';},{once:true});img.addEventListener('error',()=>{img.dataset.loaded='1';},{once:true});}});</script></body></html>`;
 }
 function fitFrames(root=document) {
   root.querySelectorAll('.email-html').forEach(frame=>{
@@ -187,10 +191,41 @@ function fitFrames(root=document) {
     frame.addEventListener('load',()=>{
       const doc=frame.contentDocument,content=doc?.querySelector('.milo-email-document');
       if(!content)return;
-      const fit=()=>{if(!frame.getClientRects().length)return;const height=Math.max(48,Math.ceil(content.getBoundingClientRect().height));if(frame.style.height!==height+'px')frame.style.height=height+'px';};
-      fit();const observer=new ResizeObserver(fit);observer.observe(content);
-      doc.addEventListener('toggle',fit,true);doc.addEventListener('load',fit,true);doc.addEventListener('keydown',handleKeydown);
-      frame.closest('.thread-message')?.addEventListener('toggle',fit);
+      let settled=false,imgCheck=0;
+      const fit=()=>{
+        if(!frame.getClientRects().length)return;
+        const height=Math.max(100,Math.ceil(content.scrollHeight));
+        frame.style.height=height+'px';
+      };
+      const waitImages=()=>{
+        const images=doc.querySelectorAll('img:not([data-checked])');
+        if(!images.length||imgCheck>20){
+          settled=true;fit();
+          setTimeout(()=>{if(frame.isConnected)fit();},100);
+          return;
+        }
+        imgCheck++;
+        images.forEach(img=>img.dataset.checked='1');
+        const pending=[...images].filter(img=>!img.complete);
+        if(!pending.length){
+          settled=true;fit();
+          setTimeout(()=>{if(frame.isConnected)fit();},100);
+          return;
+        }
+        let remaining=pending.length;
+        pending.forEach(img=>{
+          const done=()=>{if(--remaining===0)waitImages();};
+          img.addEventListener('load',done,{once:true});
+          img.addEventListener('error',done,{once:true});
+        });
+        setTimeout(waitImages,500);
+      };
+      fit();
+      waitImages();
+      const observer=new ResizeObserver(()=>{if(!settled)fit();});
+      observer.observe(content);
+      doc.addEventListener('toggle',()=>{settled=false;setTimeout(()=>{fit();waitImages();},50);},true);
+      doc.addEventListener('keydown',handleKeydown);
       frame._observer=observer;
     },{once:true});
   });
@@ -274,7 +309,7 @@ function queueCatalogue(){
   feedTimer=setTimeout(()=>{feedTimer=null;refreshCatalogue();},1500);
 }
 async function refreshCatalogue(){
-  if(feeding||!S.online||!S.status?.authenticated||Date.now()-lastFeed<120000)return;
+  if(feeding||!navigator.onLine||!S.status?.authenticated||Date.now()-lastFeed<120000)return;
   feeding=true;lastFeed=Date.now();
   try{
     let cursor;const previous=replica.keys(),seen=new Set();
@@ -283,7 +318,7 @@ async function refreshCatalogue(){
       const data=await api('/client/messages'+(cursor?'?'+new URLSearchParams(cursor):''));
       if(!S.status?.authenticated)return;
       replica.merge(data.messages,'all',started,ticket);for(const row of data.messages)seen.add(threadKey(row));paintLocal();cursor=data.next;if(cursor)await new Promise(resolve=>setTimeout(resolve,50));
-    }while(cursor&&S.online);
+    }while(cursor&&navigator.onLine);
     for(const id of previous.filter(id=>!seen.has(id))){
       const row=replica.find(id),started=replica.revision,ticket=++S.remoteTicket;try{const data=await api('/client/thread?'+new URLSearchParams({account:row.account_id,thread:row.thread_id||row.id}));if(S.status?.authenticated)replica.merge([data.message],'all',started,ticket);}
       catch(error){if(error.status===404){replica.remove(id);if(S.selected&&threadKey(S.selected)===id){S.readerVersion++;S.readerAnchor=null;S.selected=null;S.thread=[];renderReading();}}}
@@ -326,7 +361,7 @@ async function ensureBody(id,background=false){
 let warmingVersion=0;
 function warmThread(){
   const version=++warmingVersion,ids=S.thread.filter(m=>!m.body_loaded).map(m=>m.id).reverse();
-  setTimeout(async()=>{for(const id of ids){if(version!==warmingVersion||!S.online||document.hidden)break;try{await ensureBody(id,true);}catch{break;}}},1200);
+  setTimeout(async()=>{for(const id of ids){if(version!==warmingVersion||!navigator.onLine||document.hidden)break;try{await ensureBody(id,true);}catch{break;}}},1200);
 }
 async function applyThread(result,id,version,cached=false){
   if(!cached)replica.observe(result.messages);
@@ -399,8 +434,17 @@ async function mutate(patch,deleted=false){
   replica.apply(operation);adjustCounts(before,replica.find(key)||{...before,...patch},deleted);
   const current=S.selected&&threadKey(S.selected)===key;
   if(current){S.selected={...S.selected,...patch};S.thread=S.thread.map(m=>({...m,...patch}));}S.listVersion++;
-  if(current&&(deleted||'archived' in patch||'snoozed_until' in patch)){S.selected=null;S.thread=[];S.readerAnchor=null;S.readerVersion++;$('.shell')?.classList.remove('has-selection');}
-  paintLocal();renderReading();
+  let deletedIndex=-1;
+  if(current&&deleted){deletedIndex=S.messages.findIndex(m=>threadKey(m)===key);}
+  const shouldClose=('archived' in patch||'snoozed_until' in patch||deleted);
+  if(current&&shouldClose){S.selected=null;S.thread=[];S.readerAnchor=null;S.readerVersion++;$('.shell')?.classList.remove('has-selection');}
+  paintLocal();
+  if(current&&deleted&&deletedIndex>=0&&S.messages.length){
+    const nextIndex=Math.min(deletedIndex,S.messages.length-1);
+    const nextMessage=S.view==='drafts'?S.drafts[nextIndex]:S.messages[nextIndex];
+    if(nextMessage)selectMessage(nextMessage.id,false).catch(()=>{});
+    else{S.selected=null;S.thread=[];S.readerAnchor=null;S.readerVersion++;$('.shell')?.classList.remove('has-selection');renderReading();}
+  }else if(!current||!deleted)renderReading();
   await deviceCache.set('api:/state',S.state);
   if(!S.online)toast('Modifica salvata sul dispositivo. Verrà sincronizzata quando torni online.');
   else if(deleted)toast('Conversazione eliminata. Sincronizzo il cestino in background.');
@@ -450,7 +494,16 @@ function showAccountForm() {
 }
 
 function showIMAPForm() {
-  showModal('Collega un account IMAP',`<form id="account-form"><label class="field"><span>Provider</span><select id="provider"><option value="icloud">iCloud Mail</option><option value="other">Altro account IMAP</option></select></label><div class="notice" id="provider-notice">Usa una password specifica per app generata nel tuo account Apple. Il nome utente IMAP può essere la parte prima di @icloud.com.</div><div class="form-grid"><label class="field"><span>Nome dell’account</span><input name="name" value="Personale" required maxlength="80"></label><label class="field"><span>Indirizzo email</span><input name="email" type="email" required autocomplete="email"></label><label class="field"><span>Nome utente</span><input name="username" placeholder="Di solito l’indirizzo email" required></label><label class="field"><span>Password per app</span><input name="password" type="password" required autocomplete="off"></label><label class="field"><span>Server IMAP</span><input name="imap_host" value="imap.mail.me.com" required></label><label class="field"><span>Porta IMAP (TLS)</span><input name="imap_port" type="number" value="993" min="1" max="65535" required></label><label class="field"><span>Server SMTP</span><input name="smtp_host" value="smtp.mail.me.com" required></label><label class="field"><span>Porta SMTP</span><input name="smtp_port" type="number" value="587" min="1" max="65535" required></label><label class="field full"><span>Sicurezza SMTP</span><select name="smtp_security"><option value="tls">TLS</option><option value="starttls" selected>STARTTLS</option></select></label></div><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="close-modal">Annulla</button><button class="primary" type="submit">Collega e sincronizza ${icon('arrow')}</button></div></form>`);
+  showModal('Collega un account IMAP',`<form id="account-form"><label class="field"><span>Provider</span><select id="provider"><option value="icloud">iCloud Mail</option><option value="other">Altro account IMAP</option></select></label><div class="notice" id="provider-notice"><strong>Per iCloud serve una password specifica per app.</strong><br>iCloud non permette l'accesso con la password del tuo account Apple. Devi generarne una:
+<details class="guide-steps" style="margin-top:8px"><summary>Come creare la password per app su iCloud</summary><ol style="margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.6">
+<li>Vai su <strong>appleid.apple.com</strong> e accedi con il tuo Apple ID</li>
+<li>Nella sezione <strong>"Accesso e sicurezza"</strong>, clicca su <strong>"Password specifiche per app"</strong></li>
+<li>Clicca il pulsante <strong>+</strong> (o "Genera password")</li>
+<li>Inserisci un nome, es. <em>"Milo"</em>, e clicca <strong>"Crea"</strong></li>
+<li>Copia la password generata (sarà del tipo <code>xxxx-xxxx-xxxx-xxxx</code>) e incollala qui sotto</li>
+</ol>
+<p style="margin:8px 0 0;font-size:12px;color:var(--muted)">Puoi revocarla in qualsiasi momento da appleid.apple.com. La password di Apple non vienemai salvata da Milo.</p></details>
+Il nome utente IMAP è la parte prima di <code>@icloud.com</code> (es. <code>mario</code> per <code>mario@icloud.com</code>).</div><div class="form-grid"><label class="field"><span>Nome dell’account</span><input name="name" value="Personale" required maxlength="80"></label><label class="field"><span>Indirizzo email</span><input name="email" type="email" required autocomplete="email" placeholder="mario@icloud.com"></label><label class="field"><span>Nome utente</span><input name="username" placeholder="Di solito l’indirizzo email" required></label><label class="field"><span>Password per app</span><input name="password" type="password" required autocomplete="off" placeholder="xxxx-xxxx-xxxx-xxxx"></label><label class="field"><span>Server IMAP</span><input name="imap_host" value="imap.mail.me.com" required></label><label class="field"><span>Porta IMAP (TLS)</span><input name="imap_port" type="number" value="993" min="1" max="65535" required></label><label class="field"><span>Server SMTP</span><input name="smtp_host" value="smtp.mail.me.com" required></label><label class="field"><span>Porta SMTP</span><input name="smtp_port" type="number" value="587" min="1" max="65535" required></label><label class="field full"><span>Sicurezza SMTP</span><select name="smtp_security"><option value="tls">TLS</option><option value="starttls" selected>STARTTLS</option></select></label></div><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="close-modal">Annulla</button><button class="primary" type="submit">Collega e sincronizza ${icon('arrow')}</button></div></form>`);
 }
 
 function showAccountSettings(accountId) {
@@ -708,7 +761,10 @@ document.addEventListener('change', async event => {
     const form=$('#account-form'), provider=event.target.value;
     const presets={icloud:['imap.mail.me.com','smtp.mail.me.com',587,'starttls'],other:['','',465,'tls']};
     const [imap,smtp,port,security]=presets[provider];form.elements.imap_host.value=imap;form.elements.smtp_host.value=smtp;form.elements.smtp_port.value=port;form.elements.smtp_security.value=security;
-    $('#provider-notice').textContent={icloud:'Usa una password specifica per app generata nel tuo account Apple. Il nome utente IMAP può essere la parte prima di @icloud.com.',other:'Inserisci i parametri del tuo provider. IMAP usa TLS; SMTP può usare TLS oppure STARTTLS.'}[provider];
+    const notice=$('#provider-notice');
+    if(provider==='other'&&!notice.dataset.icloudHtml){notice.dataset.icloudHtml=notice.innerHTML;}
+    if(provider==='icloud'&&notice.dataset.icloudHtml){notice.innerHTML=notice.dataset.icloudHtml;}
+    else if(provider==='other'){notice.innerHTML='Inserisci i parametri del tuo provider. IMAP usa TLS; SMTP può usare TLS oppure STARTTLS.';}
   }
 });
 async function handleKeydown(event) {
@@ -749,10 +805,10 @@ async function boot() {
     for(const operation of await deviceCache.get('pending-operations')||[]){if(operation.error)S.queueErrors.set(operation.id,operation);replica.apply(operation);if(operation.kind==='setting')S.pendingSettings.set(operation.key,operation);else if(!operation.kind)S.optimistic.set(operation.key,{patch:{...S.optimistic.get(operation.key)?.patch,...operation.patch},deleted:operation.deleted,operationId:operation.id});}
     if(cachedStatus?.authenticated&&cachedState){
       S.status=cachedStatus;S.state=cachedState;S.online=navigator.onLine;applyState(cachedState);renderShell();await refresh();
-      api('/status').then(status=>{S.status=status;if(!status.authenticated)renderLogin();else{flushClientQueue().catch(()=>{});queueCatalogue();}}).catch(error=>{if(temporarilyUnavailable(error)){S.online=false;renderChrome();}});
+      api('/status').then(status=>{S.status=status;if(!status.authenticated)renderLogin();else{flushClientQueue().catch(()=>{});queueCatalogue();}}).catch(error=>{if(temporarilyUnavailable(error))recordServerError();});
       return;
     }
-    try{S.status=await api('/status');}catch(error){if(!temporarilyUnavailable(error))throw error;if(!cachedStatus?.authenticated)throw error;S.status=cachedStatus;S.online=false;}
+    try{S.status=await api('/status');}catch(error){if(!temporarilyUnavailable(error))throw error;if(!cachedStatus?.authenticated)throw error;S.status=cachedStatus;recordServerError();}
 
     if(!S.status.initialized&&!S.status.authenticated) {
       if(ownerToken) {
@@ -808,7 +864,7 @@ async function poll(){
   setTimeout(poll,3000);
 }
 setTimeout(poll,1500);
-addEventListener('online',()=>{S.online=true;queueRetryAt=0;flushClientQueue().catch(()=>{});revalidateView();queueCatalogue();});
+addEventListener('online',()=>{updateOnlineState();queueRetryAt=0;flushClientQueue().catch(()=>{});revalidateView();queueCatalogue();});
 addEventListener('offline',()=>{S.online=false;renderChrome();});
 addEventListener('pagehide',()=>{const draft=captureCompose();if(draft)rememberDraft(draft);else storePendingDrafts();});
 if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js',{type:'module'}).catch(()=>{});

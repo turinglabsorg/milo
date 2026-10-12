@@ -102,7 +102,7 @@ body{background:var(--surface-alt);color:var(--text)}
 .thread-message summary .sender-detail{margin:0}.thread-message summary small{max-width:360px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
 .thread-message-body{padding:0 18px 18px}.thread-message-body .mail-body{padding:10px 0;color:var(--text)}
 .sent-message{border-left:3px solid var(--purple)}
-.email-html{width:100%;min-height:100px;border:0;background:#fff;border-radius:8px;display:block}
+.email-html{width:100%;min-height:100px;border:0;background:#fff;border-radius:8px;display:block;contain:layout style paint;overflow:hidden;will-change:height}
 .image-permission{font-size:12px;color:var(--purple);padding:8px 0;margin-bottom:8px}
 .thread-message .attachments{margin:14px 0 0}.thread-messages{margin-bottom:24px}
 .reading-toolbar{position:sticky;top:0;z-index:5;background:var(--surface);flex-shrink:0}
@@ -156,7 +156,7 @@ body{background:var(--surface-alt);color:var(--text)}
 .modal-header{margin-bottom:14px}.modal-header h2{font-size:20px;font-weight:650}.modal p{margin:0 0 14px;line-height:1.6;color:var(--muted)}
 .modal-tabs{gap:16px;margin-bottom:16px;border-color:var(--line)}.modal-tabs button{padding-bottom:10px;color:var(--muted)}
 .field{margin-bottom:12px}.field>span{margin-bottom:5px}.field input,.field select,.field textarea{padding:8px 10px}.field textarea{min-height:80px;line-height:1.5}
-.notice{padding:10px 12px;border-radius:8px}.form-actions{margin-top:16px;gap:8px}.secondary{padding:8px 14px}.check-field{gap:8px;margin:12px 0}
+.notice{padding:10px 12px;border-radius:8px}.notice .guide-steps{margin:6px 0}.notice .guide-steps>summary{cursor:pointer;color:var(--purple);font-weight:600}.notice .guide-steps>summary:hover{text-decoration:underline}.notice .guide-steps ol{margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--text)}.notice .guide-steps code{background:var(--soft);padding:1px 5px;border-radius:4px;font-size:12px}.notice .guide-steps p{margin:8px 0 0}.form-actions{margin-top:16px;gap:8px}.secondary{padding:8px 14px}.check-field{gap:8px;margin:12px 0}
 .settings-account{padding:12px 0}.draft-row{padding:12px 18px}.error-banner,.offline-note{padding:9px 18px}.skeleton-group.list{padding:18px;gap:12px}
 .account-connect-actions{display:grid;gap:10px;margin-top:16px}.account-connect-actions>button{width:100%;min-height:42px;display:flex;align-items:center;justify-content:center;gap:10px;margin:0}
 .google-mark{width:22px;height:22px;flex-shrink:0;background:#fff;padding:2px;border-radius:4px}

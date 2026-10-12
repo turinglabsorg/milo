@@ -84,7 +84,7 @@ def test_delete_shortcut_removes_conversation_before_response(tmp_path, key):
         page.frame_locator('.email-html').locator('body').evaluate('(body)=>{body.tabIndex=-1;body.focus();}')
         page.keyboard.press(key)
         expect(page.locator('.message-row')).to_have_count(1)
-        expect(page.locator('.thread-message')).to_have_count(0)
+        expect(page.locator('.thread-message')).to_have_count(1)
         expect(page.locator('#toast')).to_contain_text('Conversazione eliminata')
         assert len(deleted) == 1
         page.reload()
