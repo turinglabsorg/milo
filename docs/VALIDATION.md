@@ -1,4 +1,41 @@
-# Validation — 2026-10-11
+# Validation — updated 2026-10-12
+
+## Current production result
+
+The Mac Pro serves the owner-only archive through private Tailscale HTTPS; the
+public domain serves the landing and fixed OAuth relay. Both real Google
+accounts are available without account errors. The installed Linux launcher opens
+the private client. Public account/message/login/client routes return 404, and
+the deployed JavaScript, cache module, stylesheet and service worker match the
+tested source. No real test email was sent.
+
+The client cache and Reply all update was verified on a real 19-message thread
+containing sent replies, at desktop 1440×1000 and mobile 390×844 sizes. API writes
+were intercepted: draft saves were simulated and all other mutations blocked.
+
+| Visible behavior | Desktop | Mobile viewport |
+| --- | ---: | ---: |
+| First inbox load, empty device cache | 2,491 ms | 2,144 ms |
+| First conversation body | 1,587 ms | 605 ms |
+| Reopen downloaded conversation | 105 ms | 77 ms |
+| Inbox after app reload with cache | 68 ms | 58 ms |
+| Inbox after offline reload | 83 ms | 108 ms |
+| Downloaded conversation while offline | 116 ms | 103 ms |
+| Close long inline draft | 61 ms | 89 ms |
+
+Repeated openings and offline reloads did not download the visible body again.
+Downloaded API payloads persisted encrypted in IndexedDB with a non-extractable
+key. Reply all appeared inline with To/Cc fields and excluded connected owner
+addresses. No browser exceptions occurred. The lightweight thread index was
+26,703 bytes before HTTP compression; list/index responses used gzip. Network
+list requests had a 638 ms median and 662 ms maximum in this sample.
+
+These are measured samples, not latency guarantees. First-time uncached content
+still depends on the network. Native iOS, physical iPhone behavior, push delivery
+and mailbox-wide AI quality remain future validation gates. The required native
+cache behavior is documented in [CLIENT_CACHE.md](CLIENT_CACHE.md).
+
+## Earlier checkpoints
 
 Verified locally on the Linux development machine:
 
@@ -132,11 +169,11 @@ verified private origin. Both real Google accounts were available without errors
 and a real 17-message thread included sent replies and HTML with no browser
 exceptions. No provider mutations or real sends were made by this check.
 
-That real-thread check also exposed a performance gap not covered by the small
+That earlier real-thread check also exposed a performance gap not covered by the small
 fixtures: eagerly rendering/downloading every body took 8–14 seconds. The current
 update introduces lightweight thread indices, body loading on expansion, compressed
-responses and persistent client-local caching to address it. Its production
-performance must be measured after rollout, rather than inferred from local tests.
+responses and persistent client-local caching to address it. The production
+measurements at the top of this document verify the resulting behavior.
 
 ## Client cache and Reply all — 2026-10-12
 
