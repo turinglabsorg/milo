@@ -1,18 +1,65 @@
 #!/usr/bin/env python3
-"""Production entrypoint supervised by the owner's permanent Grog site."""
+"""Grog serves the public landing. A separate loopback child owns the archive."""
+import asyncio
+import copy
 import os
+import subprocess
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from milo.__main__ import main
+import uvicorn
 
-root = Path(__file__).resolve().parent.parent
-origin = os.environ.get("MILO_PUBLIC_URL", "https://milo.grooooog.space")
-legacy = root / ".data/live"
-archive = Path.home() / "Library/Application Support/Milo" if sys.platform == "darwin" else legacy
-if (legacy / "mail.sqlite").exists():
-    archive = legacy
-data = os.environ.get("MILO_DATA", str(archive))
-sys.argv = ["milo", "--host", "127.0.0.1", "--port", os.environ.get("PORT", "8025"),
-            "--data", data, "--public-url", origin, "--secure-cookies", "--quiet-bootstrap"]
-main()
+from milo.__main__ import PrivateAccessFormatter
+from milo.private import private_config
+from milo.public import create_public_app
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def main():
+    legacy = ROOT / ".data/live"
+    archive = Path.home() / "Library/Application Support/Milo" if sys.platform == "darwin" else legacy
+    if (legacy / "mail.sqlite").exists():
+        archive = legacy
+    archive = Path(os.environ.get("MILO_DATA", str(archive)))
+    config_path = archive / "private-server.json"
+    config = private_config(config_path) if config_path.exists() else None
+
+    @asynccontextmanager
+    async def lifespan(app):
+        process = None
+        monitor = None
+        if config:
+            process = subprocess.Popen([sys.executable, "-m", "milo", "--host", "127.0.0.1", "--port", "8029",
+                                        "--data", str(archive), "--public-url",
+                                        os.environ.get("MILO_PUBLIC_URL", "https://milo.grooooog.space"),
+                                        "--secure-cookies", "--quiet-bootstrap", "--private-config", str(config_path)],
+                                       cwd=ROOT)
+
+            async def watch():
+                while process.poll() is None:
+                    await asyncio.sleep(1)
+                server.should_exit = True
+
+            monitor = asyncio.create_task(watch())
+        try:
+            yield
+        finally:
+            if monitor:
+                monitor.cancel()
+                await asyncio.gather(monitor, return_exceptions=True)
+            if process and process.poll() is None:
+                process.terminate()
+                await asyncio.to_thread(process.wait)
+
+    app = create_public_app(config["url"] if config else None, lifespan)
+    logging = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)
+    logging["formatters"]["access"]["()"] = PrivateAccessFormatter
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=int(os.environ.get("PORT", "8025")),
+                                          log_config=logging, proxy_headers=False))
+    server.run()
+
+
+if __name__ == "__main__":
+    main()

@@ -84,6 +84,7 @@ class Store:
                     account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
                     provider_id TEXT, PRIMARY KEY(account_id,provider_id));
                 CREATE INDEX IF NOT EXISTS messages_thread ON messages(account_id,thread_id);
+                CREATE INDEX IF NOT EXISTS messages_conversation ON messages(account_id,COALESCE(thread_id,id));
             """)
 
     def encrypt_json(self, value):

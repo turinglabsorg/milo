@@ -1,97 +1,75 @@
-# Permanent service on the Mac Pro with Grog
+# Private Mac service and public Grog landing
 
-Milo is a server on the owner's Mac Pro. It stores email, accounts, preferences
-and drafts there; Linux and iPhone connect to the same HTTPS service. Tailscale
-can be used to reach the Mac for administration.
+The public domain serves only the Milo presentation and a fixed Google OAuth
+callback relay. It has no mailbox UI, password form, login API, or archive access.
+The private email service listens on `127.0.0.1:8029`. Tailscale Serve provides
+HTTPS on port 8443 and supplies the caller identity. The backend accepts only the
+owner identities recorded in its host-local mode-0600 configuration; other
+Tailscale users and anonymous requests receive 404, even with a valid Milo cookie.
+Password and setup endpoints are unavailable in this deployment.
 
-The owner's deployment was activated on 2026-10-11 at
-`https://milo.grooooog.space`. HTTPS returned the real, non-demo Milo status,
-and unauthenticated `/api/state` returned 401. The Mac's Grog launch agent is
-loaded with `KeepAlive`; the archive exists at
-`~/Library/Application Support/Milo`. The served JavaScript, CSS and Geist font
-match this checkout. Initial passphrase setup and real Google authorization
-remain pending; see [validation](VALIDATION.md) for the limits of these checks.
+The authoritative Mac archive remains `~/Library/Application Support/Milo`,
+outside the checkout. An existing `.data/live` archive is retained. Google tokens
+and client credentials remain encrypted there; they never go to the landing or
+Linux client. The app does not sign in to the macOS user account.
 
-## Prepare the host
+## Prepare and run
 
-Use a dedicated checkout, for example `~/Sites/milo`, and Python 3.11+ with uv:
+Install Python 3.11+, uv and the owner's Grog and Tailscale clients. Use a dedicated
+checkout such as `~/Sites/milo`. Preserve existing Grog sites and Tailscale services.
 
 ```sh
-git clone https://github.com/turinglabsorg/milo.git ~/Sites/milo
-cd ~/Sites/milo
 uv sync --frozen
-uv run --frozen python scripts/mac_server.py
+uv run python scripts/prepare_private.py
 ```
 
-Run these commands on the Mac. The activation script adds only Milo to Grog's
-sites file, preserves other sites, and reuses `space.grooooog.serve`. If that
-launch agent is absent, it creates one using the owner's installed Grog. It
-refuses conflicting domain/port settings and a custom Grog sites-file override.
-After HTTPS responds and the unauthenticated private API returns 401, it opens
-Milo in the Mac browser with private first-start authorization. The interface
-asks only for the owner's Milo password; authorization happens automatically
-and survives a page reload. Then configure Google and authorize each mailbox.
+This prepares `private-server.json` in the existing archive with the server's
+Tailscale HTTPS origin and exact owner identity. It does not enable Serve or
+Funnel. `--owner-device <exact-device-DNS-name>` also includes the identity of an
+explicitly selected second owner device. For a deliberately new host only,
+`--new-archive` permits creation without an existing mailbox database.
 
-The server's default Mac archive is `~/Library/Application Support/Milo`, outside
-the checkout. A previously existing `.data/live` archive is retained. Keep one
-authoritative archive on this host. Configure Ollama on this host, or set
-`MILO_OLLAMA_URL` to an explicitly selected reachable Ollama service; cloud
-processing and automatic analysis are enabled by the owner in Milo settings.
+Grog's permanent site command is `.venv/bin/python scripts/serve.py`, working in
+this checkout on port 8025. `scripts/mac_server.py` registers only Milo and
+preserves other sites and the existing Grog launch agent. `scripts/serve.py`
+supervises both the public landing and private child; the child opens the same
+archive. Missing private configuration leaves only the public landing available.
+There is no fallback to public webmail. A failed private child causes the parent
+to exit so Grog can restart both services.
 
-## Add the static Grog site
+Before enabling the proxy, confirm the loopback service is healthy and `/api/state`
+without identity headers returns 404. Then configure **Serve**, with no Funnel:
 
-Merge this entry into `~/.grog/sites.json`, preserving every existing site:
-
-```json
-{
-  "milo.grooooog.space": {
-    "run": ".venv/bin/python scripts/serve.py",
-    "cwd": "~/Sites/milo",
-    "port": 8025
-  }
-}
+```sh
+tailscale serve --bg --https=8443 http://127.0.0.1:8029
 ```
 
-`scripts/serve.py` launches the production Uvicorn service on loopback with
-secure cookies, the fixed HTTPS origin and a host-local persistent archive.
-Grog's existing `serve` launch agent supervises and restarts the site command.
-The activation script uses absolute paths for the command and working directory.
-Use the owner's Grog CLI, not the unrelated GNU groff `grog` binary installed on
-some Linux systems. Inspect the existing Grog installation and launch agent
-before starting a second `grog serve` process. Grog hot-reloads its sites map.
-The service keeps bootstrap codes out of shared Grog logs; initialization codes
-remain in the owner's private archive.
+Inspect existing Serve configuration first. Do not overwrite another handler or
+enable Funnel. HTTPS certificates may require the owner's Tailscale consent.
+The backend binds only loopback and disables forwarded-client-IP trust. Tailscale
+Serve strips incoming identity headers before adding its attested caller identity;
+see [the official identity-header documentation](https://tailscale.com/kb/1312/serve#identity-headers).
 
-Default origin is `https://milo.grooooog.space`; change `MILO_PUBLIC_URL` if a
-registered static domain is selected instead. The OAuth callback must match
-that origin exactly. Uvicorn removes query strings from its access logs. Inspect
-the deployed Grog version's logging too; OAuth authorization codes must not be
-retained there. The currently published Grog counting proxy retains the path
-without the query string and preserves the incoming Host header.
+Set the Linux launcher's `.data/server.json` to the verified private HTTPS origin:
+`{"url":"https://<Mac Tailscale DNS name>:8443"}`. The launcher opens the private
+inbox using device identity, without an initialization code or password prompt.
+The old public first-start link is ignored for Tailscale origins.
 
-## Initialize and verify
+## Google and verification
 
-Open Milo through the activation script or the paired Linux app and choose the
-owner's Milo password. There is no user-facing initialization code. A private
-owner link is exchanged for a short-lived Secure/HttpOnly cookie; a public
-visitor without that authorization cannot initialize or claim the server.
-Configure the Google web client using [Google setup](GOOGLE.md).
+Keep the registered Google redirect URI on the public static Grog domain:
+`https://milo.grooooog.space/api/oauth/google/callback`. The public handler relays
+only bounded state/code/error values to the fixed configured private callback.
+It does not exchange codes or read the archive. PKCE, single-use state and the
+browser nonce are checked by the private backend. Success/error returns to the
+private client. Both services strip query strings from Uvicorn access logs.
 
-For the owner's Linux installation, keep its first-start link in
-`.data/setup.url` with mode 0600. The launcher checks that the link belongs to
-the configured HTTPS origin and opens it automatically. The UI immediately
-removes the private fragment from the address and never places it in a form.
-Never publish this file or an owner link. After password setup, the authorization
-is consumed and the same installed app opens the normal login or inbox.
+Verify the deployed public landing and 404 responses for `/api/login`, `/api/state`,
+`/api/messages` and `/static/app.js`. On the owner's actual Tailscale device,
+verify the private inbox opens without a password and uses the existing accounts.
+Check persistence after a service restart. `scripts/restart_server.py` requests
+termination only after verifying the exact Grog-supervised Milo listener; Grog
+relaunches it. Reboot/logout behavior depends on the owner's Grog launch agent.
 
-Before treating deployment as ready:
-
-- Check HTTPS and confirm unauthenticated `/api/state` returns 401.
-- Confirm setup is one-time and cookies are Secure/HttpOnly.
-- Authorize a real mailbox; verify sync and persistence across a service restart.
-- Open the same origin on Linux and iPhone and confirm they share settings,
-  account identities and message changes.
-- Check the Grog launch agent survives logout/reboot as configured on this Mac.
-
-The Linux launcher can point to the shared service by setting `MILO_SERVER_URL`
-or by writing its origin to `.data/server.json` as `{"url":"https://milo.grooooog.space"}`.
+The desktop client remains a dedicated Chromium window. Native iOS, push and
+offline mailbox reading remain future work.

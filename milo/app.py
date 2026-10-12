@@ -33,7 +33,13 @@ from .store import Store
 
 
 def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434", secure_cookies=False,
-               public_url="http://127.0.0.1:8025", google_client=None):
+               public_url="http://127.0.0.1:8025", google_client=None, private_url=None, tailscale_owners=None):
+    owners = frozenset(tailscale_owners or ())
+    if bool(private_url) != bool(owners):
+        raise ValueError("Private access requires an HTTPS origin and an explicit owner allowlist")
+    if private_url and (urlsplit(private_url).scheme != "https" or not secure_cookies):
+        raise ValueError("Private access requires HTTPS and secure cookies")
+    client_url = (private_url or public_url).rstrip("/")
     store = Store(directory)
     ai = AI(store, ollama_url)
     engine = SyncEngine(store, ai)
@@ -77,14 +83,32 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         if worker_loop and not demo:
             worker_loop.call_soon_threadsafe(wake_worker.set)
 
-    app = FastAPI(title="Milo", version="0.1.0", lifespan=lifespan, docs_url=None, redoc_url=None)
+    app = FastAPI(title="Milo", version="0.1.0", lifespan=lifespan, docs_url=None, redoc_url=None,
+                  openapi_url=None)
     app.state.store, app.state.engine, app.state.ai, app.state.google = store, engine, ai, google
+
+    def owner(request):
+        # Tailscale Serve strips supplied identity headers, then adds its own.
+        # The backend must bind loopback, with Uvicorn proxy_headers disabled.
+        return bool(owners and request.client and request.client.host in {"127.0.0.1", "::1"}
+                    and request.headers.get("tailscale-user-login") in owners)
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
+        if owners:
+            local_health = (request.method == "GET" and request.url.path == "/api/status"
+                            and request.client and request.client.host in {"127.0.0.1", "::1"}
+                            and urlsplit("http://" + request.headers.get("host", "")).hostname
+                            in {"localhost", "127.0.0.1", "::1"})
+            if (not owner(request) and not local_health) or request.url.path in {
+                "/api/login", "/api/logout", "/api/setup", "/api/setup/authorize", "/api/setup/status"
+            }:
+                return Response(status_code=404, headers={"Cache-Control": "no-store"})
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin")
-            if origin and urlsplit(origin).netloc != request.headers.get("host"):
+            expected = urlsplit(client_url).netloc if owners else request.headers.get("host")
+            if origin and (urlsplit(origin).netloc != expected
+                           or (owners and urlsplit(origin).scheme != urlsplit(client_url).scheme)):
                 return Response(status_code=403)
             if request.headers.get("sec-fetch-site") == "cross-site":
                 return Response(status_code=403)
@@ -100,7 +124,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         return response
 
     def auth(request: Request):
-        if not demo and not store.valid_session(request.cookies.get("milo_session")):
+        if not owner(request) and not demo and not store.valid_session(request.cookies.get("milo_session")):
             raise HTTPException(401, "Accedi a Milo")
 
     def live():
@@ -114,9 +138,13 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         return message
 
     @app.get("/api/status")
-    def status(request: Request):
-        authenticated = demo or store.valid_session(request.cookies.get("milo_session"))
-        return {"service": "milo", "demo": demo, "initialized": bool(store.setting("password")), "authenticated": authenticated,
+    def status(request: Request, response: Response):
+        trusted = owner(request)
+        if trusted and not store.valid_session(request.cookies.get("milo_session")):
+            issue_session(response)
+        authenticated = trusted or (not owners and (demo or store.valid_session(request.cookies.get("milo_session"))))
+        return {"service": "milo", "demo": demo, "initialized": bool(owners or store.setting("password")), "authenticated": authenticated,
+                "access": "tailscale" if owners else "password",
                 "version": "0.1.0"}
 
     def issue_session(response):
@@ -198,9 +226,9 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         try:
             account_id = google.finish(state, request.cookies.get("milo_oauth"), "" if error else code)
         except (ValueError, RuntimeError) as exc:
-            response = RedirectResponse(google.public_url + "/#google_error=" + quote(str(exc), safe=""), 303)
+            response = RedirectResponse(client_url + "/#google_error=" + quote(str(exc), safe=""), 303)
         else:
-            response = RedirectResponse(google.public_url + "/#google_connected=1", 303)
+            response = RedirectResponse(client_url + "/#google_connected=1", 303)
             issue_session(response)
             account = next(a for a in store.accounts(private=True) if a["id"] == account_id)
             background.add_task(engine.sync_account, account)
@@ -405,7 +433,11 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         if not any(a["id"] == data.account_id for a in store.accounts()):
             raise HTTPException(404, "Account non trovato")
         draft_id = data.id or uuid.uuid4().hex
-        store.execute("INSERT OR REPLACE INTO drafts VALUES(?,?,?)", (draft_id, data.model_dump_json(), time.time()))
+        with store.lock:
+            existing = store.rows("SELECT data FROM drafts WHERE id=?", (draft_id,))
+            if existing and data.revision and json.loads(existing[0]["data"]).get("revision", 0) > data.revision:
+                raise HTTPException(409, "Questa bozza contiene modifiche più recenti. La tua copia resta nelle bozze in attesa.")
+            store.execute("INSERT OR REPLACE INTO drafts VALUES(?,?,?)", (draft_id, data.model_dump_json(), time.time()))
         return {"id": draft_id}
 
     @app.delete("/api/drafts/{draft_id}", dependencies=[Depends(auth)])

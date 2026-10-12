@@ -81,8 +81,11 @@ class DraftInput(BaseModel):
     account_id: str
     to: str = Field(max_length=2000)
     subject: str = Field(max_length=998)
-    body: str = Field(max_length=100000)
+    body: str = Field(max_length=1_000_000)
     reply_to_id: str | None = None
+    context_message_id: str | None = None
+    mode: Literal["new", "reply", "forward"] = "new"
+    revision: int = Field(default=0, ge=0)
 
 
 class AISettings(BaseModel):

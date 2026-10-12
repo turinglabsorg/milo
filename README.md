@@ -58,8 +58,10 @@ uv run milo --data .data/live
   Deleting a conversation removes it from the list immediately and queues a
   move to the provider's trash in the background. IMAP requires a Trash folder
   and MOVE; a failed move stays queued and the local conversation stays hidden.
-- Shared drafts and explicit SMTP sending over TLS/STARTTLS, reply headers and
-  sent-mail caching. Ambiguous failures are never automatically resent.
+- Inline conversation replies and forwards, collapsed quoted history, normalized
+  repeated reply prefixes, drafts up to one million characters, automatic saving
+  and recovery after a failed save. Shared drafts and explicit SMTP sending over
+  TLS/STARTTLS, reply headers and sent-mail caching. Ambiguous failures are never automatically resent.
 - Shared account names, pause/resume and encrypted IMAP credential updates.
   Google reconnection checks that the chosen mailbox matches the original one.
 - Gmail local edits and explicit sending stay responsive during mailbox sync;
@@ -99,10 +101,13 @@ guarantee factual accuracy.
 ## One configuration across devices
 
 Use **one running Milo service**, not separate archives on each device. Another
-browser connecting to the same service and signing in with the same passphrase
-receives the stored accounts, mail, preferences and drafts. Messages never live
-in browser localStorage. The service polls providers every 60 seconds and the
-UI refreshes every 30 seconds while visible. Only the web app shell is cached
+client connecting to that service receives the stored accounts, mail, preferences
+and drafts. The permanent Mac deployment uses owner-only Tailscale device access;
+its public domain serves only a landing and OAuth relay, with no password endpoint.
+Standalone local development retains password authentication. Received mail and
+tokens stay on the server. Unsaved draft edits have a local recovery copy until
+the server acknowledges them. The service polls providers every 60 seconds and
+the UI refreshes every 2–10 seconds while visible. Only the web app shell is cached
 offline; offline mailbox reading is still on the roadmap.
 
 For access from iOS, the service needs a stable HTTPS address reachable by the

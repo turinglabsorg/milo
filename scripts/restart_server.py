@@ -9,10 +9,13 @@ from pathlib import Path
 
 
 def main():
-    with urllib.request.urlopen('http://127.0.0.1:8025/api/status', timeout=5) as response:
-        status = json.load(response)
-    if status.get('service') != 'milo' or status.get('demo'):
-        raise SystemExit('Port 8025 is not the production Milo service')
+    with urllib.request.urlopen('http://127.0.0.1:8025/', timeout=5) as response:
+        public = response.headers.get('X-Milo-Surface') == 'public'
+    if not public:
+        with urllib.request.urlopen('http://127.0.0.1:8025/api/status', timeout=5) as response:
+            status = json.load(response)
+        if status.get('service') != 'milo' or status.get('demo'):
+            raise SystemExit('Port 8025 is not the production Milo service')
     pids = subprocess.check_output(['lsof', '-t', '-nP', '-iTCP:8025', '-sTCP:LISTEN'], text=True).split()
     if len(set(pids)) != 1:
         raise SystemExit('Milo listener is not unique')

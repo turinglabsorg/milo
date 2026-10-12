@@ -62,6 +62,8 @@ def open_window(url):
 
 def owner_setup_url(server):
     """Attach this installed client's private first-start authorization, never display it."""
+    if urlsplit(server).hostname.endswith('.ts.net'):
+        return server  # Device identity replaces first-start and password grants.
     pairing = ROOT / ".data/setup.url"
     if not pairing.exists():
         return server

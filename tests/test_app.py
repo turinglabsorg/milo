@@ -141,6 +141,33 @@ def test_drafts_can_be_sent_only_once_explicitly(logged_in, account_data, monkey
     assert client.get("/api/messages?view=sent").json()["messages"][0]["subject"] == "Re: Hello"
 
 
+def test_large_forward_saves_sends_intact_and_stale_autosave_is_rejected(logged_in, account_data, monkeypatch):
+    client = logged_in
+    message_id = add_mail(client, account_data)
+    account_id = client.app.state.store.accounts()[0]['id']
+    body = 'Original full message.\n' * 10000 + 'LAST-LINE'
+    draft = {'id': 'large-forward', 'account_id': account_id, 'to': 'recipient@example.com',
+             'subject': 'Fwd: Project', 'body': body, 'mode': 'forward', 'context_message_id': message_id, 'revision': 2}
+    assert client.put('/api/drafts', json=draft).status_code == 200
+    assert client.put('/api/drafts', json={**draft, 'body': 'older text', 'revision': 1}).status_code == 409
+    assert client.get('/api/drafts').json()['drafts'][0]['body'] == body
+    sent = []
+
+    def transport(account, saved_draft, original):
+        assert saved_draft['body'] == body and original is None
+        message = EmailMessage()
+        message['From'] = account['email']
+        message['To'] = saved_draft['to']
+        message['Subject'] = saved_draft['subject']
+        message.set_content(saved_draft['body'])
+        sent.append(message)
+        return message
+
+    monkeypatch.setattr('milo.app.send_mail', transport)
+    assert client.post('/api/drafts/large-forward/send').status_code == 200
+    assert len(sent) == 1 and sent[0].get_content().rstrip('\n') == body
+
+
 def test_filters_are_literal_and_apply_to_existing_mail(logged_in, account_data):
     client = logged_in
     message_id = add_mail(client, account_data, raw_mail("100% ready"))

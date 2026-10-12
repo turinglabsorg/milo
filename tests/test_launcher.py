@@ -58,3 +58,12 @@ def test_owner_authorization_file_must_be_private(tmp_path, monkeypatch):
     pairing.symlink_to(private)
     with pytest.raises(RuntimeError, match="protetta"):
         launch.owner_setup_url("https://milo.example")
+
+
+def test_private_device_access_ignores_old_public_setup_link(tmp_path, monkeypatch):
+    data = tmp_path / '.data'
+    data.mkdir()
+    (data / 'setup.url').write_text('https://public.example#setup=' + 'x' * 32)
+    monkeypatch.setattr(launch, 'ROOT', tmp_path)
+    url = 'https://owner.example.ts.net:8443'
+    assert launch.owner_setup_url(url) == url

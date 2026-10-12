@@ -6,7 +6,6 @@ import plistlib
 import shlex
 import shutil
 import socket
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -14,6 +13,8 @@ import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
+
+from milo.private import private_config
 
 ORIGIN = "https://milo.grooooog.space"
 HOST = "milo.grooooog.space"
@@ -106,6 +107,9 @@ def check_port(sites_path):
     if not isinstance(sites, dict) or HOST not in sites:
         raise RuntimeError("La porta 8025 è occupata; non pubblico il servizio che la sta usando.")
     try:
+        with urlopen(f"http://127.0.0.1:{PORT}/", timeout=3) as response:
+            if response.headers.get('X-Milo-Surface') == 'public':
+                return
         with urlopen(f"http://127.0.0.1:{PORT}/api/status", timeout=3) as response:
             status = json.load(response)
         if status.get("service") == "milo" and status.get("demo") is False:
@@ -119,15 +123,17 @@ def verify_service():
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         try:
-            with urlopen(ORIGIN + "/api/status", timeout=5) as response:
-                status = json.load(response)
-            if status.get("service") == "milo" and status.get("demo") is False:
-                try:
-                    urlopen(ORIGIN + "/api/state", timeout=5).close()
-                except HTTPError as error:
-                    if error.code == 401:
-                        return status
-                raise RuntimeError("La verifica dell'accesso privato non è riuscita.")
+            with urlopen(ORIGIN + "/", timeout=5) as response:
+                public = response.headers.get('X-Milo-Surface') == 'public'
+            if public:
+                for path in ('/api/login', '/api/state', '/static/app.js'):
+                    try:
+                        urlopen(ORIGIN + path, timeout=5).close()
+                    except HTTPError as error:
+                        if error.code == 404:
+                            continue
+                    raise RuntimeError("Il dominio pubblico espone ancora l'applicazione.")
+                return
         except (URLError, json.JSONDecodeError):
             time.sleep(2)
     raise RuntimeError("Il dominio non risponde ancora come Milo. La configurazione è salvata, "
@@ -156,19 +162,14 @@ def main():
                 atomic_write(agent, payload)
             subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(agent)], check=True)
         print("Milo registrato nel servizio permanente Grog. Verifico HTTPS…", flush=True)
-        status = verify_service()
-        url = ORIGIN
-        if not status.get("initialized"):
-            legacy = root / ".data/live"
-            archive = legacy if (legacy / "mail.sqlite").exists() else home / "Library/Application Support/Milo"
-            with sqlite3.connect(f"{(archive / 'mail.sqlite').as_uri()}?mode=ro", uri=True) as database:
-                row = database.execute("SELECT value FROM settings WHERE key='bootstrap'").fetchone()
-            if row and json.loads(row[0]):
-                url += "#setup=" + json.loads(row[0])
-        subprocess.run(["open", url], check=True)
-        print(ORIGIN + " è attivo. Nel browser scegli la passphrase, poi collega Google.")
-        print("Questo avvio non autorizza ancora una casella Google: serve Continua con Google.")
-    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, sqlite3.Error) as error:
+        verify_service()
+        legacy = root / ".data/live"
+        archive = legacy if (legacy / "mail.sqlite").exists() else home / "Library/Application Support/Milo"
+        config = archive / 'private-server.json'
+        if config.exists():
+            subprocess.run(["open", private_config(config)['url']], check=True)
+        print("Pagina pubblica verificata. L'archivio si apre soltanto dall'indirizzo privato Tailscale.")
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         raise SystemExit(str(error)) from error
 
 

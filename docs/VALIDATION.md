@@ -88,3 +88,35 @@ HTML safety, dark-mode persistence, colors and removal before the DELETE respons
 The owner-authorized live diagnostic confirms successful Gmail profile/list
 responses and recovery of the previously reported account/outbox errors.
 This does not identify the original transient rejection's precise cause.
+
+## Private access, compose recovery and latency — 2026-10-12
+
+The current local suite passes 97 tests (nine opt-in browser tests run separately
+and also pass). An additional launcher regression verifies that Tailscale device
+access ignores the old public setup link. Chromium tests on desktop and mobile
+verify collapsed quoted HTML and its expanding/shrinking iframe, normalized reply
+prefixes, intact forwarding beyond 100,000 characters, immediate draft closure
+before a failing HTTP response, recovery after reload, and focus/caret retention
+during synchronization. AI reply loading and its result stay inline; user edits
+made during generation are preserved. A controlled mail transport verifies large
+forward sending intact without contacting a real recipient.
+
+Public-route checks verify that login, setup, account, message, attachment and
+draft routes all return 404 even with forged cookies and identity headers. The
+private backend accepts only the configured owner identity from a loopback proxy;
+other identities and network-supplied identity headers are rejected. Actual local
+production parent/child processes were launched against an isolated archive,
+verified and stopped gracefully with both ports released.
+
+A local 10,000-message archive exposed a missing expression index: list requests
+initially exceeded five seconds. After adding the conversation index, measured
+list latency was approximately 38 ms at the 95th percentile, visible inbox 138 ms,
+slowest sampled conversation opening 66 ms, and 35 keystrokes in a 196,000-character
+draft 443 ms. The list payload was 39,514 bytes. Measurements use synthetic test
+messages and the local development machine; they are not a guarantee of network
+or provider latency. Machine-readable measurements are written to the ignored
+`test-results/performance.json`.
+
+These local checks do not establish a completed production privacy cutover.
+Production Tailscale access and public landing deployment must be verified
+separately before reporting them as live.
