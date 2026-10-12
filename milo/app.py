@@ -2,6 +2,7 @@ import asyncio
 import email
 import hashlib
 import json
+import math
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -271,9 +272,9 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                 "google": google.status(), "rules": store.rules(),
                 "pending": store.rows("SELECT kind,error,COUNT(*) AS count FROM outbox GROUP BY kind,error"),
                 "counts": {"inbox": inbox["count"], "unread": inbox["unread"] or 0,
-                           "starred": store.rows("SELECT COUNT(*) AS count FROM messages WHERE hidden=0 AND trashed=0 AND starred=1")[0]["count"],
+                           "starred": store.rows("SELECT COUNT(DISTINCT account_id || ':' || COALESCE(thread_id,id)) AS count FROM messages WHERE hidden=0 AND trashed=0 AND starred=1")[0]["count"],
                            "drafts": store.rows("SELECT COUNT(*) AS count FROM drafts")[0]["count"],
-                           "snoozed": store.rows("SELECT COUNT(*) AS count FROM messages WHERE hidden=0 AND trashed=0 AND snoozed_until>?",
+                           "snoozed": store.rows("SELECT COUNT(DISTINCT account_id || ':' || COALESCE(thread_id,id)) AS count FROM messages WHERE hidden=0 AND trashed=0 AND snoozed_until>?",
                                                  (time.time(),))[0]["count"]}}
 
     @app.post("/api/accounts", dependencies=[Depends(auth)])
@@ -321,6 +322,24 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     @app.get("/api/messages", dependencies=[Depends(auth)])
     def messages(view="inbox", category: str | None = None, account: str | None = None, search=""):
         return {"messages": store.conversations(view, category, account, search[:300])}
+
+    @app.get("/api/client/messages", dependencies=[Depends(auth)])
+    def client_messages(before_date: float | None = None, before_id: str = ""):
+        if (before_date is None) != (not before_id) or len(before_id) > 128 or (before_date is not None and not math.isfinite(before_date)):
+            raise HTTPException(422, "Cursore non valido")
+        before = (before_date, before_id) if before_id else None
+        messages = store.conversations(view="all", limit=201, before=before, chronological=True)
+        more = len(messages) > 200
+        messages = messages[:200]
+        last = messages[-1] if messages else None
+        return {"messages": messages, "next": {"before_date": last["date"], "before_id": last["id"]} if more else None}
+
+    @app.get("/api/client/thread", dependencies=[Depends(auth)])
+    def client_thread(account: str, thread: str):
+        messages = store.conversations(view="all", account=account, thread=thread, limit=1)
+        if not messages:
+            raise HTTPException(404, "Conversazione non trovata")
+        return {"message": messages[0]}
 
     @app.get("/api/messages/{message_id}/recipients", dependencies=[Depends(auth)])
     def message_recipients(message_id: str):
@@ -370,6 +389,12 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     def get_thread(message_id: str, background: BackgroundTasks, load_images: bool = False, lazy: bool = False):
         message_or_404(message_id, metadata=True)
         messages = store.conversation(message_id, raw=not lazy, metadata=lazy)
+        if lazy and messages:
+            source = next((message for message in reversed(messages) if not message["sent"]), messages[-1])
+            try:
+                source.update(message_recipients(source["id"]))
+            except HTTPException:
+                pass
         for message in messages:
             if lazy:
                 message["body_loaded"] = False

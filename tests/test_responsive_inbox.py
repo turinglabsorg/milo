@@ -94,6 +94,7 @@ def test_threads_theme_html_pin_and_optimistic_delete(tmp_path, width, height):
         page.locator('[name="theme"]').select_option('dark')
         assert page.locator('html').get_attribute('data-theme') == 'dark'
         page.get_by_role('button', name='Salva aspetto', exact=True).click()
+        expect(page.get_by_role('dialog')).to_have_count(0)
         page.reload()
         expect(page.locator('.message-row')).to_have_count(2)
         assert page.locator('html').get_attribute('data-theme') == 'dark'

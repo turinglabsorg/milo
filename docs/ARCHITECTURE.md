@@ -112,8 +112,12 @@ second IMAP configuration is introduced by that client. The shared client now re
 IndexedDB cache and queues offline metadata/trash edits. Thread indices are
 separate from immutable versioned bodies, and metadata refreshes do not download
 old content again. Native iOS must implement persistent local storage and the
-same offline behavior; see [the required cache contract](CLIENT_CACHE.md). A full
-archive-wide incremental change feed and native device cache remain future work.
+same offline behavior; see [the required cache contract](CLIENT_CACHE.md). The normalized local catalogue uses a paged metadata snapshot and verifies missing
+threads before removing them. A dedicated worker indexes downloaded bodies for
+local word search. Idempotent edits and safe preferences enter a serialized local
+journal in both online and offline modes; background HTTP acknowledgement cannot
+overwrite a newer local intent. An incremental change feed and native device
+cache remain future work.
 
 ## Trust and open work
 

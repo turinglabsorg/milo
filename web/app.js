@@ -1,4 +1,5 @@
 import {deviceCache} from './cache.js';
+import {replica} from './replica.js';
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const paths = {
@@ -24,6 +25,8 @@ const categoryNames = {people:'Persone', updates:'Notifiche', newsletters:'Newsl
 const viewNames = {inbox:'Smart inbox', starred:'Preferiti', drafts:'Bozze', sent:'Posta inviata', snoozed:'Per dopo', archive:'Archivio'};
 let toastTimer, searchTimer, autosaveTimer, localDraftTimer;
 S.pendingDrafts=new Map();S.draftWrites=new Map();S.discardedDrafts=new Set();
+S.pendingSettings=new Map();S.queueErrors=new Map();S.remoteTicket=0;
+try{for(const id of JSON.parse(localStorage.getItem('milo-discarded-drafts')||'[]'))S.discardedDrafts.add(id);}catch{}
 try{for(const draft of JSON.parse(localStorage.getItem('milo-pending-drafts')||'[]'))if(draft.id&&typeof draft.body==='string')S.pendingDrafts.set(draft.id,draft);}catch{}
 const systemTheme=matchMedia('(prefers-color-scheme: dark)');
 function applyTheme(theme=S.theme) {
@@ -41,24 +44,26 @@ function skeleton(lines=4,kind='block',label='Caricamento…') {
 function syncMarkup() {
   const active=(S.state.sync||[]).filter(p=>['connecting','downloading','applying'].includes(p.phase));
   const count=active.reduce((n,p)=>n+(p.downloaded||0),0);
-  const pending=(S.state.pending||[]).reduce((n,p)=>n+p.count,0)+S.optimistic.size;
-  const text=active.some(p=>p.phase==='downloading')?`Scarico messaggi · ${count} salvati`:active.some(p=>p.phase==='applying')?'Sincronizzo le modifiche':active.length||S.syncing?'Collegamento alla posta…':pending?`${pending} modifiche in sincronizzazione`:S.online?'Posta aggiornata':'Connessione interrotta';
+  const pending=(S.state.pending||[]).reduce((n,p)=>n+p.count,0)+S.optimistic.size+S.pendingSettings.size;
+  const text=S.queueErrors.size?'Modifiche da controllare · riprova con Sincronizza':active.some(p=>p.phase==='downloading')?`Scarico messaggi · ${count} salvati`:active.some(p=>p.phase==='applying')?'Sincronizzo le modifiche':active.length||S.syncing?'Collegamento alla posta…':pending?`${pending} ${pending===1?"modifica":"modifiche"} in sincronizzazione`:S.online?'Posta aggiornata':'Connessione interrotta';
   return `<span class="sync-status ${active.length||S.syncing?'working':''}" role="status">${icon(active.length||S.syncing?'refresh':'check')}<span>${esc(text)}</span></span>`;
 }
 
 const temporarilyUnavailable=error=>!error.status||error.status>=500||[408,429].includes(error.status);
 async function api(path, method='GET', body) {
+  const started=replica.revision;
   let response;
   try { response = await fetch('/api' + path, {method, signal:AbortSignal.timeout(method==='GET'?12000:60000), credentials:'same-origin', headers:body ? {'Content-Type':'application/json'} : {}, body:body ? JSON.stringify(body) : undefined}); }
   catch { S.online=false; throw new Error('Connessione a Milo interrotta. I dati salvati restano sul servizio.'); }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if ((response.status === 401 || response.status===404&&['/status','/state'].includes(path)) && S.status?.authenticated) { await deviceCache.clear(); S.status.authenticated=false; renderLogin(); }
+    if ((response.status === 401 || response.status===404&&['/status','/state'].includes(path)) && S.status?.authenticated) { replica.clear();await deviceCache.clear();S.optimistic.clear();S.pendingSettings.clear();S.queueErrors.clear();S.readerVersion++;S.readerAnchor=null;S.selected=null;S.thread=[];S.status.authenticated=false;renderLogin(); }
     const message = Array.isArray(data.detail) ? data.detail.map(item => item.msg).join('; ') : data.detail;
     const error=new Error(message || 'Operazione non riuscita');error.status=response.status;if(temporarilyUnavailable(error))S.online=false;throw error;
   }
   S.online=true;
-  if(method==='GET'&&(/^(?:\/status|\/state|\/recap|\/messages(?:[/?]|$)|\/drafts)/.test(path)))deviceCache.set('api:'+path,data).then(saved=>{if(!saved&&!S.cacheWarning){S.cacheWarning=true;toast('Cache locale non disponibile. I messaggi restano sul server, ma non saranno disponibili offline su questo dispositivo.');}});
+  const immutable=/^\/messages\/[^/?]+(?:\?.*)?$/.test(path)||/^\/messages\/[^/]+\/recipients$/.test(path);
+  if(method==='GET'&&(started===replica.revision||immutable&&S.status?.authenticated)&&(/^(?:\/status|\/state|\/recap|\/messages(?:[/?]|$)|\/drafts)/.test(path)))deviceCache.set('api:'+path,data).then(saved=>{if(!saved&&S.status?.authenticated&&!S.cacheWarning){S.cacheWarning=true;toast('Cache locale non disponibile. I messaggi restano sul server, ma non saranno disponibili offline su questo dispositivo.');}});
   return data;
 }
 
@@ -209,33 +214,78 @@ function renderReading() {
   if(S.compose?.inline&&S.selected&&S.compose.thread_key===threadKey(S.selected)){renderInlineComposer(editor);if(editor&&editor.contains(active)){active.focus({preventScroll:true});if(caret)active.setSelectionRange(...caret);}}
 }
 
-async function refresh(resetSelection=false,showLoading=false) {
-  if (!S.status?.authenticated) return;
-  const version=++S.listVersion;
-  const view=S.view,params=new URLSearchParams({view,search:S.search});
-  if(S.category&&view==='inbox')params.set('category',S.category);
-  if(S.account)params.set('account',S.account);
-  if(showLoading){S.loadingList=true;renderList();}
-  const cachePath=view==='drafts'?'/drafts':'/messages?'+params;
-  const [cachedState,cachedList]=await Promise.all([deviceCache.get('api:/state'),deviceCache.get('api:'+cachePath)]);
-  if(version!==S.listVersion)return;
-  if(cachedState&&cachedList){
-    S.state=cachedState;renderChrome();
-    const before=JSON.stringify(S.messages);
-    if(view==='drafts'){const drafts=new Map(cachedList.drafts.map(d=>[d.id,d]));for(const draft of S.pendingDrafts.values())drafts.set(draft.id,{...draft,pending:true});S.drafts=[...drafts.values()].filter(d=>!S.discardedDrafts.has(d.id));S.messages=[];}
-    else S.messages=cachedList.messages.filter(m=>!S.optimistic.get(threadKey(m))?.deleted).map(m=>({...m,...S.optimistic.get(threadKey(m))?.patch}));
-    const repaint=S.loadingList||before!==JSON.stringify(S.messages);S.loadingList=false;if(repaint)renderList();
+const viewRequests=new Map();
+function currentQuery(){return {view:S.view,account:S.account,category:S.category,search:S.search};}
+function listPath(query=currentQuery()){
+  const params=new URLSearchParams({view:query.view,search:query.search});
+  if(query.category&&query.view==='inbox')params.set('category',query.category);
+  if(query.account)params.set('account',query.account);
+  return query.view==='drafts'?'/drafts':'/messages?'+params;
+}
+function applyState(state){
+  const counts=S.optimistic.size?S.state.counts:state.counts;S.state={...state,counts};
+  for(const operation of S.pendingSettings.values()){
+    if(operation.account_id)S.state.accounts=S.state.accounts.map(a=>a.id===operation.account_id?{...a,...operation.body}:a);
+    else S.state[operation.setting]=operation.body;
   }
-  try {
-    const path=view==='drafts'?'/drafts':'/messages?'+params;
-    const [state,list]=await Promise.all([api('/state').catch(async error=>{if(!temporarilyUnavailable(error))throw error;return await deviceCache.get('api:/state')||Promise.reject(error);}),api(path).catch(async error=>{if(!temporarilyUnavailable(error))throw error;return await deviceCache.get('api:'+path)||(view==='drafts'&&S.pendingDrafts.size?{drafts:[]}:Promise.reject(error));})]);
-    if(version!==S.listVersion)return;
-    S.state=state;renderChrome();if(!$('#appearance-form'))applyTheme(state.appearance?.theme||S.theme);
-    if(view==='drafts'){const drafts=new Map(list.drafts.map(d=>[d.id,d]));for(const draft of S.pendingDrafts.values())drafts.set(draft.id,{...draft,pending:true});S.drafts=[...drafts.values()].filter(d=>!S.discardedDrafts.has(d.id));S.messages=[];}
-    else S.messages=list.messages.filter(m=>!S.optimistic.get(threadKey(m))?.deleted).map(m=>({...m,...S.optimistic.get(threadKey(m))?.patch}));
-    S.messages.sort((a,b)=>(b.pinned||0)-(a.pinned||0)||b.date-a.date);
-    if(resetSelection){S.selected=null;S.thread=[];S.readerAnchor=null;}
-  } finally {if(version===S.listVersion)S.loadingList=false;}
+  if(!$('#appearance-form'))applyTheme(S.state.appearance?.theme||S.theme);renderChrome();
+}
+function paintLocal(){
+  if(!S.status?.authenticated||!$('#list-panel'))return;
+  if(S.view==='drafts'){
+    const drafts=new Map((S.cachedDrafts||[]).map(d=>[d.id,d]));
+    for(const draft of S.pendingDrafts.values())drafts.set(draft.id,{...draft,pending:true});
+    S.drafts=[...drafts.values()].filter(d=>!S.discardedDrafts.has(d.id));S.messages=[];
+  }else S.messages=replica.select(currentQuery(),listPath(),S.optimistic);
+  S.loadingList=S.view!=='drafts'&&!replica.available;renderList();renderChrome();
+  if(S.selected){const latest=replica.find(threadKey(S.selected));const fields=['subject','sender','sender_email','preview','date','read','starred','archived','pinned','category','message_count','analyzed_count'];if(latest&&!latest.deleted&&fields.some(field=>latest[field]!==S.selected[field])){S.selected={...S.selected,...Object.fromEntries(fields.map(field=>[field,latest[field]]))};renderReading();}}
+}
+replica.onChange(()=>{if(S.search)paintLocal();});
+function revalidateView(query=currentQuery()){
+  const path=listPath(query);if(viewRequests.has(path))return viewRequests.get(path);
+  const started=replica.revision,ticket=++S.remoteTicket;
+  const promise=(async()=>{
+    try{
+      const [state,list]=await Promise.all([api('/state'),api(path)]);
+      if(!S.status?.authenticated)return;
+      if(started===replica.revision&&ticket>=(S.stateTicket||0)){S.stateTicket=ticket;applyState(state);}
+      if(query.view==='drafts'){if(started===replica.revision)S.cachedDrafts=list.drafts;}
+      else{replica.merge(list.messages,query.view,started,ticket);replica.rememberQuery(path,list.messages);}
+      paintLocal();
+    }catch(error){
+      if(!temporarilyUnavailable(error)&&S.status?.authenticated)toast(error.message);
+      if(S.status?.authenticated){S.loadingList=false;paintLocal();}
+    }finally{
+      viewRequests.delete(path);
+      if(started!==replica.revision&&S.status?.authenticated)revalidateView();
+    }
+  })();viewRequests.set(path,promise);return promise;
+}
+async function refresh(resetSelection=false,showLoading=false){
+  if(!S.status?.authenticated)return;
+  await replica.init();
+  if(resetSelection){S.selected=null;S.thread=[];S.readerAnchor=null;S.readerVersion++;renderReading();}
+  const cached=await deviceCache.get('api:/drafts');if(cached)S.cachedDrafts=cached.drafts;
+  paintLocal();revalidateView();
+}
+let feeding=false,lastFeed=0;
+async function refreshCatalogue(){
+  if(feeding||!S.online||!S.status?.authenticated||Date.now()-lastFeed<20000)return;
+  feeding=true;lastFeed=Date.now();
+  try{
+    let cursor;const previous=replica.keys(),seen=new Set();
+    do{
+      const started=replica.revision,ticket=++S.remoteTicket;
+      const data=await api('/client/messages'+(cursor?'?'+new URLSearchParams(cursor):''));
+      if(!S.status?.authenticated)return;
+      replica.merge(data.messages,'all',started,ticket);for(const row of data.messages)seen.add(threadKey(row));paintLocal();cursor=data.next;
+    }while(cursor&&S.online);
+    for(const id of previous.filter(id=>!seen.has(id))){
+      const row=replica.find(id),started=replica.revision,ticket=++S.remoteTicket;try{const data=await api('/client/thread?'+new URLSearchParams({account:row.account_id,thread:row.thread_id||row.id}));if(S.status?.authenticated)replica.merge([data.message],'all',started,ticket);}
+      catch(error){if(error.status===404){replica.remove(id);if(S.selected&&threadKey(S.selected)===id){S.readerVersion++;S.readerAnchor=null;S.selected=null;S.thread=[];renderReading();}}}
+    }
+    paintLocal();await replica.commit();
+  }catch{}finally{feeding=false;}
 }
 const bodyRequests=new Map();
 const bodyPath=id=>'/messages/'+encodeURIComponent(id)+(S.images?'?load_images=true':'');
@@ -249,10 +299,11 @@ function displayBody(item){
   slot.querySelectorAll('.email-html').forEach(frame=>frame._observer?.disconnect());
   slot.innerHTML=bodyMarkup(item);fitFrames(slot);
 }
-async function ensureBody(id){
+async function ensureBody(id,background=false){
   const version=S.readerVersion,path=bodyPath(id),metadata=S.thread.find(m=>m.id===id);
   if(!metadata)return null;
   if(metadata.body_loaded)return metadata;
+  if(background&&await deviceCache.has('api:'+path))return metadata;
   let message=await deviceCache.get('api:'+path);
   if(message&&metadata.content_version&&message.content_version!==metadata.content_version)message=null;
   if(!message){
@@ -263,6 +314,7 @@ async function ensureBody(id){
       throw error;
     }
   }
+  replica.body(message);if(background)return message;
   if(version!==S.readerVersion)return message;
   const latest=S.thread.find(m=>m.id===id)||metadata,item={...message,...latest,body_loaded:true,body_error:null};
   S.thread=S.thread.map(m=>m.id===id?item:m);if(S.selected?.id===id)S.selected=item;displayBody(item);return item;
@@ -270,12 +322,18 @@ async function ensureBody(id){
 let warmingVersion=0;
 function warmThread(){
   const version=++warmingVersion,ids=S.thread.filter(m=>!m.body_loaded).map(m=>m.id).reverse();
-  setTimeout(async()=>{for(const id of ids){if(version!==warmingVersion||!S.online||document.hidden)break;try{await ensureBody(id);}catch{break;}}},1200);
+  setTimeout(async()=>{for(const id of ids){if(version!==warmingVersion||!S.online||document.hidden)break;try{await ensureBody(id,true);}catch{break;}}},1200);
 }
-async function applyThread(result,id,version){
+async function applyThread(result,id,version,cached=false){
+  if(!cached)replica.observe(result.messages);
   if(version!==S.readerVersion||id!==S.readerAnchor)return;
-  const messages=await Promise.all(result.messages.map(async metadata=>{
+  const visible=new Set([...document.querySelectorAll('.thread-message[open]')].map(el=>el.dataset.threadMessage));visible.add(result.messages.at(-1)?.id);
+  const local=replica.find(threadKey(result.messages[0]||S.selected)),overlay=S.optimistic.get(threadKey(result.messages[0]||S.selected))?.patch||{};
+  const messages=await Promise.all(result.messages.map(async original=>{
+    const metadata={...original,...(cached&&local?{read:local.read,starred:local.starred,pinned:local.pinned}:{}),...overlay};
+    if(!visible.has(metadata.id))return metadata;
     const message=await deviceCache.get('api:'+bodyPath(metadata.id));
+    if(message)replica.body(message);
     return message&&(!metadata.content_version||message.content_version===metadata.content_version)?{...message,...metadata,body_loaded:true}:metadata;
   }));
   if(version!==S.readerVersion||id!==S.readerAnchor)return;
@@ -284,12 +342,26 @@ async function applyThread(result,id,version){
   S.thread=messages;S.threadSync=result.sync||{};if(S.thread.length)S.selected=S.thread.at(-1);
   S.loadingMessage=false;if(changed){renderReading();warmThread();}
 }
+const threadRequests=new Map();
 async function loadThread(id,version=S.readerVersion){
   const path='/messages/'+encodeURIComponent(id)+'/thread?lazy=true';
-  const cached=await deviceCache.get('api:'+path);
-  if(cached)await applyThread(cached,id,version);
-  try{await applyThread(await api(path),id,version);}
-  catch(error){if(!cached||!temporarilyUnavailable(error))throw error;S.online=false;renderChrome();}
+  const cached=await deviceCache.get('api:'+path)||await deviceCache.get('thread:'+threadKey(S.selected));
+  if(cached)await applyThread(cached,id,version,true);
+  let request=threadRequests.get(id);
+  if(!request){request={started:replica.revision,promise:api(path)};threadRequests.set(id,request);request.promise.finally(()=>{if(threadRequests.get(id)===request)threadRequests.delete(id);}).catch(()=>{});}
+  const started=request.started;
+  const remote=(async()=>{
+    try{
+      const result=await request.promise;
+      if(started===replica.revision&&S.status?.authenticated)await applyThread(result,id,version);
+      if(started===replica.revision&&S.status?.authenticated&&result.messages.length)await deviceCache.set('thread:'+threadKey(result.messages[0]),result);
+    }catch(error){
+      if(!cached&&version===S.readerVersion){S.loadingMessage=false;S.threadSync={error:error.message};renderReading();}
+      if(!temporarilyUnavailable(error)&&!cached)throw error;
+      renderChrome();
+    }
+  })();remote.catch(()=>{});
+  if(!cached)await remote;
 }
 async function selectMessage(id,markRead=true) {
   warmingVersion++;const version=++S.readerVersion;
@@ -303,34 +375,45 @@ async function selectMessage(id,markRead=true) {
     if(version===S.readerVersion&&markRead&&S.thread.some(m=>!m.read&&!m.sent))mutate({read:true}).catch(error=>toast(error.message));
   }catch(error){if(version===S.readerVersion){S.loadingMessage=false;S.threadSync={error:error.message};renderReading();}throw error;}
 }
-async function mutate(patch,deleted=false) {
-  if(!S.selected||S.loadingMessage)return;
+function adjustCounts(before,after,deleted=false){
+  const counts={...S.state.counts};
+  const inbox=Number(Boolean(before.has_inbox)),nextInbox=deleted?0:Number(Boolean(after.has_inbox));
+  counts.inbox=Math.max(0,(counts.inbox||0)+nextInbox-inbox);
+  counts.starred=Math.max(0,(counts.starred||0)+(deleted?0:Number(Boolean(after.starred)))-Number(Boolean(before.starred)));
+  counts.unread=Math.max(0,(counts.unread||0)+(deleted||!nextInbox?0:(after.inbox_unread_count??after.unread_count??0))-((before.inbox_unread_count??before.unread_count??0)));
+  counts.snoozed=Math.max(0,(counts.snoozed||0)+(deleted?0:Number(after.snoozed_until>Date.now()/1000))-Number(before.snoozed_until>Date.now()/1000));
+  S.state={...S.state,counts};
+}
+async function mutate(patch,deleted=false){
+  if(!S.selected?.account_id)return;
   if(S.compose&&(deleted||'archived' in patch||'snoozed_until' in patch))closeCompose().catch(error=>toast(error.message));
-  const id=S.readerAnchor,key=threadKey(S.selected),previous=S.selected;
-  const token={patch:{...S.optimistic.get(key)?.patch,...patch},deleted};S.optimistic.set(key,token);
-  S.listVersion++;
-  S.selected={...S.selected,...patch};S.thread=S.thread.map(m=>({...m,...patch}));
-  S.messages=S.messages.map(m=>threadKey(m)===key?{...m,...patch}:m);
-  if(deleted||('archived' in patch&&S.view==='inbox'&&patch.archived)||('snoozed_until' in patch&&S.view==='inbox'))S.messages=S.messages.filter(m=>threadKey(m)!==key);
-  S.messages.sort((a,b)=>(b.pinned||0)-(a.pinned||0)||b.date-a.date);
-  if(deleted||'archived' in patch||'snoozed_until' in patch){S.selected=null;S.thread=[];S.readerAnchor=null;S.readerVersion++;$('.shell')?.classList.remove('has-selection');}
-  renderList();renderReading();renderChrome();
-  try {
-    await api('/messages/'+encodeURIComponent(id)+'/thread',deleted?'DELETE':'PATCH',deleted?undefined:patch);
-    if(S.optimistic.get(key)===token)S.optimistic.delete(key);
-    S.listVersion++;await refresh();renderList();renderChrome();
-    if(deleted)toast('Conversazione eliminata. Sincronizzo il cestino in background.');
-  }catch(error){
-    if(temporarilyUnavailable(error)&&!S.online){
-      const operation={id:crypto.randomUUID(),key,message_id:id,patch,deleted};token.operationId=operation.id;
-      await deviceCache.enqueue(operation);await deviceCache.set('api:/messages?view=inbox&search=',{messages:S.messages});
-      renderChrome();toast('Modifica salvata sul dispositivo. Verrà sincronizzata quando torni online.');return;
-    }
-    if(S.optimistic.get(key)===token)S.optimistic.delete(key);
-    if(S.selected?.id===previous.id)S.selected=previous;
-    await refresh().catch(()=>{});renderList();renderReading();
-    throw error;
-  }
+  const id=S.readerAnchor,key=threadKey(S.selected),before=replica.find(key)||S.selected;
+  const operation={id:crypto.randomUUID(),key,message_id:id,patch,deleted};
+  await deviceCache.enqueue(operation);
+  const token={patch:{...S.optimistic.get(key)?.patch,...patch},deleted,operationId:operation.id};S.optimistic.set(key,token);
+  for(const [id,error] of S.queueErrors)if(error.key===key)S.queueErrors.delete(id);
+  replica.apply(operation);adjustCounts(before,replica.find(key)||{...before,...patch},deleted);
+  const current=S.selected&&threadKey(S.selected)===key;
+  if(current){S.selected={...S.selected,...patch};S.thread=S.thread.map(m=>({...m,...patch}));}S.listVersion++;
+  if(current&&(deleted||'archived' in patch||'snoozed_until' in patch)){S.selected=null;S.thread=[];S.readerAnchor=null;S.readerVersion++;$('.shell')?.classList.remove('has-selection');}
+  paintLocal();renderReading();
+  await deviceCache.set('api:/state',S.state);
+  if(!S.online)toast('Modifica salvata sul dispositivo. Verrà sincronizzata quando torni online.');
+  else if(deleted)toast('Conversazione eliminata. Sincronizzo il cestino in background.');
+  flushClientQueue().catch(()=>{});
+}
+async function savePreference(setting,body,account_id=null){
+  const allowed=account_id?['name','enabled','color']:({identity:['name','aliases','context','reply_language'],appearance:['theme'],ai:['model','automatic','cloud_consent']})[setting];
+  if(!allowed||Object.keys(body).some(key=>!allowed.includes(key)))throw new Error('Preferenza non valida.');
+  const operation={id:crypto.randomUUID(),kind:'setting',key:account_id?'account:'+account_id:'setting:'+setting,
+    setting,account_id,body,method:account_id?'PATCH':'PUT',path:account_id?'/accounts/'+encodeURIComponent(account_id):'/settings/'+setting};
+  if(setting==='identity'&&(body.aliases.length>20||body.aliases.some(alias=>alias.length>80||/[\r\n\0]/.test(alias))))throw new Error('Usa al massimo 20 nomi, ciascuno entro 80 caratteri.');
+  for(const [id,error] of S.queueErrors)if(error.key===operation.key)S.queueErrors.delete(id);
+  replica.apply(operation);S.pendingSettings.set(operation.key,operation);
+  if(account_id)S.state.accounts=S.state.accounts.map(a=>a.id===account_id?{...a,...body}:a);
+  else S.state[setting]=body;
+  renderChrome();await deviceCache.enqueue(operation);await deviceCache.set('api:/state',S.state);
+  flushClientQueue().catch(()=>{});
 }
 
 function showSettings(tab=S.settingsTab) {
@@ -390,7 +473,7 @@ function captureCompose() {
   return {...S.compose};
 }
 function storePendingDrafts(){clearTimeout(localDraftTimer);try{localStorage.setItem('milo-pending-drafts',JSON.stringify([...S.pendingDrafts.values()]));}catch{toast('Spazio locale esaurito. La bozza resta in Bozze finché Milo è aperto; attendi il salvataggio sul server prima di uscire.');}}
-function rememberDraft(draft,immediate=true){if(!draft||(!draft.to&&!draft.subject&&!draft.body))return false;S.pendingDrafts.set(draft.id,{...draft});if(immediate)storePendingDrafts();else{clearTimeout(localDraftTimer);localDraftTimer=setTimeout(storePendingDrafts,200);}return true;}
+function rememberDraft(draft,immediate=true){if(!draft||S.discardedDrafts.has(draft.id)||(!draft.to&&!draft.subject&&!draft.body))return false;if((S.pendingDrafts.get(draft.id)?.revision||0)>draft.revision)return true;S.pendingDrafts.set(draft.id,{...draft});if(immediate)storePendingDrafts();else{clearTimeout(localDraftTimer);localDraftTimer=setTimeout(storePendingDrafts,200);}return true;}
 function draftPayload(draft){return Object.fromEntries(['id','account_id','to','cc','subject','body','reply_to_id','context_message_id','mode','revision'].map(key=>[key,draft[key]??(['to','cc','subject','body'].includes(key)?'':null)]));}
 function persistDraft(draft) {
   if(!rememberDraft(draft)||S.discardedDrafts.has(draft.id))return Promise.resolve(null);
@@ -398,16 +481,16 @@ function persistDraft(draft) {
   if(previous&&previous.revision>=draft.revision)return previous.promise;
   const promise=(previous?.promise||Promise.resolve()).catch(()=>{}).then(async()=>{
     if(S.discardedDrafts.has(draft.id))return null;
-    if($('#compose-form')&&S.compose?.id===draft.id&&$('.draft-save-status'))$('.draft-save-status').textContent='Salvataggio…';
+    if($('#compose-form')&&S.compose?.id===draft.id&&$('.draft-save-status'))$('.draft-save-status').textContent='Bozza salvata sul dispositivo · sincronizzazione…';
     const result=await api('/drafts','PUT',draftPayload(draft));
-    await cachedDraftChange(result.id,draft);
+    if(!S.discardedDrafts.has(draft.id))await cachedDraftChange(result.id,draft);
     if((S.pendingDrafts.get(draft.id)?.revision||0)<=draft.revision)S.pendingDrafts.delete(draft.id);
     storePendingDrafts();
     if(S.compose?.id===draft.id&&$('.draft-save-status'))$('.draft-save-status').textContent='Bozza salvata';
     return result.id;
   });
   S.draftWrites.set(draft.id,{revision:draft.revision,promise});
-  promise.finally(()=>{if(S.draftWrites.get(draft.id)?.promise===promise)S.draftWrites.delete(draft.id);}).catch(()=>{});
+  promise.finally(()=>{if(S.draftWrites.get(draft.id)?.promise===promise)S.draftWrites.delete(draft.id);flushClientQueue().catch(()=>{});}).catch(()=>{});
   return promise;
 }
 function removeComposer(){clearTimeout(autosaveTimer);if($('#overlay #compose-form'))$('#overlay').innerHTML='';if($('#inline-composer'))$('#inline-composer').innerHTML='';S.compose=null;}
@@ -417,8 +500,9 @@ async function cachedDraftChange(id,draft=null){
   if(draft)drafts.unshift({...draft,id,updated:Date.now()/1000});
   await deviceCache.set('api:/drafts',{drafts});
 }
-async function closeCompose(){const draft=captureCompose();removeComposer();if(draft)await persistDraft(draft);}
-async function saveCompose(){clearTimeout(autosaveTimer);return persistDraft(captureCompose());}
+async function saveLocalDraft(draft){if(!rememberDraft(draft))return null;await cachedDraftChange(draft.id,draft);if(S.compose?.id===draft.id&&$('.draft-save-status'))$('.draft-save-status').textContent='Bozza salvata sul dispositivo';persistDraft(draft).catch(error=>{if(S.compose?.id===draft.id&&$('.draft-save-status'))$('.draft-save-status').textContent='Bozza salvata sul dispositivo · sincronizzazione in attesa';else toast(error.message);});return draft.id;}
+async function closeCompose(){const draft=captureCompose();removeComposer();if(draft)await saveLocalDraft(draft);}
+async function saveCompose(){clearTimeout(autosaveTimer);return saveLocalDraft(captureCompose());}
 function showCompose(draft={},inline=Boolean(draft.reply_to_id||draft.context_message_id)) {
   if(!S.state.accounts.length){showAccountForm();return;}
   if(S.compose){
@@ -439,9 +523,9 @@ async function openDraft(draft){
 }
 async function discardCompose(){
   const draft=captureCompose();if(!draft)return;
-  S.discardedDrafts.add(draft.id);S.pendingDrafts.delete(draft.id);storePendingDrafts();removeComposer();
-  await S.draftWrites.get(draft.id)?.promise.catch(()=>{});await api('/drafts/'+encodeURIComponent(draft.id),'DELETE');await cachedDraftChange(draft.id);
-  await refresh();renderList();toast('Bozza eliminata.');
+  S.discardedDrafts.add(draft.id);localStorage.setItem('milo-discarded-drafts',JSON.stringify([...S.discardedDrafts]));S.pendingDrafts.delete(draft.id);storePendingDrafts();removeComposer();
+  const operation={id:crypto.randomUUID(),kind:'draft_delete',key:'draft:'+draft.id,message_id:draft.id};
+  replica.apply(operation);await deviceCache.enqueue(operation);await cachedDraftChange(draft.id);await refresh();toast('Bozza eliminata.');flushClientQueue().catch(()=>{});
 }
 
 function showRecap(result) {
@@ -480,6 +564,7 @@ async function runAI(action,button) {
     generatedDraft={id:S.compose.id,revision:S.compose.revision};
     $('#compose-form .compose-heading').insertAdjacentHTML('afterend',`<div class="reply-generation">${skeleton(3,'block','Milo prepara una risposta…')}</div>`);
   }
+    while(S.pendingSettings.size){if([...S.pendingSettings.values()].some(op=>S.queueErrors.has(op.id)))throw new Error('Controlla le preferenze non sincronizzate prima di usare l’AI.');await flushClientQueue();if(!S.online||Date.now()<queueRetryAt)throw new Error('Le preferenze devono essere sincronizzate prima di usare l’AI.');}
     if(action==='analyze') {
       await api('/messages/'+id+'/analyze','POST');
       S.analyzing=false;if(S.selected?.id===id)await loadThread(S.readerAnchor);
@@ -546,11 +631,11 @@ document.addEventListener('click', async event => {
     if(action==='close-modal'){if($('#overlay #compose-form'))await closeCompose();else closeModal();await refresh();renderList();}
     if(action==='sync') {
       if(S.syncing)return;S.syncing=true;renderChrome();
-      try{await api('/sync','POST');toast('Sincronizzazione avviata in background.');}
+      try{await deviceCache.retryOperations();S.queueErrors.clear();queueRetryAt=0;flushClientQueue().catch(()=>{});await api('/sync','POST');toast('Sincronizzazione avviata in background.');}
       finally{S.syncing=false;await refresh();renderChrome();renderList();}
     }
     if(action==='retry-login') { await boot(); }
-    if(action==='logout') { await api('/logout','POST');await deviceCache.clear();S.status.authenticated=false;S.selected=null;S.messages=[];renderLogin(); }
+    if(action==='logout') { await api('/logout','POST');replica.clear();S.optimistic.clear();S.pendingSettings.clear();S.queueErrors.clear();await deviceCache.clear();S.status.authenticated=false;S.selected=null;S.messages=[];renderLogin(); }
   } catch(error) { toast(error.message); }
 });
 
@@ -567,11 +652,11 @@ document.addEventListener('submit', async event => {
       const file=form.elements.credentials.files[0];
       if(!file || file.size>16000) throw new Error('Seleziona il JSON OAuth Google (massimo 16 KB).');
       let config;try { config=JSON.parse(await file.text()); } catch { throw new Error('Il file non contiene un JSON valido.'); }
-      await api('/settings/google','PUT',config);await refresh();showAccountForm();toast('Google configurato. Ora collega la tua casella.');
+      await api('/settings/google','PUT',config);await revalidateView();showAccountForm();toast('Google configurato. Ora collega la tua casella.');
     }
     if(form.id==='account-form') {
       data.imap_port=Number(data.imap_port);data.smtp_port=Number(data.smtp_port);
-      await api('/accounts','POST',data);closeModal();await refresh();renderShell();toast('Account salvato. La prima sincronizzazione è in corso.');
+      await api('/accounts','POST',data);closeModal();await revalidateView();renderShell();paintLocal();toast('Account salvato. La prima sincronizzazione è in corso.');
     }
     if(form.id==='account-settings-form') {
       data.enabled=form.elements.enabled.checked;
@@ -579,22 +664,24 @@ document.addEventListener('submit', async event => {
         if(!data.password) delete data.password;
         data.imap_port=Number(data.imap_port);data.smtp_port=Number(data.smtp_port);
       }
-      await api('/accounts/'+encodeURIComponent(form.dataset.accountId),'PATCH',data);
-      S.loadingList=true;renderShell();await refresh(false,true);renderList();showSettings('accounts');toast('Account aggiornato su Milo.');
+      const previous=S.state.accounts.find(a=>a.id===form.dataset.accountId),patch=Object.fromEntries(Object.entries(data).filter(([key,value])=>value!==previous?.[key]));
+      if(Object.keys(patch).every(key=>['name','enabled','color'].includes(key)))await savePreference(null,patch,form.dataset.accountId);
+      else await api('/accounts/'+encodeURIComponent(form.dataset.accountId),'PATCH',patch);
+      S.loadingList=true;renderShell();await refresh(false,true);revalidateView().then(()=>{refreshCatalogue();if(S.status.demo&&S.messages.length&&innerWidth>900)selectMessage(S.messages[0].id,false).catch(()=>{});});renderList();showSettings('accounts');toast('Account aggiornato su Milo.');
     }
     if(form.id==='identity-form') {
       data.aliases=data.aliases.split(',').map(name=>name.trim()).filter(Boolean);
-      S.state.identity=await api('/settings/identity','PUT',data);await refresh();closeModal();toast('Identità salvata. Milo la userà nelle prossime risposte.');
+      await savePreference('identity',data);await refresh();closeModal();toast('Identità salvata. Milo la userà nelle prossime risposte.');
     }
-    if(form.id==='appearance-form'){applyTheme(data.theme);await api('/settings/appearance','PUT',data);S.state.appearance=data;closeModal();toast('Aspetto salvato.');}
+    if(form.id==='appearance-form'){applyTheme(data.theme);await savePreference('appearance',data);closeModal();toast('Aspetto salvato.');}
     if(form.id==='ai-form') {
       data.automatic=form.elements.automatic.checked;data.cloud_consent=form.elements.cloud_consent.checked;
-      await api('/settings/ai','PUT',data);await refresh();closeModal();toast('Preferenze AI salvate.');
+      await savePreference('ai',data);await refresh();closeModal();toast('Preferenze AI salvate.');
     }
-    if(form.id==='rule-form') { await api('/rules','POST',data);await refresh();showSettings('rules');renderList();toast('Filtro creato e applicato.'); }
+    if(form.id==='rule-form') { await api('/rules','POST',data);await revalidateView();showSettings('rules');renderList();toast('Filtro creato e applicato.'); }
     if(form.id==='compose-form') {
       const snapshot=captureCompose(),id=await saveCompose();if(!id)throw new Error('Scrivi prima il tuo messaggio.');
-      await api('/drafts/'+encodeURIComponent(id)+'/send','POST');
+      await persistDraft(snapshot);await api('/drafts/'+encodeURIComponent(id)+'/send','POST');
       if(S.compose?.id===id&&(S.compose.revision||0)<=snapshot.revision){removeComposer();await cachedDraftChange(id);}
       await refresh();if(S.readerAnchor)await loadThread(S.readerAnchor);renderList();toast('Messaggio inviato.');
     }
@@ -627,7 +714,7 @@ async function handleKeydown(event) {
     try { if($('#compose-form')){closeCompose().catch(error=>toast(error.message));}else closeModal();S.menu=false;$('.shell')?.classList.remove('menu-open'); }
     catch(error) { toast(error.message); }
   }
-  if(!editing && !$('#overlay').children.length && !$('#compose-form') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat) {
+  if(S.status?.authenticated && !editing && !$('#overlay').children.length && !$('#compose-form') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat) {
     const key=event.key.toLowerCase();
     if(key==='/') { event.preventDefault();$('#search-input')?.focus(); }
     if(key==='c') { event.preventDefault();showCompose(); }
@@ -653,9 +740,14 @@ async function boot() {
     const oauth=new URLSearchParams(location.hash.slice(1));
     const oauthError=oauth.get('google_error'),connected=oauth.has('google_connected'),ownerToken=oauth.get('setup');
     if(ownerToken || oauthError || connected) history.replaceState(null,'',location.pathname);
-    const cachedStatus=await deviceCache.get('api:/status'),cachedState=await deviceCache.get('api:/state'),cachedList=await deviceCache.get('api:/messages?view=inbox&search=');
-    for(const operation of await deviceCache.get('pending-operations')||[])S.optimistic.set(operation.key,{patch:{...S.optimistic.get(operation.key)?.patch,...operation.patch},deleted:operation.deleted,operationId:operation.id});
-    if(cachedStatus?.authenticated&&cachedState&&cachedList){S.status=cachedStatus;S.state=cachedState;S.messages=cachedList.messages.filter(m=>!S.optimistic.get(threadKey(m))?.deleted).map(m=>({...m,...S.optimistic.get(threadKey(m))?.patch}));S.online=navigator.onLine;renderShell();renderList();}
+    await replica.init();
+    const cachedStatus=await deviceCache.get('api:/status'),cachedState=await deviceCache.get('api:/state');
+    for(const operation of await deviceCache.get('pending-operations')||[]){if(operation.error)S.queueErrors.set(operation.id,operation);replica.apply(operation);if(operation.kind==='setting')S.pendingSettings.set(operation.key,operation);else if(!operation.kind)S.optimistic.set(operation.key,{patch:{...S.optimistic.get(operation.key)?.patch,...operation.patch},deleted:operation.deleted,operationId:operation.id});}
+    if(cachedStatus?.authenticated&&cachedState){
+      S.status=cachedStatus;S.state=cachedState;S.online=navigator.onLine;applyState(cachedState);renderShell();await refresh();
+      api('/status').then(status=>{S.status=status;if(!status.authenticated)renderLogin();else{flushClientQueue().catch(()=>{});refreshCatalogue();}}).catch(error=>{if(temporarilyUnavailable(error)){S.online=false;renderChrome();}});
+      return;
+    }
     try{S.status=await api('/status');}catch(error){if(!temporarilyUnavailable(error))throw error;if(!cachedStatus?.authenticated)throw error;S.status=cachedStatus;S.online=false;}
 
     if(!S.status.initialized&&!S.status.authenticated) {
@@ -668,35 +760,52 @@ async function boot() {
     if(oauthError) toast(oauthError);
     if(connected) toast('Casella Google collegata. Sto sincronizzando la tua posta.');
     if(!S.status.authenticated) { renderLogin();return; }
-    S.loadingList=true;renderShell();await refresh(false,true);renderList();
-    if(S.status.demo && S.messages.length && innerWidth>900) await selectMessage(S.messages[0].id,false);
+    S.loadingList=true;renderShell();await refresh(false,true);revalidateView().then(()=>{refreshCatalogue();if(S.status.demo&&S.messages.length&&innerWidth>900)selectMessage(S.messages[0].id,false).catch(()=>{});});renderList();
+
   } catch(error) { $('#app').innerHTML=`<div class="empty" style="min-height:100vh">${icon('mail')}<h3>Milo non è raggiungibile.</h3><p>${esc(error.message)}</p></div>`; }
 }
-let flushingQueue=false;
-async function flushClientQueue(){
-  if(flushingQueue||!S.online)return;flushingQueue=true;
+let queueTask,queueRetryAt=0;
+function flushClientQueue(){
+  if(queueTask)return queueTask;
+  if(!S.online||!S.status?.authenticated||Date.now()<queueRetryAt)return Promise.resolve();
+  queueTask=runClientQueue();queueTask.finally(async()=>{queueTask=null;const remaining=await deviceCache.get('pending-operations')||[];if(remaining.some(op=>!op.error&&(op.kind!=='draft_delete'||!S.draftWrites.has(op.message_id)))&&S.online&&Date.now()>=queueRetryAt)flushClientQueue().catch(()=>{});}).catch(()=>{});return queueTask;
+}
+async function runClientQueue(){
   try{
     for(const operation of await deviceCache.get('pending-operations')||[]){
-      try{await api('/messages/'+encodeURIComponent(operation.message_id)+'/thread',operation.deleted?'DELETE':'PATCH',operation.deleted?undefined:operation.patch);}
-      catch(error){if(error.status!==404)throw error;}
+      if(operation.error)continue;
+      if(operation.kind==='draft_delete'&&S.draftWrites.has(operation.message_id))continue;
+      try{
+        if(operation.kind==='setting')await api(operation.path,operation.method,operation.body);
+        else if(operation.kind==='draft_delete')await api('/drafts/'+encodeURIComponent(operation.message_id),'DELETE');
+        else await api('/messages/'+encodeURIComponent(operation.message_id)+'/thread',operation.deleted?'DELETE':'PATCH',operation.deleted?undefined:operation.patch);
+      }catch(error){
+        if(error.status!==404||operation.kind==='setting'){if(temporarilyUnavailable(error)||error.status===401)throw error;await deviceCache.markFailed(operation.id,error.message);S.queueErrors.set(operation.id,{...operation,error:error.message});toast('Una modifica richiede attenzione: '+error.message);continue;}
+        if(!operation.kind){const row=replica.find(operation.key);if(row){try{const newer=await api('/client/thread?'+new URLSearchParams({account:row.account_id,thread:row.thread_id||row.id}));await api('/messages/'+newer.message.id+'/thread',operation.deleted?'DELETE':'PATCH',operation.deleted?undefined:operation.patch);}catch(missing){if(missing.status!==404)throw missing;}}}
+      }
+      if(!S.status?.authenticated)return;
+      replica.confirm(operation);
+      if(!await replica.commit())throw new Error('Cache locale non disponibile. La sincronizzazione resterà in attesa.');
       await deviceCache.acknowledge(operation.id);
       if(S.optimistic.get(operation.key)?.operationId===operation.id)S.optimistic.delete(operation.key);
+      if(S.pendingSettings.get(operation.key)?.id===operation.id)S.pendingSettings.delete(operation.key);
     }
-  }finally{flushingQueue=false;}
+    revalidateView();
+  }catch(error){queueRetryAt=Date.now()+3000;if(!temporarilyUnavailable(error)&&S.status?.authenticated)toast(error.message);}
+  finally{renderChrome();}
 }
-async function poll() {
-  try {
-    if(S.status?.authenticated&&!document.hidden){
-      const before=JSON.stringify(S.messages);
-      await refresh();await flushClientQueue();renderChrome();if(before!==JSON.stringify(S.messages))renderList();
-      if(S.recapOpen&&S.recapSignature!==JSON.stringify(S.state.recap)){const result=await api('/recap');if(S.recapOpen)showRecap(result);}
-      for(const draft of S.pendingDrafts.values())if(!S.draftWrites.has(draft.id)&&S.compose?.id!==draft.id)persistDraft(draft).catch(()=>{});
-      if(S.readerAnchor&&(S.threadSync.phase==='downloading'||before!==JSON.stringify(S.messages))&&!S.loadingMessage)await loadThread(S.readerAnchor);
-    }
-  }catch(error){if(error.status===404){S.readerAnchor=null;S.selected=null;renderReading();}renderChrome();}
-  finally {setTimeout(poll,(S.state.sync||[]).some(p=>['connecting','downloading','applying'].includes(p.phase))||S.threadSync.phase==='downloading'?2000:10000);}
+async function poll(){
+  if(S.status?.authenticated&&!document.hidden){
+    await refresh();flushClientQueue().catch(()=>{});refreshCatalogue();
+    if(S.recapOpen&&S.recapSignature!==JSON.stringify(S.state.recap))api('/recap').then(result=>{if(S.recapOpen)showRecap(result);}).catch(()=>{});
+    for(const draft of S.pendingDrafts.values())if(!S.draftWrites.has(draft.id)&&S.compose?.id!==draft.id)persistDraft(draft).catch(()=>{});
+    if(S.readerAnchor&&S.threadSync.phase==='downloading'&&!S.loadingMessage)loadThread(S.readerAnchor).catch(()=>{});
+  }
+  setTimeout(poll,3000);
 }
-setTimeout(poll,2000);
+setTimeout(poll,1500);
+addEventListener('online',()=>{S.online=true;queueRetryAt=0;flushClientQueue().catch(()=>{});revalidateView();refreshCatalogue();});
+addEventListener('offline',()=>{S.online=false;renderChrome();});
 addEventListener('pagehide',()=>{const draft=captureCompose();if(draft)rememberDraft(draft);else storePendingDrafts();});
 if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js',{type:'module'}).catch(()=>{});
 boot();

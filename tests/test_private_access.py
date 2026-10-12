@@ -16,7 +16,7 @@ def test_public_surface_has_no_archive_login_or_application():
         assert root.status_code == 200 and 'La tua posta.' in root.text
         assert not any(value in root.text for value in ('password', 'app.js', PRIVATE, '<form'))
         for path in ('/api/login', '/api/setup', '/api/status', '/api/state', '/api/accounts', '/api/messages',
-                     '/api/messages/one/attachments/0', '/api/drafts', '/static/app.js', '/docs', '/openapi.json'):
+                     '/api/client/messages', '/api/client/thread?account=a&thread=t', '/static/replica.js', '/static/search-worker.js', '/api/messages/one/attachments/0', '/api/drafts', '/static/app.js', '/docs', '/openapi.json'):
             for method in ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'):
                 response = client.request(method, path, headers={**OWNER, 'Cookie': 'milo_session=forged'},
                                           json={'password': 'attempt'})

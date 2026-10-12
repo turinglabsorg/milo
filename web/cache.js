@@ -1,5 +1,13 @@
 // Device-local, origin-isolated cache. Provider tokens never enter this database.
 const memory=new Map();
+const sizes=new Map(),versions=new Map();
+let memoryBytes=0,generation=0;
+function remember(id,value,size){
+  memoryBytes-=sizes.get(id)||0;memory.delete(id);sizes.delete(id);
+  if(size>16*1024*1024)return;
+  memory.set(id,value);sizes.set(id,size);memoryBytes+=size;
+  while(memoryBytes>16*1024*1024){const oldest=memory.keys().next().value;memoryBytes-=sizes.get(oldest)||0;memory.delete(oldest);sizes.delete(oldest);}
+}
 let opening,keyPromise;
 function database(){
   return opening??=new Promise((resolve,reject)=>{
@@ -25,28 +33,48 @@ async function encryptionKey(){
   })();
 }
 async function get(id){
-  if(memory.has(id))return memory.get(id);
+  if(memory.has(id)){const value=memory.get(id);memory.delete(id);memory.set(id,value);return value;}
+  const epoch=generation,version=versions.get(id)||0;
   try{
-    const record=await rawGet(id);if(!record?.data)return null;
+    const record=await rawGet(id);
+    if(epoch!==generation)return null;
+    if(version!==(versions.get(id)||0))return get(id);
+    if(!record?.data)return null;
     const bytes=await crypto.subtle.decrypt({name:'AES-GCM',iv:record.iv},await encryptionKey(),record.data);
-    const value=JSON.parse(new TextDecoder().decode(bytes));memory.set(id,value);return value;
+    if(epoch!==generation)return null;
+    if(version!==(versions.get(id)||0))return get(id);
+    const value=JSON.parse(new TextDecoder().decode(bytes));remember(id,value,bytes.byteLength);return value;
   }catch{return null;}
 }
 async function set(id,value){
-  memory.set(id,value);
+  const epoch=generation,version=(versions.get(id)||0)+1;versions.set(id,version);
+  const plain=new TextEncoder().encode(JSON.stringify(value));remember(id,value,plain.byteLength);
   try{
     const db=await database(),iv=crypto.getRandomValues(new Uint8Array(12));
-    const data=await crypto.subtle.encrypt({name:'AES-GCM',iv},await encryptionKey(),new TextEncoder().encode(JSON.stringify(value)));
+    const data=await crypto.subtle.encrypt({name:'AES-GCM',iv},await encryptionKey(),plain);
+    if(epoch!==generation)return false;
+    if(version!==versions.get(id))return true;
     return await new Promise((resolve,reject)=>{const tx=db.transaction('records','readwrite');tx.objectStore('records').put({id,data,iv,updated:Date.now()});tx.oncomplete=()=>resolve(true);tx.onabort=()=>reject(tx.error);});
   }catch{return false;}
 }
 async function remove(id){
-  memory.delete(id);
+  versions.set(id,(versions.get(id)||0)+1);
+  memoryBytes-=sizes.get(id)||0;sizes.delete(id);memory.delete(id);
   try{const db=await database();await new Promise((resolve,reject)=>{const tx=db.transaction('records','readwrite');tx.objectStore('records').delete(id);tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});}catch{}
 }
 async function clear(){
-  memory.clear();keyPromise=null;
+  generation++;memory.clear();sizes.clear();versions.clear();memoryBytes=0;keyPromise=null;
   try{const db=await database();await new Promise((resolve,reject)=>{const tx=db.transaction('records','readwrite');tx.objectStore('records').clear();tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});}catch{}
+}
+async function has(id){
+  if(memory.has(id))return true;
+  try{const db=await database();return await new Promise((resolve,reject)=>{const r=db.transaction('records').objectStore('records').count(id);r.onsuccess=()=>resolve(r.result>0);r.onerror=()=>reject(r.error);});}catch{return false;}
+}
+async function keys(prefix){
+  try{
+    const db=await database();
+    return await new Promise((resolve,reject)=>{const r=db.transaction('records').objectStore('records').getAllKeys();r.onsuccess=()=>resolve(r.result.filter(id=>id.startsWith(prefix)));r.onerror=()=>reject(r.error);});
+  }catch{return [];}
 }
 async function setAsset(id,response){
   if(Number(response.headers.get('content-length'))>16*1024*1024){response.body?.cancel().catch(()=>{});return;}
@@ -67,11 +95,19 @@ async function getAsset(id){
 }
 let operations=Promise.resolve();
 function enqueue(operation){
-  const next=operations.then(async()=>{const queue=await get('pending-operations')||[];queue.push(operation);if(!await set('pending-operations',queue))throw new Error('Impossibile salvare la modifica sul dispositivo. Mantieni Milo aperto e riconnettiti.');});
+  const next=operations.then(async()=>{const queue=await get('pending-operations')||[];const nextQueue=queue.filter(item=>!item.error||item.key!==operation.key);nextQueue.push(operation);if(!await set('pending-operations',nextQueue))throw new Error('Impossibile salvare la modifica sul dispositivo. Mantieni Milo aperto e riconnettiti.');});
   operations=next.catch(()=>{});return next;
 }
 function acknowledge(id){
-  const next=operations.then(async()=>{const queue=await get('pending-operations')||[];await set('pending-operations',queue.filter(item=>item.id!==id));});
+  const next=operations.then(async()=>{const queue=await get('pending-operations')||[];if(!await set('pending-operations',queue.filter(item=>item.id!==id)))throw new Error('Impossibile confermare la modifica sul dispositivo.');});
   operations=next.catch(()=>{});return next;
 }
-export const deviceCache={get,set,remove,clear,enqueue,acknowledge,setAsset,getAsset};
+function markFailed(id,error){
+  const next=operations.then(async()=>{const queue=await get('pending-operations')||[];if(!await set('pending-operations',queue.map(item=>item.id===id?{...item,error}:item)))throw new Error('Impossibile salvare lo stato della sincronizzazione.');});
+  operations=next.catch(()=>{});return next;
+}
+function retryOperations(){
+  const next=operations.then(async()=>{const queue=await get('pending-operations')||[];if(!await set('pending-operations',queue.map(({error,...item})=>item)))throw new Error('Cache locale non disponibile.');});
+  operations=next.catch(()=>{});return next;
+}
+export const deviceCache={get,set,remove,clear,keys,has,enqueue,acknowledge,markFailed,retryOperations,setAsset,getAsset};

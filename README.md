@@ -109,8 +109,11 @@ Standalone local development retains password authentication. Received mail and
 tokens stay on the server. Unsaved draft edits have a local recovery copy until
 the server acknowledges them. The service polls providers every 60 seconds and
 the UI refreshes every 2–10 seconds while visible. Downloaded message content and thread metadata are retained in the device cache
-for offline reading. Metadata refreshes separately; already downloaded bodies are
-reused. This cache is a requirement of every client, including the future iOS app;
+for offline reading. Folder/account navigation, cached-content search and ordinary
+mailbox edits run locally; a durable journal synchronizes changes in background.
+Saving/closing drafts and safe preferences do not wait for the server. Metadata
+refreshes separately; already downloaded bodies are reused. Sending, AI and
+uncached downloads still need the service. This cache is a requirement of every client, including the future iOS app;
 see [the cache contract](docs/CLIENT_CACHE.md).
 
 For access from iOS, the service needs a stable HTTPS address reachable by the

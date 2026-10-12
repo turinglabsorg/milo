@@ -382,7 +382,8 @@ class Store:
                                 (uuid.uuid4().hex, message["id"], "trash", "true", time.time()))
             return bool(messages)
 
-    def conversations(self, view="inbox", category=None, account=None, search="", limit=100):
+    def conversations(self, view="inbox", category=None, account=None, search="", limit=100,
+                      before=None, chronological=False, thread=None):
         # Fetch only list metadata. Bodies and MIME blobs belong to the reader.
         clauses, params = ["hidden=0", "trashed=0"], []
         views = {"inbox": "archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?)",
@@ -398,16 +399,30 @@ class Store:
         if account:
             clauses.append("account_id=?")
             params.append(account)
+        if thread:
+            clauses.append("COALESCE(thread_id,id)=?")
+            params.append(thread)
         if search:
             clauses.append("(sender LIKE ? OR sender_email LIKE ? OR subject LIKE ? OR body LIKE ?)")
             params.extend([f"%{search}%"] * 4)
+        cursor = " AND (date<? OR (date=? AND id<?))" if before else ""
+        ordering = "date DESC,id DESC" if chronological else "pinned DESC,date DESC"
+        if before:
+            params.extend((before[0], before[0], before[1]))
         rows = self.rows("""
             WITH eligible AS (
                 SELECT account_id,COALESCE(thread_id,id) AS thread FROM messages WHERE """ + " AND ".join(clauses) + """
                 GROUP BY account_id,COALESCE(thread_id,id)
             ), ranked AS (
                 SELECT m.id,m.account_id,m.thread_id,m.sender,m.sender_email,m.subject,m.preview,m.date,
-                       m.read,m.starred,m.archived,m.sent,m.category,m.snoozed_until,
+                       m.read,m.content_version,MAX(m.starred) OVER w AS starred,m.archived,m.sent,m.category,
+                       MAX(m.snoozed_until) OVER w AS snoozed_until,
+                       MAX(m.sent=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<=CAST(strftime('%s','now') AS REAL))) OVER w AS has_inbox,
+                       MAX(m.sent=0 AND m.archived=1) OVER w AS has_archive,
+                       MAX(m.sent=1) OVER w AS has_sent,
+                       SUM(m.sent=0) OVER w AS received_count,
+                       SUM(m.sent=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<=CAST(strftime('%s','now') AS REAL))) OVER w AS inbox_count,
+                       SUM(m.sent=0 AND m.read=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<=CAST(strftime('%s','now') AS REAL))) OVER w AS inbox_unread_count,
                        MAX(m.pinned) OVER w AS pinned,COUNT(*) OVER w AS message_count,
                        SUM(m.read=0 AND m.sent=0) OVER w AS unread_count,
                        SUM(m.analysis IS NOT NULL) OVER w AS analyzed_count,
@@ -415,8 +430,7 @@ class Store:
                 FROM messages m JOIN eligible e ON m.account_id=e.account_id AND COALESCE(m.thread_id,m.id)=e.thread
                 WHERE m.hidden=0 AND m.trashed=0
                 WINDOW w AS (PARTITION BY m.account_id,COALESCE(m.thread_id,m.id))
-            ) SELECT * FROM ranked WHERE rank=1 ORDER BY pinned DESC,date DESC LIMIT ?
-            """, (*params, limit))
+            ) SELECT * FROM ranked WHERE rank=1""" + cursor + " ORDER BY " + ordering + " LIMIT ?", (*params, limit))
         for row in rows:
             row.pop("rank")
             row["read"] = int(not row["unread_count"])

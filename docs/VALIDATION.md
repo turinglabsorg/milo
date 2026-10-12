@@ -36,7 +36,7 @@ spacing, header account/analysis indicators, no sidebar AI promotion, editable
 identity, readable recap priorities and matching full-width Google/IMAP buttons
 with the Google icon.
 
-The local suite passes **120 tests**; nine opt-in browser flows pass separately.
+The local suite passes **128 tests**; nine opt-in browser flows pass separately.
 This includes lightweight recipient-header extraction without body
 loading, Reply all owner-address exclusion, and encrypted inbox/body/inline-image
 reuse through a temporary HTTP 503 and app reload. Local Docker-host Ollama
@@ -85,6 +85,25 @@ These are measured samples, not latency guarantees. First-time uncached content
 still depends on the network. Native iOS, physical iPhone behavior, push delivery
 and mailbox-wide AI quality remain future validation gates. The required native
 cache behavior is documented in [CLIENT_CACHE.md](CLIENT_CACHE.md).
+
+## Offline-first interactions — 2026-10-12
+
+Isolated Chromium checks hold every API response while opening the cached inbox,
+reading downloaded HTML, toggling favorites, archiving and switching folders.
+The local journal and changes survive an offline restart. Separate checks verify
+FIFO edits with delayed acknowledgements/stale metadata, cached-body word search
+after offline restart, local draft save/delete and identity persistence followed
+by reconnection. A rejected preference remains visible without blocking mail
+edits; correcting it synchronizes successfully. Provider identity changes recover
+through authenticated, account-scoped thread lookup. Metadata snapshot tests
+verify 200-item chronological pagination remains stable when pins change.
+
+Measured cached inbox/reader/favorites navigation in the held-server fixture was
+approximately 40/81/70 ms. These are synthetic samples on the development laptop,
+not a guarantee of network, storage or provider latency. Results and UI screenshots
+are saved in the ignored `test-results` directory. Backend and browser regressions
+also cover the existing responsive interface, editable identity, drafts and sends
+using controlled transports. No real email was sent by these tests.
 
 ## Earlier checkpoints
 

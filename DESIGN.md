@@ -81,3 +81,9 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
 - Recap views show a compact timestamp/status, unboxed high-contrast overview and
   a bordered list of numbered priorities. Numbers use a fixed 22 px column;
   source and model metadata stay subordinate. No lavender recap background.
+
+- Ordinary mailbox edits confirm after a device-local journal write, without
+  waiting for HTTP. Folder/account/search navigation projects the local catalogue;
+  refreshes stay in background. Keep pending changes visible in the existing
+  compact synchronization status. Rejected changes show a retry instruction;
+  unrelated edits continue. Closing or saving a draft confirms device persistence.

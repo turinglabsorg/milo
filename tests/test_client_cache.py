@@ -1,6 +1,7 @@
 from email.message import EmailMessage
 
 import pytest
+from browser_helpers import wait_for_async
 from playwright.sync_api import expect, sync_playwright
 from test_responsive_inbox import service
 
@@ -53,7 +54,7 @@ def test_cache_survives_offline_reload_and_does_not_refetch_bodies(tmp_path, wid
         expect(page.locator('.message-row')).to_have_count(2)
         page.locator(f'[data-message="{sent}"]').click()
         expect(page.frame_locator('.email-html').get_by_text('HTML reply', exact=True)).to_be_visible()
-        page.wait_for_function('async()=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.get("api:/messages/"+document.querySelector(".message-row.selected").dataset.message));}')
+        wait_for_async(page, 'async()=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.get("api:/messages/"+document.querySelector(".message-row.selected").dataset.message));}')
         page.evaluate('()=>navigator.serviceWorker.ready.then(()=>new Promise(resolve=>navigator.serviceWorker.controller?resolve():navigator.serviceWorker.addEventListener("controllerchange",resolve,{once:true})))')
         # A reopen uses downloaded content, not another body request.
         before = len(bodies)
@@ -112,8 +113,8 @@ def test_offline_delete_is_durable_and_reconciles_without_resurrection(tmp_path)
         assert len(page.evaluate('async()=>{const {deviceCache}=await import("/static/cache.js");return await deviceCache.get("pending-operations");}')) == 1
         context.set_offline(False)
         page.reload()
-        page.wait_for_function('async()=>{const response=await fetch("/api/messages");return (await response.json()).messages.length===1;}')
-        page.wait_for_function('async()=>{const {deviceCache}=await import("/static/cache.js");return !(await deviceCache.get("pending-operations"))?.length;}')
+        wait_for_async(page, 'async()=>{const response=await fetch("/api/messages");return (await response.json()).messages.length===1;}')
+        wait_for_async(page, 'async()=>{const {deviceCache}=await import("/static/cache.js");return !(await deviceCache.get("pending-operations"))?.length;}')
         expect(page.locator('.message-row')).to_have_count(1)
         assert page.request.get(url + '/api/messages').json()['messages'][0]['id'] != sent
         browser.close()
@@ -140,7 +141,7 @@ def test_downloaded_inline_image_remains_available_offline(tmp_path):
         image = page.frame_locator('.email-html').get_by_alt_text('cached image')
         expect(image).to_be_visible()
         path = image.get_attribute('src')
-        page.wait_for_function('async path=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.getAsset(path));}', arg=path)
+        wait_for_async(page, 'async path=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.getAsset(path));}', arg=path)
         context.set_offline(True)
         page.reload()
         page.locator(f'[data-message="{sent}"]').click()
@@ -183,7 +184,7 @@ def test_server_restart_503_preserves_downloaded_inbox_and_body(tmp_path):
         image = page.frame_locator('.email-html').get_by_alt_text('restart image')
         expect(image).to_be_visible()
         path = image.get_attribute('src')
-        page.wait_for_function('async path=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.getAsset(path));}', arg=path)
+        wait_for_async(page, 'async path=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.getAsset(path));}', arg=path)
         state['app'].state.outage = True
         page.reload()
         expect(page.locator('.message-row')).to_have_count(2)
