@@ -64,7 +64,7 @@ class Store:
             "accounts": {"provider": "TEXT NOT NULL DEFAULT 'imap'", "enabled": "INTEGER NOT NULL DEFAULT 1"},
             "messages": {"provider_id": "TEXT", "thread_id": "TEXT", "labels": "TEXT",
                          "hidden": "INTEGER NOT NULL DEFAULT 0", "pinned": "INTEGER NOT NULL DEFAULT 0",
-                         "trashed": "INTEGER NOT NULL DEFAULT 0"},
+                         "trashed": "INTEGER NOT NULL DEFAULT 0", "content_version": "TEXT"},
         }
         with self.lock, self.db:
             for table, columns in migrations.items():
@@ -246,11 +246,17 @@ class Store:
                      tuple(value.values()))
         return value["id"]
 
-    def message(self, message_id, raw=False):
-        rows = self.rows("SELECT * FROM messages WHERE id=?", (message_id,))
+    def message(self, message_id, raw=False, metadata=False):
+        fields = self.message_fields(metadata, raw)
+        rows = self.rows(f"SELECT {fields} FROM messages WHERE id=?", (message_id,))
         if not rows:
             return None
         return self.public_message(rows[0], raw)
+
+    @staticmethod
+    def message_fields(metadata=False, raw=False):
+        fields = "id,account_id,thread_id,provider_id,message_id,sender,sender_email,recipients,subject,preview,date,read,starred,archived,sent,category,snoozed_until,analysis,pinned,trashed,hidden,content_version"
+        return "*" if raw else fields if metadata else fields + ",folder,uidvalidity,uid,body,labels"
 
     @staticmethod
     def public_message(row, raw=False):
@@ -294,6 +300,7 @@ class Store:
             if existing:
                 return existing[0]["id"]
             data = dict(data)
+            data["content_version"] = hashlib.sha256(data["raw"]).hexdigest()
             if data.get("thread_id"):
                 pinned = self.rows("SELECT MAX(pinned) AS pinned FROM messages WHERE account_id=? AND thread_id=?",
                                    (data["account_id"], data["thread_id"]))
@@ -322,14 +329,15 @@ class Store:
                                     (uuid.uuid4().hex, message_id, key, json.dumps(value), time.time()))
             return True
 
-    def conversation(self, message_id, raw=False):
-        message = self.message(message_id)
+    def conversation(self, message_id, raw=False, metadata=False):
+        message = self.message(message_id, metadata=True)
         if not message:
             return []
         if not message.get("thread_id"):
-            return [self.message(message_id, raw=raw)]
+            return [self.message(message_id, raw=raw, metadata=metadata)]
+        fields = self.message_fields(metadata, raw)
         return [self.public_message(row, raw=raw) for row in self.rows(
-            "SELECT * FROM messages WHERE account_id=? AND thread_id=? AND hidden=0 AND trashed=0 ORDER BY date,id",
+            f"SELECT {fields} FROM messages WHERE account_id=? AND thread_id=? AND hidden=0 AND trashed=0 ORDER BY date,id",
             (message["account_id"], message["thread_id"]))]
 
     def patch_conversation(self, message_id, patch):

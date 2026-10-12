@@ -1,16 +1,19 @@
 import asyncio
 import email
+import hashlib
 import json
 import time
 import uuid
 from contextlib import asynccontextmanager
 from email import policy
+from email.utils import getaddresses
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from .ai import AI
 from .demo import seed_demo
@@ -86,6 +89,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     app = FastAPI(title="Milo", version="0.1.0", lifespan=lifespan, docs_url=None, redoc_url=None,
                   openapi_url=None)
     app.state.store, app.state.engine, app.state.ai, app.state.google = store, engine, ai, google
+    app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=4)
 
     def owner(request):
         # Tailscale Serve strips supplied identity headers, then adds its own.
@@ -131,8 +135,8 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         if demo:
             raise HTTPException(400, "Questa è una demo. Avvia Milo senza --demo per collegare account reali.")
 
-    def message_or_404(message_id, raw=False):
-        message = store.message(message_id, raw)
+    def message_or_404(message_id, raw=False, metadata=False):
+        message = store.message(message_id, raw, metadata)
         if not message:
             raise HTTPException(404, "Email non trovata")
         return message
@@ -300,6 +304,14 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         message = message_or_404(message_id, raw=True)
         raw = message.pop("raw")
         mail = email.message_from_bytes(raw, policy=policy.default)
+        if not message.get("content_version"):
+            message["content_version"] = hashlib.sha256(raw).hexdigest()
+            store.execute("UPDATE messages SET content_version=? WHERE id=? AND content_version IS NULL",
+                          (message["content_version"], message_id))
+        for header, field in (("To", "to_addresses"), ("Cc", "cc_addresses"), ("Reply-To", "reply_to_addresses")):
+            message[field] = [{"name": name, "email": address} for name, address in getaddresses(mail.get_all(header, []))
+                              if address and "@" in address and not any(char in address for char in "\r\n\x00")]
+        message["body_loaded"] = True
         message.update(render_html(mail, message_id, load_images))
         message["attachments"] = [{"index": i, "name": part.get_filename() or "allegato",
                                     "type": part.get_content_type()}
@@ -318,10 +330,13 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                         headers={"Content-Disposition": ("inline" if inline else "attachment") + "; filename*=UTF-8''" + quote(part.get_filename() or "immagine", safe="")})
 
     @app.get("/api/messages/{message_id}/thread", dependencies=[Depends(auth)])
-    def get_thread(message_id: str, background: BackgroundTasks, load_images: bool = False):
-        message_or_404(message_id)
-        messages = store.conversation(message_id, raw=True)
+    def get_thread(message_id: str, background: BackgroundTasks, load_images: bool = False, lazy: bool = False):
+        message_or_404(message_id, metadata=True)
+        messages = store.conversation(message_id, raw=not lazy, metadata=lazy)
         for message in messages:
+            if lazy:
+                message["body_loaded"] = False
+                continue
             mail = email.message_from_bytes(message.pop("raw"), policy=policy.default)
             message.update(render_html(mail, message["id"], load_images))
             message["attachments"] = [{"index": i, "name": part.get_filename(), "type": part.get_content_type()}

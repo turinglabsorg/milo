@@ -19,6 +19,10 @@ complete that goal.
 | Gmail / Outlook | Google OAuth/PKCE and Gmail labels/history adapter; protocol tests | Live Google account authorization and round trip; Microsoft Graph/Exchange adapter |
 | iOS availability | Responsive portable client and PWA shell | Physical Safari/PWA check; native iOS client, Keychain, local cache, APNs, build/signing on macOS |
 
+## Mandatory client-local cache
+
+Every client, including the future native iOS app, must persist downloaded email locally and support offline reading. Server-only caching does not satisfy this requirement. Follow [the client cache contract](CLIENT_CACHE.md).
+
 ## Next milestones
 
 1. Connect a real mailbox and complete a round trip with controlled test mail.

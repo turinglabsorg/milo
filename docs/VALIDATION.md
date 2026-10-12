@@ -124,7 +124,33 @@ VNC session over Tailscale. Public HTTPS returned the landing with
 initialized archive and Tailscale access; requests to its state API without an
 owner identity return 404. The existing Grog supervisor is retained.
 
-Tailscale Serve/HTTPS was not yet enabled in the owner's tailnet. The CLI requires
-owner authentication through Apple before activation. Public webmail is closed,
-but private HTTPS access from the Linux client remains awaiting that external
-step and is not yet claimed as verified.
+The owner subsequently enabled Tailscale Serve/HTTPS. The saved command completed
+and the private HTTPS service returned authenticated, initialized, non-demo Milo
+from Linux. Serve status shows only the private HTTPS handler to loopback 8029,
+with no Funnel configuration. The installed Linux launcher now points to that
+verified private origin. Both real Google accounts were available without errors,
+and a real 17-message thread included sent replies and HTML with no browser
+exceptions. No provider mutations or real sends were made by this check.
+
+That real-thread check also exposed a performance gap not covered by the small
+fixtures: eagerly rendering/downloading every body took 8–14 seconds. The current
+update introduces lightweight thread indices, body loading on expansion, compressed
+responses and persistent client-local caching to address it. Its production
+performance must be measured after rollout, rather than inferred from local tests.
+
+## Client cache and Reply all — 2026-10-12
+
+The local suite passes 104 tests; the nine opt-in browser flows pass separately.
+New desktop/mobile tests verify downloaded HTML survives an offline reload,
+opening cached content causes no extra body download, payloads are encrypted
+in IndexedDB with a non-extractable key, inline images remain available offline,
+and offline deletion survives reload and reconciles on reconnect without
+resurrecting the row. Reply all includes Reply-To, To and Cc, removes the owner's
+connected addresses and duplicates, and retains Cc in drafts. Controlled SMTP
+and Gmail transports verify Cc delivery without sending to a real recipient.
+Lazy thread indices exclude MIME and body data. On a synthetic 10,000-message
+archive, list p95 remained around 41 ms and the sampled reader around 71 ms.
+
+[The client-local cache contract](CLIENT_CACHE.md) is mandatory for every client,
+including the future native iOS app. These browser tests do not establish an iOS
+implementation or physical iPhone behavior.

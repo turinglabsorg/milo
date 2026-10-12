@@ -108,9 +108,12 @@ separate milestone.
 PWA manifest and responsive navigation establish a portable UI, not a verified
 iOS product. Native iOS will use the same API and archive, with Keychain-backed
 device credentials, local encrypted cache, background delivery and APNs. No
-second IMAP configuration is introduced by that client. Offline clients need a
-versioned change feed, acknowledgements and conflict policy; the current shared
-service design does not yet implement replicated offline databases.
+second IMAP configuration is introduced by that client. The shared client now retains downloaded mail and binary assets in an encrypted
+IndexedDB cache and queues offline metadata/trash edits. Thread indices are
+separate from immutable versioned bodies, and metadata refreshes do not download
+old content again. Native iOS must implement persistent local storage and the
+same offline behavior; see [the required cache contract](CLIENT_CACHE.md). A full
+archive-wide incremental change feed and native device cache remain future work.
 
 ## Trust and open work
 

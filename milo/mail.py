@@ -351,12 +351,14 @@ def safe_error(exc):
 
 
 def build_message(account, draft, original=None):
-    recipients = [address for _, address in getaddresses([draft["to"]])]
+    recipients = [address for _, address in getaddresses([value for value in (draft["to"], draft.get("cc", "")) if value])]
     if not recipients or any("@" not in address or any(c in address for c in "\r\n") for address in recipients):
         raise ValueError("Inserisci destinatari validi")
     message = EmailMessage()
     message["From"] = account["email"]
     message["To"] = draft["to"]
+    if draft.get("cc"):
+        message["Cc"] = draft["cc"]
     message["Subject"] = draft["subject"]
     message["Message-ID"] = make_msgid()
     message["Date"] = email.utils.formatdate(localtime=True)
@@ -369,7 +371,8 @@ def build_message(account, draft, original=None):
 
 def send_mail(account, draft, original=None):
     message = build_message(account, draft, original)
-    recipients = [address for _, address in getaddresses([draft["to"]])]
+    recipients = list(dict.fromkeys(address for _, address in getaddresses(
+        [value for value in (draft["to"], draft.get("cc", "")) if value])))
     context = ssl.create_default_context()
     if account["smtp_security"] == "tls":
         client = smtplib.SMTP_SSL(account["smtp_host"], account["smtp_port"], timeout=20, context=context)

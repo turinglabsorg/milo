@@ -1,3 +1,4 @@
+import {deviceCache} from './cache.js';
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const paths = {
@@ -46,15 +47,16 @@ function syncMarkup() {
 
 async function api(path, method='GET', body) {
   let response;
-  try { response = await fetch('/api' + path, {method, credentials:'same-origin', headers:body ? {'Content-Type':'application/json'} : {}, body:body ? JSON.stringify(body) : undefined}); }
+  try { response = await fetch('/api' + path, {method, signal:AbortSignal.timeout(method==='GET'?12000:60000), credentials:'same-origin', headers:body ? {'Content-Type':'application/json'} : {}, body:body ? JSON.stringify(body) : undefined}); }
   catch { S.online=false; throw new Error('Connessione a Milo interrotta. I dati salvati restano sul servizio.'); }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401 && S.status?.authenticated) { S.status.authenticated=false; renderLogin(); }
+    if ((response.status === 401 || response.status===404&&['/status','/state'].includes(path)) && S.status?.authenticated) { await deviceCache.clear(); S.status.authenticated=false; renderLogin(); }
     const message = Array.isArray(data.detail) ? data.detail.map(item => item.msg).join('; ') : data.detail;
     const error=new Error(message || 'Operazione non riuscita');error.status=response.status;throw error;
   }
   S.online=true;
+  if(method==='GET'&&(/^(?:\/status|\/state|\/messages(?:[/?]|$)|\/drafts)/.test(path)))deviceCache.set('api:'+path,data).then(saved=>{if(!saved&&!S.cacheWarning){S.cacheWarning=true;toast('Cache locale non disponibile. I messaggi restano sul server, ma non saranno disponibili offline su questo dispositivo.');}});
   return data;
 }
 
@@ -81,6 +83,7 @@ function closeModal(){if($('#overlay #compose-form')){closeCompose().catch(error
 
 function renderLogin() {
   closeModal();
+  if(S.status?.access==='tailscale'){$('#app').innerHTML=emptyMarkup('shield','Accesso privato non disponibile.','Verifica che questo dispositivo sia autorizzato nella tua rete Tailscale.');return;}
   const setup = !S.status.initialized;
   const form = setup && !S.setupAuthorized
     ? `<section class="login-form"><h2>Milo aspetta il primo accesso.</h2><p>Apri l’app Milo sul dispositivo su cui è stata installata per scegliere la tua password. Poi potrai accedere anche da qui.</p><button class="primary" data-action="retry-login">Riprova ${icon('arrow')}</button></section>`
@@ -116,7 +119,7 @@ function renderList() {
   if (!$('#list-panel')) return;
   const inbox = S.view==='inbox';
   const count = S.messages.length;
-  $('#list-panel').innerHTML=`<div class="list-heading"><div class="eyebrow">${new Date().toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'})}</div><div class="title-row"><h1>${viewNames[S.view]}</h1><span class="badge">${S.view==='drafts'?S.drafts?.length||0:count} ${S.view==='drafts'?'bozze':count===1?'conversazione':'conversazioni'}</span></div><p class="subheading">${inbox?`${S.state.counts.unread||0} email da leggere. Facciamo un po’ di spazio.`:({starred:'Le conversazioni a cui vuoi tornare.',drafts:'Le parole giuste, con i tuoi tempi.',sent:'I messaggi che hai inviato.',snoozed:'Al momento giusto, di nuovo nella tua inbox.',archive:'Tutto conservato, niente in mezzo.'}[S.view])}</p></div>${inbox?`<button class="recap-card" data-action="recap"><span class="recap-symbol">${icon('sparkle')}</span><span><strong>La tua inbox, in un minuto.</strong><p>Lascia che Milo prepari il tuo recap.</p></span>${icon('arrow')}</button><div class="tabs">${[['','Tutte'],['people','Persone'],['updates','Notifiche'],['newsletters','Newsletter']].map(([category,name])=>`<button class="tab ${S.category===category?'active':''}" data-category="${category}">${name}</button>`).join('')}</div>`:''}${!S.online?'<div class="offline-note">Servizio non raggiungibile. Riprovo a collegarmi.</div>':''}${S.state.accounts.some(a=>a.error)?`<div class="error-banner">${esc(S.state.accounts.find(a=>a.error).error)} <button data-action="settings">Apri account</button></div>`:''}${S.state.pending?.some(p=>p.error)?'<div class="error-banner">Le modifiche sono salvate in Milo. La sincronizzazione con la casella verrà riprovata. <button data-action="settings">Dettagli</button></div>':''}<div id="message-list"></div>`;
+  $('#list-panel').innerHTML=`<div class="list-heading"><div class="eyebrow">${new Date().toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'})}</div><div class="title-row"><h1>${viewNames[S.view]}</h1><span class="badge">${S.view==='drafts'?S.drafts?.length||0:count} ${S.view==='drafts'?'bozze':count===1?'conversazione':'conversazioni'}</span></div><p class="subheading">${inbox?`${S.state.counts.unread||0} email da leggere. Facciamo un po’ di spazio.`:({starred:'Le conversazioni a cui vuoi tornare.',drafts:'Le parole giuste, con i tuoi tempi.',sent:'I messaggi che hai inviato.',snoozed:'Al momento giusto, di nuovo nella tua inbox.',archive:'Tutto conservato, niente in mezzo.'}[S.view])}</p></div>${inbox?`<button class="recap-card" data-action="recap"><span class="recap-symbol">${icon('sparkle')}</span><span><strong>La tua inbox, in un minuto.</strong><p>Lascia che Milo prepari il tuo recap.</p></span>${icon('arrow')}</button><div class="tabs">${[['','Tutte'],['people','Persone'],['updates','Notifiche'],['newsletters','Newsletter']].map(([category,name])=>`<button class="tab ${S.category===category?'active':''}" data-category="${category}">${name}</button>`).join('')}</div>`:''}${!S.online?'<div class="offline-note">Sei offline. Mostro la posta salvata su questo dispositivo.</div>':''}${S.state.accounts.some(a=>a.error)?`<div class="error-banner">${esc(S.state.accounts.find(a=>a.error).error)} <button data-action="settings">Apri account</button></div>`:''}${S.state.pending?.some(p=>p.error)?'<div class="error-banner">Le modifiche sono salvate in Milo. La sincronizzazione con la casella verrà riprovata. <button data-action="settings">Dettagli</button></div>':''}<div id="message-list"></div>`;
   const container=$('#message-list');
   if (S.loadingList) { container.innerHTML=skeleton(9,'list','Carico le conversazioni…');return; }
   if (S.view==='drafts') {
@@ -170,8 +173,9 @@ function htmlDocument(html) {
   const images=S.images?"'self' https:":"'self'";
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${images}; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style>html{color-scheme:light}body{margin:0;height:auto!important;font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;overflow-wrap:anywhere}.milo-email-document{display:flow-root;padding:16px;box-sizing:border-box}img,table{max-width:100%!important}img{height:auto}pre{white-space:pre-wrap}a{color:#2563eb}table{border-collapse:collapse}.milo-quoted-history{margin:16px 0;border-top:1px solid #dfe7f2;padding-top:10px}.milo-quoted-history>summary{cursor:pointer;color:#64748b;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.milo-quoted-history blockquote{margin-left:12px!important;padding-left:12px!important;border-left:2px solid #dfe7f2}.milo-quoted-history:not([open])>*:not(summary){display:none!important}</style></head><body><div class="milo-email-document">${quotedHTML(html)}</div></body></html>`;
 }
-function fitFrames() {
-  document.querySelectorAll('.email-html').forEach(frame=>{
+function fitFrames(root=document) {
+  root.querySelectorAll('.email-html').forEach(frame=>{
+    if(frame.dataset.fitted)return;frame.dataset.fitted='true';
     frame.addEventListener('load',()=>{
       const doc=frame.contentDocument,content=doc?.querySelector('.milo-email-document');
       if(!content)return;
@@ -196,8 +200,9 @@ function renderReading() {
   const messages=S.thread.length?S.thread:[m];
   const analysis=S.thread.findLast(message=>message.analysis)?.analysis||m.analysis;
   const downloading=S.loadingMessage||S.threadSync.phase==='downloading';
-  panel.innerHTML=`<div class="reading-toolbar"><button class="icon-button back-button" data-action="back" aria-label="Torna alla lista">${icon('back')}</button><button class="icon-button ${m.pinned?'is-active':''}" data-action="pin" aria-label="${m.pinned?'Rimuovi pin':'Fissa in alto'}" title="${m.pinned?'Rimuovi pin':'Fissa in alto'}">${icon('pin')}</button><button class="icon-button" data-action="archive" aria-label="${m.archived?'Sposta in inbox':'Archivia'}" title="Archivia">${icon('archive')}</button><button class="icon-button" data-action="trash" aria-label="Elimina conversazione" title="Sposta nel cestino">${icon('trash')}</button><button class="icon-button" data-action="snooze" aria-label="Posticipa" title="Posticipa">${icon('clock')}</button><button class="icon-button" data-action="read" aria-label="${m.read?'Segna da leggere':'Segna come letta'}">${icon('mail')}</button><button class="icon-button ${m.starred?'is-active':''}" data-action="star" aria-label="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'}">${icon('star')}</button><div class="right"><span class="dot" style="background:${accountColor(m.account_id)}"></span>${esc(S.state.accounts.find(a=>a.id===m.account_id)?.name||'Account')}</div></div><article class="mail-content"><span class="mail-label">${icon('people')}${categoryNames[m.category]||'Email'}</span><select class="category-select" id="message-category" aria-label="Categoria della email">${Object.entries(categoryNames).map(([key,name])=>`<option value="${key}" ${key===m.category?'selected':''}>${name}</option>`).join('')}</select><h2>${esc(subjectCore(m.subject))}</h2>${downloading?`<div class="download-status" role="status">${icon('refresh','spinner')}Scarico la conversazione e le tue risposte…</div>`:''}${S.threadSync.error?`<div class="error-banner">${esc(S.threadSync.error)}</div>`:''}${S.loadingMessage?skeleton(7,'reader','Carico il messaggio…'):`<section class="ai-summary"><div class="ai-summary-title">${icon('sparkle')}${analysis?'Il punto, secondo Milo':'Milo AI'}<button data-action="analyze">${analysis?'Rianalizza':'Analizza'}${icon('arrow')}</button></div><div id="analysis-content">${S.analyzing?skeleton(3,'block','Analisi in corso…'):`<p>${analysis?esc(analysis.summary):'Sintesi, cose da fare e priorità della conversazione.'}</p>${analysis?.action_items?.length?`<ul>${analysis.action_items.map(item=>`<li>${esc(item)}</li>`).join('')}</ul>`:''}`}</div></section><div class="thread-messages">${messages.map((item,index)=>`<details class="thread-message ${item.sent?'sent-message':''}" data-thread-message="${esc(item.id)}" ${index===messages.length-1||open.has(item.id)?'open':''}><summary><span class="sender-detail">${avatar(item)}<span><strong>${item.sent?'Tu':esc(item.sender)}</strong><span class="address">${esc(item.sender_email)}</span><small>${item.sent?'Risposta inviata':esc(item.preview.slice(0,90))}</small></span><time>${dateLabel(item.date,true)}</time></span></summary><div class="thread-message-body">${item.remote_images&&!S.images?'<button class="image-permission" data-action="load-images">Carica immagini esterne</button>':''}${item.html?`<iframe class="email-html" title="Contenuto di ${esc(item.subject)}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc="${esc(htmlDocument(item.html))}"></iframe>`:quotedText(item.body)}${item.attachments?.length?`<div class="attachments">${item.attachments.map(a=>`<a class="attachment" href="/api/messages/${encodeURIComponent(item.id)}/attachments/${a.index}">${icon('paperclip')}${esc(a.name)}</a>`).join('')}</div>`:''}</div></details>`).join('')}</div><div class="reply-actions"><button data-action="reply">${icon('reply')}Rispondi</button><button data-action="forward">${icon('forward')}Inoltra</button><button data-action="ai-reply">${icon('sparkle')}Aiutami a rispondere</button></div><div id="inline-composer"></div>`}</article>`;
+  panel.innerHTML=`<div class="reading-toolbar"><button class="icon-button back-button" data-action="back" aria-label="Torna alla lista">${icon('back')}</button><button class="icon-button ${m.pinned?'is-active':''}" data-action="pin" aria-label="${m.pinned?'Rimuovi pin':'Fissa in alto'}" title="${m.pinned?'Rimuovi pin':'Fissa in alto'}">${icon('pin')}</button><button class="icon-button" data-action="archive" aria-label="${m.archived?'Sposta in inbox':'Archivia'}" title="Archivia">${icon('archive')}</button><button class="icon-button" data-action="trash" aria-label="Elimina conversazione" title="Sposta nel cestino">${icon('trash')}</button><button class="icon-button" data-action="snooze" aria-label="Posticipa" title="Posticipa">${icon('clock')}</button><button class="icon-button" data-action="read" aria-label="${m.read?'Segna da leggere':'Segna come letta'}">${icon('mail')}</button><button class="icon-button ${m.starred?'is-active':''}" data-action="star" aria-label="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'}">${icon('star')}</button><div class="right"><span class="dot" style="background:${accountColor(m.account_id)}"></span>${esc(S.state.accounts.find(a=>a.id===m.account_id)?.name||'Account')}</div></div><article class="mail-content"><span class="mail-label">${icon('people')}${categoryNames[m.category]||'Email'}</span><select class="category-select" id="message-category" aria-label="Categoria della email">${Object.entries(categoryNames).map(([key,name])=>`<option value="${key}" ${key===m.category?'selected':''}>${name}</option>`).join('')}</select><h2>${esc(subjectCore(m.subject))}</h2>${downloading?`<div class="download-status" role="status">${icon('refresh','spinner')}Scarico la conversazione e le tue risposte…</div>`:''}${S.threadSync.error?`<div class="error-banner">${esc(S.threadSync.error)}</div>`:''}${S.loadingMessage?skeleton(7,'reader','Carico il messaggio…'):`<section class="ai-summary"><div class="ai-summary-title">${icon('sparkle')}${analysis?'Il punto, secondo Milo':'Milo AI'}<button data-action="analyze">${analysis?'Rianalizza':'Analizza'}${icon('arrow')}</button></div><div id="analysis-content">${S.analyzing?skeleton(3,'block','Analisi in corso…'):`<p>${analysis?esc(analysis.summary):'Sintesi, cose da fare e priorità della conversazione.'}</p>${analysis?.action_items?.length?`<ul>${analysis.action_items.map(item=>`<li>${esc(item)}</li>`).join('')}</ul>`:''}`}</div></section><div class="thread-messages">${messages.map((item,index)=>`<details class="thread-message ${item.sent?'sent-message':''}" data-thread-message="${esc(item.id)}" ${index===messages.length-1||open.has(item.id)?'open':''}><summary><span class="sender-detail">${avatar(item)}<span><strong>${item.sent?'Tu':esc(item.sender)}</strong><span class="address">${esc(item.sender_email)}</span><small>${item.sent?'Risposta inviata':esc(item.preview.slice(0,90))}</small></span><time>${dateLabel(item.date,true)}</time></span></summary><div class="thread-message-body" data-body-for="${esc(item.id)}">${index===messages.length-1||open.has(item.id)?bodyMarkup(item):''}</div></details>`).join('')}</div><div class="reply-actions"><button data-action="reply">${icon('reply')}Rispondi</button><button data-action="reply-all">${icon('reply')}Rispondi a tutti</button><button data-action="forward">${icon('forward')}Inoltra</button><button data-action="ai-reply">${icon('sparkle')}Aiutami a rispondere</button></div><div id="inline-composer"></div>`}</article>`;
   fitFrames();
+  for(const item of messages)if((item.id===messages.at(-1)?.id||open.has(item.id))&&!item.body_loaded)ensureBody(item.id).catch(()=>{});
   if(S.compose?.inline&&S.selected&&S.compose.thread_key===threadKey(S.selected)){renderInlineComposer(editor);if(editor&&editor.contains(active)){active.focus({preventScroll:true});if(caret)active.setSelectionRange(...caret);}}
 }
 
@@ -208,8 +213,19 @@ async function refresh(resetSelection=false,showLoading=false) {
   if(S.category&&view==='inbox')params.set('category',S.category);
   if(S.account)params.set('account',S.account);
   if(showLoading){S.loadingList=true;renderList();}
+  const cachePath=view==='drafts'?'/drafts':'/messages?'+params;
+  const [cachedState,cachedList]=await Promise.all([deviceCache.get('api:/state'),deviceCache.get('api:'+cachePath)]);
+  if(version!==S.listVersion)return;
+  if(cachedState&&cachedList){
+    S.state=cachedState;
+    const before=JSON.stringify(S.messages);
+    if(view==='drafts'){const drafts=new Map(cachedList.drafts.map(d=>[d.id,d]));for(const draft of S.pendingDrafts.values())drafts.set(draft.id,{...draft,pending:true});S.drafts=[...drafts.values()].filter(d=>!S.discardedDrafts.has(d.id));S.messages=[];}
+    else S.messages=cachedList.messages.filter(m=>!S.optimistic.get(threadKey(m))?.deleted).map(m=>({...m,...S.optimistic.get(threadKey(m))?.patch}));
+    const repaint=S.loadingList||before!==JSON.stringify(S.messages);S.loadingList=false;if(repaint)renderList();
+  }
   try {
-    const [state,list]=await Promise.all([api('/state'),api(view==='drafts'?'/drafts':'/messages?'+params)]);
+    const path=view==='drafts'?'/drafts':'/messages?'+params;
+    const [state,list]=await Promise.all([api('/state').catch(async error=>{if(error.status)throw error;return await deviceCache.get('api:/state')||Promise.reject(error);}),api(path).catch(async error=>{if(error.status)throw error;return await deviceCache.get('api:'+path)||(view==='drafts'&&S.pendingDrafts.size?{drafts:[]}:Promise.reject(error));})]);
     if(version!==S.listVersion)return;
     S.state=state;if(!$('#appearance-form'))applyTheme(state.appearance?.theme||S.theme);
     if(view==='drafts'){const drafts=new Map(list.drafts.map(d=>[d.id,d]));for(const draft of S.pendingDrafts.values())drafts.set(draft.id,{...draft,pending:true});S.drafts=[...drafts.values()].filter(d=>!S.discardedDrafts.has(d.id));S.messages=[];}
@@ -218,16 +234,62 @@ async function refresh(resetSelection=false,showLoading=false) {
     if(resetSelection){S.selected=null;S.thread=[];S.readerAnchor=null;}
   } finally {if(version===S.listVersion)S.loadingList=false;}
 }
-async function loadThread(id,version=S.readerVersion) {
-  const result=await api('/messages/'+encodeURIComponent(id)+'/thread'+(S.images?'?load_images=true':''));
+const bodyRequests=new Map();
+const bodyPath=id=>'/messages/'+encodeURIComponent(id)+(S.images?'?load_images=true':'');
+function bodyMarkup(item){
+  if(!item.body_loaded)return item.body_error?`<div class="offline-note">${esc(item.body_error)}</div><button class="secondary" data-download-body="${esc(item.id)}">Riprova</button>`:skeleton(3,'message-body','Scarico il messaggio…');
+  return `${item.remote_images&&!S.images?'<button class="image-permission" data-action="load-images">Carica immagini esterne</button>':''}${item.html?`<iframe class="email-html" title="Contenuto di ${esc(item.subject)}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc="${esc(htmlDocument(item.html))}"></iframe>`:quotedText(item.body)}${item.attachments?.length?`<div class="attachments">${item.attachments.map(a=>`<a class="attachment" href="/api/messages/${encodeURIComponent(item.id)}/attachments/${a.index}">${icon('paperclip')}${esc(a.name)}</a>`).join('')}</div>`:''}`;
+}
+function displayBody(item){
+  const slot=[...document.querySelectorAll('[data-body-for]')].find(el=>el.dataset.bodyFor===item.id);
+  if(!slot||!slot.closest('details')?.open)return;
+  slot.querySelectorAll('.email-html').forEach(frame=>frame._observer?.disconnect());
+  slot.innerHTML=bodyMarkup(item);fitFrames(slot);
+}
+async function ensureBody(id){
+  const version=S.readerVersion,path=bodyPath(id),metadata=S.thread.find(m=>m.id===id);
+  if(!metadata)return null;
+  if(metadata.body_loaded)return metadata;
+  let message=await deviceCache.get('api:'+path);
+  if(message&&metadata.content_version&&message.content_version!==metadata.content_version)message=null;
+  if(!message){
+    let pending=bodyRequests.get(path);
+    if(!pending){pending=api(path);bodyRequests.set(path,pending);pending.finally(()=>{if(bodyRequests.get(path)===pending)bodyRequests.delete(path);}).catch(()=>{});}
+    try{message=await pending;}catch(error){
+      if(version===S.readerVersion){metadata.body_error=S.online?error.message:'Questo messaggio non è ancora nella cache del dispositivo. Ricollegati per scaricarlo.';displayBody(metadata);}
+      throw error;
+    }
+  }
+  if(version!==S.readerVersion)return message;
+  const latest=S.thread.find(m=>m.id===id)||metadata,item={...message,...latest,body_loaded:true,body_error:null};
+  S.thread=S.thread.map(m=>m.id===id?item:m);if(S.selected?.id===id)S.selected=item;displayBody(item);return item;
+}
+let warmingVersion=0;
+function warmThread(){
+  const version=++warmingVersion,ids=S.thread.filter(m=>!m.body_loaded).map(m=>m.id).reverse();
+  setTimeout(async()=>{for(const id of ids){if(version!==warmingVersion||!S.online||document.hidden)break;try{await ensureBody(id);}catch{break;}}},1200);
+}
+async function applyThread(result,id,version){
   if(version!==S.readerVersion||id!==S.readerAnchor)return;
-  const changed=S.loadingMessage||JSON.stringify(S.thread)!==JSON.stringify(result.messages)||JSON.stringify(S.threadSync)!==JSON.stringify(result.sync||{});
-  S.thread=result.messages;S.threadSync=result.sync||{};
-  if(S.thread.length)S.selected=S.thread.at(-1);
-  S.loadingMessage=false;if(changed)renderReading();
+  const messages=await Promise.all(result.messages.map(async metadata=>{
+    const message=await deviceCache.get('api:'+bodyPath(metadata.id));
+    return message&&(!metadata.content_version||message.content_version===metadata.content_version)?{...message,...metadata,body_loaded:true}:metadata;
+  }));
+  if(version!==S.readerVersion||id!==S.readerAnchor)return;
+  const signature=JSON.stringify(result.messages)+JSON.stringify({phase:result.sync?.phase,error:result.sync?.error});
+  const changed=S.loadingMessage||S.threadSignature!==signature;S.threadSignature=signature;
+  S.thread=messages;S.threadSync=result.sync||{};if(S.thread.length)S.selected=S.thread.at(-1);
+  S.loadingMessage=false;if(changed){renderReading();warmThread();}
+}
+async function loadThread(id,version=S.readerVersion){
+  const path='/messages/'+encodeURIComponent(id)+'/thread?lazy=true';
+  const cached=await deviceCache.get('api:'+path);
+  if(cached)await applyThread(cached,id,version);
+  try{await applyThread(await api(path),id,version);}
+  catch(error){if(!cached||error.status)throw error;S.online=false;renderChrome();}
 }
 async function selectMessage(id,markRead=true) {
-  const version=++S.readerVersion;
+  warmingVersion++;const version=++S.readerVersion;
   const cached=S.messages.find(m=>m.id===id);
   S.readerAnchor=id;S.selected=cached||{id,subject:'Conversazione',category:'people'};
   S.thread=[];S.threadSync={};S.images=false;S.loadingMessage=true;S.menu=false;
@@ -242,7 +304,7 @@ async function mutate(patch,deleted=false) {
   if(!S.selected||S.loadingMessage)return;
   if(S.compose&&(deleted||'archived' in patch||'snoozed_until' in patch))closeCompose().catch(error=>toast(error.message));
   const id=S.readerAnchor,key=threadKey(S.selected),previous=S.selected;
-  const token={patch,deleted};S.optimistic.set(key,token);
+  const token={patch:{...S.optimistic.get(key)?.patch,...patch},deleted};S.optimistic.set(key,token);
   S.listVersion++;
   S.selected={...S.selected,...patch};S.thread=S.thread.map(m=>({...m,...patch}));
   S.messages=S.messages.map(m=>threadKey(m)===key?{...m,...patch}:m);
@@ -256,6 +318,11 @@ async function mutate(patch,deleted=false) {
     S.listVersion++;await refresh();renderList();renderChrome();
     if(deleted)toast('Conversazione eliminata. Sincronizzo il cestino in background.');
   }catch(error){
+    if(!error.status&&!S.online){
+      const operation={id:crypto.randomUUID(),key,message_id:id,patch,deleted};token.operationId=operation.id;
+      await deviceCache.enqueue(operation);await deviceCache.set('api:/messages?view=inbox&search=',{messages:S.messages});
+      renderChrome();toast('Modifica salvata sul dispositivo. Verrà sincronizzata quando torni online.');return;
+    }
     if(S.optimistic.get(key)===token)S.optimistic.delete(key);
     if(S.selected?.id===previous.id)S.selected=previous;
     await refresh().catch(()=>{});renderList();renderReading();
@@ -277,7 +344,7 @@ function showSettings(tab=S.settingsTab) {
   } else if(tab==='rules') {
     body=`<p>I tuoi filtri hanno precedenza sulla classificazione AI e vengono applicati anche alle email già salvate.</p>${S.state.rules.map(r=>`<div class="rule-row"><div><strong>${esc(r.name)}</strong>${esc(r.contains)} → ${categoryNames[r.category]}</div><button class="icon-button" data-delete-rule="${esc(r.id)}" aria-label="Elimina filtro">${icon('trash')}</button></div>`).join('')}<form id="rule-form" style="margin-top:22px"><div class="form-grid"><label class="field full"><span>Nome del filtro</span><input name="name" placeholder="Le notifiche di GitHub" required></label><label class="field"><span>Quando</span><select name="field"><option value="sender">Il mittente contiene</option><option value="subject">L’oggetto contiene</option><option value="body">Il testo contiene</option></select></label><label class="field"><span>Questo testo</span><input name="contains" placeholder="github.com" required></label><label class="field full"><span>Sposta nella categoria</span><select name="category">${Object.entries(categoryNames).map(([key,name])=>`<option value="${key}">${name}</option>`).join('')}</select></label></div><div class="form-actions"><button class="primary" type="submit">Crea filtro</button></div></form>`;
   } else {
-    body=`<p>Questa è la casa del tuo archivio. Un altro dispositivo che accede allo stesso indirizzo trova account, email, preferenze e bozze già configurati.</p><div class="notice"><strong>Indirizzo del servizio</strong><br>${esc(location.origin)}</div><p>Per accedere da iPhone servirà un indirizzo HTTPS raggiungibile dal telefono. La versione nativa iOS e le notifiche push sono i prossimi passi; questa prima versione parte da Linux.</p><div class="notice">L’archivio email vive sul servizio. Per ora, la lettura richiede la connessione a Milo; la cache offline delle email sul dispositivo è ancora da costruire.</div>${S.status.access==='tailscale'?'<div class="notice">Accesso privato tramite i tuoi dispositivi Tailscale autorizzati. Il dominio pubblico mostra solo la presentazione di Milo.</div>':!S.status.demo?'<div class="form-actions"><button class="secondary" data-action="logout">Esci da questo dispositivo</button></div>':''}`;
+    body=`<p>Questa è la casa del tuo archivio. Un altro dispositivo che accede allo stesso indirizzo trova account, email, preferenze e bozze già configurati.</p><div class="notice"><strong>Indirizzo del servizio</strong><br>${esc(location.origin)}</div><p>Per accedere da iPhone servirà un indirizzo HTTPS raggiungibile dal telefono. La versione nativa iOS e le notifiche push sono i prossimi passi; questa prima versione parte da Linux.</p><div class="notice">I messaggi scaricati sono conservati nella cache privata di questo dispositivo e si possono leggere offline. L’archivio completo e gli account restano sul servizio.</div>${S.status.access==='tailscale'?'<div class="notice">Accesso privato tramite i tuoi dispositivi Tailscale autorizzati. Il dominio pubblico mostra solo la presentazione di Milo.</div>':!S.status.demo?'<div class="form-actions"><button class="secondary" data-action="logout">Esci da questo dispositivo</button></div>':''}`;
   }
   showModal('Il tuo Milo',tabs+body);
 }
@@ -302,7 +369,7 @@ function showAccountSettings(accountId) {
 }
 
 function composeMarkup(draft,inline=false) {
-  return `<form id="compose-form" class="${inline?'inline-compose-form':''}"><div class="compose-heading"><h3>${draft.mode==='forward'?'Inoltra':draft.mode==='reply'?'Rispondi':'Nuovo messaggio'}</h3>${inline?`<button class="icon-button" type="button" data-action="close-compose" aria-label="Chiudi" title="Chiudi bozza">${icon('close')}</button>`:''}</div><label class="field"><span>Da</span><select name="account_id">${S.state.accounts.map(a=>`<option value="${esc(a.id)}" ${draft.account_id===a.id?'selected':''}>${esc(a.name)} · ${esc(a.email)}</option>`).join('')}</select></label><label class="field"><span>A</span><input name="to" value="${esc(draft.to)}" placeholder="nome@example.com" maxlength="2000"></label><label class="field"><span>Oggetto</span><input name="subject" value="${esc(draft.subject)}" placeholder="Di cosa parliamo?" maxlength="998"></label><label class="field"><span>Messaggio</span><textarea class="composer-body" name="body" placeholder="Scrivi qui…" maxlength="1000000">
+  return `<form id="compose-form" class="${inline?'inline-compose-form':''}"><div class="compose-heading"><h3>${draft.mode==='forward'?'Inoltra':['reply','reply_all'].includes(draft.mode)?draft.mode==='reply_all'?'Rispondi a tutti':'Rispondi':'Nuovo messaggio'}</h3>${inline?`<button class="icon-button" type="button" data-action="close-compose" aria-label="Chiudi" title="Chiudi bozza">${icon('close')}</button>`:''}</div><label class="field"><span>Da</span><select name="account_id">${S.state.accounts.map(a=>`<option value="${esc(a.id)}" ${draft.account_id===a.id?'selected':''}>${esc(a.name)} · ${esc(a.email)}</option>`).join('')}</select></label><label class="field"><span>A</span><input name="to" value="${esc(draft.to)}" placeholder="nome@example.com" maxlength="2000"></label><label class="field"><span>Cc</span><input name="cc" value="${esc(draft.cc)}" placeholder="Copia conoscenza" maxlength="2000"></label><label class="field"><span>Oggetto</span><input name="subject" value="${esc(draft.subject)}" placeholder="Di cosa parliamo?" maxlength="998"></label><label class="field"><span>Messaggio</span><textarea class="composer-body" name="body" placeholder="Scrivi qui…" maxlength="1000000">
 ${esc(draft.body)}</textarea></label><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="delete-draft">Elimina bozza</button><button class="secondary" type="button" data-action="save-draft">Salva bozza</button><button class="primary" type="submit">${icon('sent')}Invia messaggio</button></div><div class="draft-save-status" role="status">${S.pendingDrafts.has(draft.id)?'Salvataggio in attesa':'Le modifiche vengono salvate automaticamente.'}</div></form>`;
 }
 function renderInlineComposer(existing=null) {
@@ -318,7 +385,7 @@ function captureCompose() {
 }
 function storePendingDrafts(){clearTimeout(localDraftTimer);try{localStorage.setItem('milo-pending-drafts',JSON.stringify([...S.pendingDrafts.values()]));}catch{toast('Spazio locale esaurito. La bozza resta in Bozze finché Milo è aperto; attendi il salvataggio sul server prima di uscire.');}}
 function rememberDraft(draft,immediate=true){if(!draft||(!draft.to&&!draft.subject&&!draft.body))return false;S.pendingDrafts.set(draft.id,{...draft});if(immediate)storePendingDrafts();else{clearTimeout(localDraftTimer);localDraftTimer=setTimeout(storePendingDrafts,200);}return true;}
-function draftPayload(draft){return Object.fromEntries(['id','account_id','to','subject','body','reply_to_id','context_message_id','mode','revision'].map(key=>[key,draft[key]??(['to','subject','body'].includes(key)?'':null)]));}
+function draftPayload(draft){return Object.fromEntries(['id','account_id','to','cc','subject','body','reply_to_id','context_message_id','mode','revision'].map(key=>[key,draft[key]??(['to','cc','subject','body'].includes(key)?'':null)]));}
 function persistDraft(draft) {
   if(!rememberDraft(draft)||S.discardedDrafts.has(draft.id))return Promise.resolve(null);
   const previous=S.draftWrites.get(draft.id);
@@ -327,6 +394,7 @@ function persistDraft(draft) {
     if(S.discardedDrafts.has(draft.id))return null;
     if($('#compose-form')&&S.compose?.id===draft.id&&$('.draft-save-status'))$('.draft-save-status').textContent='Salvataggio…';
     const result=await api('/drafts','PUT',draftPayload(draft));
+    await cachedDraftChange(result.id,draft);
     if((S.pendingDrafts.get(draft.id)?.revision||0)<=draft.revision)S.pendingDrafts.delete(draft.id);
     storePendingDrafts();
     if(S.compose?.id===draft.id&&$('.draft-save-status'))$('.draft-save-status').textContent='Bozza salvata';
@@ -337,6 +405,12 @@ function persistDraft(draft) {
   return promise;
 }
 function removeComposer(){clearTimeout(autosaveTimer);if($('#overlay #compose-form'))$('#overlay').innerHTML='';if($('#inline-composer'))$('#inline-composer').innerHTML='';S.compose=null;}
+async function cachedDraftChange(id,draft=null){
+  const existing=await deviceCache.get('api:/drafts')||{drafts:[]};
+  const drafts=existing.drafts.filter(item=>item.id!==id);
+  if(draft)drafts.unshift({...draft,id,updated:Date.now()/1000});
+  await deviceCache.set('api:/drafts',{drafts});
+}
 async function closeCompose(){const draft=captureCompose();removeComposer();if(draft)await persistDraft(draft);}
 async function saveCompose(){clearTimeout(autosaveTimer);return persistDraft(captureCompose());}
 function showCompose(draft={},inline=Boolean(draft.reply_to_id||draft.context_message_id)) {
@@ -346,7 +420,7 @@ function showCompose(draft={},inline=Boolean(draft.reply_to_id||draft.context_me
     closeCompose().catch(error=>toast(error.message));
   }
   const mode=draft.reply_to_id&&(!draft.mode||draft.mode==='new')?'reply':draft.mode||'new';
-  const current={...draft,id:draft.id||crypto.randomUUID(),account_id:draft.account_id||S.state.accounts[0].id,to:draft.to||'',subject:draft.subject||'',body:draft.body||'',mode,reply_to_id:draft.reply_to_id||null,context_message_id:draft.context_message_id||draft.reply_to_id||null,revision:draft.revision||Date.now(),inline:inline&&Boolean($('#inline-composer')),thread_key:S.selected?threadKey(S.selected):null};
+  const current={...draft,id:draft.id||crypto.randomUUID(),account_id:draft.account_id||S.state.accounts[0].id,to:draft.to||'',cc:draft.cc||'',subject:draft.subject||'',body:draft.body||'',mode,reply_to_id:draft.reply_to_id||null,context_message_id:draft.context_message_id||draft.reply_to_id||null,revision:draft.revision||Date.now(),inline:inline&&Boolean($('#inline-composer')),thread_key:S.selected?threadKey(S.selected):null};
   S.compose=current;
   if(current.inline){renderInlineComposer();$('#inline-composer').scrollIntoView({block:'nearest'});$('#inline-composer [name="body"]').focus({preventScroll:true});}
   else{showModal('Nuovo messaggio',composeMarkup(current),true);S.compose=current;}
@@ -360,7 +434,7 @@ async function openDraft(draft){
 async function discardCompose(){
   const draft=captureCompose();if(!draft)return;
   S.discardedDrafts.add(draft.id);S.pendingDrafts.delete(draft.id);storePendingDrafts();removeComposer();
-  await S.draftWrites.get(draft.id)?.promise.catch(()=>{});await api('/drafts/'+encodeURIComponent(draft.id),'DELETE');
+  await S.draftWrites.get(draft.id)?.promise.catch(()=>{});await api('/drafts/'+encodeURIComponent(draft.id),'DELETE');await cachedDraftChange(draft.id);
   await refresh();renderList();toast('Bozza eliminata.');
 }
 
@@ -395,6 +469,15 @@ async function runAI(action,button) {
   finally { if(S.compose?.id===generatedDraft?.id)$('#compose-form .reply-generation')?.remove();S.analyzing=false;if(action==='analyze')renderReading();if(button){button.disabled=false;button.classList.remove('is-loading');} }
 }
 
+function replyRecipients(message,all=false){
+  const mine=new Set(S.state.accounts.map(a=>a.email.toLowerCase())),seen=new Set(mine);
+  const unique=addresses=>addresses.filter(address=>{const email=address.email?.trim();if(!email||!email.includes('@')||seen.has(email.toLowerCase()))return false;seen.add(email.toLowerCase());return true;}).map(address=>address.email);
+  const primary=message.sent?(message.to_addresses||[]):message.reply_to_addresses?.length?message.reply_to_addresses:[{email:message.sender_email}];
+  const to=unique(all?[...primary,...(message.to_addresses||[])]:primary);
+  const cc=all?unique(message.cc_addresses||[]):[];
+  return {to:to.join(', '),cc:cc.join(', ')};
+}
+document.addEventListener('toggle',event=>{const details=event.target;if(details.matches?.('.thread-message')&&details.open){const item=S.thread.find(m=>m.id===details.dataset.threadMessage);if(item?.body_loaded)displayBody(item);else if(item)ensureBody(item.id).catch(()=>{});}},true);
 document.addEventListener('click', async event => {
   const target=event.target.closest('button,a'); if(!target) return;
   try {
@@ -406,6 +489,7 @@ document.addEventListener('click', async event => {
     if('category' in target.dataset) { if(S.compose)closeCompose().catch(error=>toast(error.message));S.category=target.dataset.category; S.selected=null; S.loadingList=true;renderShell();await refresh(true,true);renderList();return; }
     if(target.dataset.account) { if(S.compose)closeCompose().catch(error=>toast(error.message));S.account=S.account===target.dataset.account?'':target.dataset.account; S.loadingList=true;renderShell();await refresh(true,true);renderList();return; }
     if(target.dataset.message) { if(S.compose)closeCompose().catch(error=>toast(error.message));await selectMessage(target.dataset.message); return; }
+    if(target.dataset.downloadBody){await ensureBody(target.dataset.downloadBody);return;}
     if(target.dataset.draft) { await openDraft(S.drafts.find(d=>d.id===target.dataset.draft)); return; }
     if(target.dataset.editAccount) { showAccountSettings(target.dataset.editAccount);return; }
     if(target.dataset.settingsTab) { showSettings(target.dataset.settingsTab); return; }
@@ -429,8 +513,8 @@ document.addEventListener('click', async event => {
     if(action==='archive') { await mutate({archived:!S.selected.archived});toast('Modifica salvata. Milo la sincronizza con il provider.'); }
     if(action==='snooze') showModal('Un momento migliore.',`<p>La conversazione torna nella tua inbox quando arriva il momento.</p><div class="form-actions"><button class="secondary" data-snooze="${Date.now()/1000+3600}">Tra un’ora</button><button class="primary" data-snooze="${Date.now()/1000+86400}">Domani</button></div>`);
     if(target.dataset.snooze) { await mutate({snoozed_until:Number(target.dataset.snooze)});closeModal();toast('Email messa da parte.'); }
-    if(action==='reply') { const m=S.thread.findLast(message=>!message.sent)||S.selected;showCompose({account_id:m.account_id,to:m.sender_email,subject:'Re: '+subjectCore(m.subject),reply_to_id:m.id}); }
-    if(action==='forward') { const m=S.selected;showCompose({account_id:m.account_id,mode:'forward',context_message_id:m.id,subject:'Fwd: '+subjectCore(m.subject),body:`\n\n---------- Messaggio inoltrato ----------\nDa: ${m.sender} <${m.sender_email}>\nOggetto: ${m.subject}\n\n${m.body}`}); }
+    if(action==='reply'||action==='reply-all') {target.disabled=true;target.classList.add('is-loading');try{const source=S.thread.findLast(message=>!message.sent)||S.selected,m=await ensureBody(source.id);if(m)showCompose({account_id:m.account_id,...replyRecipients(m,action==='reply-all'),mode:action==='reply-all'?'reply_all':'reply',subject:'Re: '+subjectCore(m.subject),reply_to_id:m.id});}finally{target.disabled=false;target.classList.remove('is-loading');}}
+    if(action==='forward') { const m=await ensureBody(S.selected.id);if(!m)return;showCompose({account_id:m.account_id,mode:'forward',context_message_id:m.id,subject:'Fwd: '+subjectCore(m.subject),body:`\n\n---------- Messaggio inoltrato ----------\nDa: ${m.sender} <${m.sender_email}>\nOggetto: ${m.subject}\n\n${m.body}`}); }
     if(action==='save-draft') { if(await saveCompose()) { await refresh();renderList();toast('Bozza salvata nel tuo archivio.'); } }
     if(action==='delete-draft')await discardCompose();
     if(action==='close-compose')await closeCompose();
@@ -441,7 +525,7 @@ document.addEventListener('click', async event => {
       finally{S.syncing=false;await refresh();renderChrome();renderList();}
     }
     if(action==='retry-login') { await boot(); }
-    if(action==='logout') { await api('/logout','POST');S.status.authenticated=false;S.selected=null;S.messages=[];renderLogin(); }
+    if(action==='logout') { await api('/logout','POST');await deviceCache.clear();S.status.authenticated=false;S.selected=null;S.messages=[];renderLogin(); }
   } catch(error) { toast(error.message); }
 });
 
@@ -482,7 +566,7 @@ document.addEventListener('submit', async event => {
     if(form.id==='compose-form') {
       const snapshot=captureCompose(),id=await saveCompose();if(!id)throw new Error('Scrivi prima il tuo messaggio.');
       await api('/drafts/'+encodeURIComponent(id)+'/send','POST');
-      if(S.compose?.id===id&&(S.compose.revision||0)<=snapshot.revision)removeComposer();
+      if(S.compose?.id===id&&(S.compose.revision||0)<=snapshot.revision){removeComposer();await cachedDraftChange(id);}
       await refresh();if(S.readerAnchor)await loadThread(S.readerAnchor);renderList();toast('Messaggio inviato.');
     }
   } catch(error) { if(errorBox) errorBox.textContent=error.message;else toast(error.message); }
@@ -531,8 +615,12 @@ async function boot() {
     const oauth=new URLSearchParams(location.hash.slice(1));
     const oauthError=oauth.get('google_error'),connected=oauth.has('google_connected'),ownerToken=oauth.get('setup');
     if(ownerToken || oauthError || connected) history.replaceState(null,'',location.pathname);
-    S.status=await api('/status');
-    if(!S.status.initialized) {
+    const cachedStatus=await deviceCache.get('api:/status'),cachedState=await deviceCache.get('api:/state'),cachedList=await deviceCache.get('api:/messages?view=inbox&search=');
+    for(const operation of await deviceCache.get('pending-operations')||[])S.optimistic.set(operation.key,{patch:{...S.optimistic.get(operation.key)?.patch,...operation.patch},deleted:operation.deleted,operationId:operation.id});
+    if(cachedStatus?.authenticated&&cachedState&&cachedList){S.status=cachedStatus;S.state=cachedState;S.messages=cachedList.messages.filter(m=>!S.optimistic.get(threadKey(m))?.deleted).map(m=>({...m,...S.optimistic.get(threadKey(m))?.patch}));S.online=navigator.onLine;renderShell();renderList();}
+    try{S.status=await api('/status');}catch(error){if(error.status){await deviceCache.clear();throw error;}if(!cachedStatus?.authenticated)throw error;S.status=cachedStatus;S.online=false;}
+
+    if(!S.status.initialized&&!S.status.authenticated) {
       if(ownerToken) {
         try { await api('/setup/authorize','POST',{token:ownerToken}); }
         catch(error) { if(error.status!==403) throw error;toast(error.message); }
@@ -546,11 +634,23 @@ async function boot() {
     if(S.status.demo && S.messages.length && innerWidth>900) await selectMessage(S.messages[0].id,false);
   } catch(error) { $('#app').innerHTML=`<div class="empty" style="min-height:100vh">${icon('mail')}<h3>Milo non è raggiungibile.</h3><p>${esc(error.message)}</p></div>`; }
 }
+let flushingQueue=false;
+async function flushClientQueue(){
+  if(flushingQueue||!S.online)return;flushingQueue=true;
+  try{
+    for(const operation of await deviceCache.get('pending-operations')||[]){
+      try{await api('/messages/'+encodeURIComponent(operation.message_id)+'/thread',operation.deleted?'DELETE':'PATCH',operation.deleted?undefined:operation.patch);}
+      catch(error){if(error.status!==404)throw error;}
+      await deviceCache.acknowledge(operation.id);
+      if(S.optimistic.get(operation.key)?.operationId===operation.id)S.optimistic.delete(operation.key);
+    }
+  }finally{flushingQueue=false;}
+}
 async function poll() {
   try {
     if(S.status?.authenticated&&!document.hidden){
       const before=JSON.stringify(S.messages);
-      await refresh();renderChrome();if(before!==JSON.stringify(S.messages))renderList();
+      await refresh();await flushClientQueue();renderChrome();if(before!==JSON.stringify(S.messages))renderList();
       for(const draft of S.pendingDrafts.values())if(!S.draftWrites.has(draft.id)&&S.compose?.id!==draft.id)persistDraft(draft).catch(()=>{});
       if(S.readerAnchor&&(S.threadSync.phase==='downloading'||before!==JSON.stringify(S.messages))&&!S.loadingMessage)await loadThread(S.readerAnchor);
     }
@@ -559,5 +659,5 @@ async function poll() {
 }
 setTimeout(poll,2000);
 addEventListener('pagehide',()=>{const draft=captureCompose();if(draft)rememberDraft(draft);else storePendingDrafts();});
-if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
+if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js',{type:'module'}).catch(()=>{});
 boot();

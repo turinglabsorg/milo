@@ -80,11 +80,12 @@ class DraftInput(BaseModel):
     id: str | None = None
     account_id: str
     to: str = Field(max_length=2000)
+    cc: str = Field(default="", max_length=2000)
     subject: str = Field(max_length=998)
     body: str = Field(max_length=1_000_000)
     reply_to_id: str | None = None
     context_message_id: str | None = None
-    mode: Literal["new", "reply", "forward"] = "new"
+    mode: Literal["new", "reply", "reply_all", "forward"] = "new"
     revision: int = Field(default=0, ge=0)
 
 

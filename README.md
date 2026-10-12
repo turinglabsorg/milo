@@ -58,7 +58,8 @@ uv run milo --data .data/live
   Deleting a conversation removes it from the list immediately and queues a
   move to the provider's trash in the background. IMAP requires a Trash folder
   and MOVE; a failed move stays queued and the local conversation stays hidden.
-- Inline conversation replies and forwards, collapsed quoted history, normalized
+- Inline replies, Reply all with deduplicated To/Cc recipients, and forwards.
+  Collapsed quoted history, normalized
   repeated reply prefixes, drafts up to one million characters, automatic saving
   and recovery after a failed save. Shared drafts and explicit SMTP sending over
   TLS/STARTTLS, reply headers and sent-mail caching. Ambiguous failures are never automatically resent.
@@ -107,8 +108,10 @@ its public domain serves only a landing and OAuth relay, with no password endpoi
 Standalone local development retains password authentication. Received mail and
 tokens stay on the server. Unsaved draft edits have a local recovery copy until
 the server acknowledges them. The service polls providers every 60 seconds and
-the UI refreshes every 2–10 seconds while visible. Only the web app shell is cached
-offline; offline mailbox reading is still on the roadmap.
+the UI refreshes every 2–10 seconds while visible. Downloaded message content and thread metadata are retained in the device cache
+for offline reading. Metadata refreshes separately; already downloaded bodies are
+reused. This cache is a requirement of every client, including the future iOS app;
+see [the cache contract](docs/CLIENT_CACHE.md).
 
 For access from iOS, the service needs a stable HTTPS address reachable by the
 phone. Do not publish an unauthenticated demo or plain HTTP service to the
