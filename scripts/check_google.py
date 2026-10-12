@@ -26,7 +26,7 @@ def main():
             try:
                 for endpoint in ("profile", "messages"):
                     response = client.session.get(GMAIL_API + endpoint,
-                        params={"maxResults": 1} if endpoint == "messages" else None, timeout=20)
+                        params={"maxResults": 1, "q": "-in:drafts"} if endpoint == "messages" else None, timeout=20)
                     error = response.json().get("error", {})
                     reasons = [item.get("reason") for field in ("errors", "details")
                                for item in error.get(field, []) if isinstance(item, dict)]

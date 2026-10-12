@@ -110,10 +110,18 @@ service design does not yet implement replicated offline databases.
 
 This is a single-owner service, not a multi-tenant SaaS. The host can read the
 mail database and decrypt provider credentials. It is not end-to-end encrypted
-across devices. TLS verifies provider certificates. Message HTML is converted
-to text; attachments are authenticated downloads, never inline active content.
+across devices. TLS verifies provider certificates. Message HTML is sanitized
+with nh3, preserving tables and safe inline styles, then rendered in a sandboxed
+iframe with scripts, forms and external resources disabled. CID images use
+authenticated attachment endpoints; HTTPS remote images require a user action.
 Cookies are HttpOnly/SameSite; cross-origin writes are rejected. Client assets
-use a restrictive CSP and no third-party fonts, images, trackers or scripts.
+use a restrictive CSP and bundled fonts; email scripts are never executable.
+
+Conversation lists return only metadata, grouped by account and provider thread
+ID. IMAP uses References/In-Reply-To roots. The reader includes received and sent
+messages; opening a Google thread fetches missing messages in the background.
+Pin and theme preferences stay on the shared service. Trash is a local tombstone
+plus a durable provider operation, retaining identity and retries across restarts.
 
 Future work includes session/device revocation UI, account removal,
 passphrase recovery, encrypted backup, Microsoft OAuth, operational supervision, full mailbox pagination, incoming attachment

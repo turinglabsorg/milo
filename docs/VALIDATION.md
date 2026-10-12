@@ -50,6 +50,15 @@ bundled Geist font match this checkout. The Linux launcher is configured to use
 this same HTTPS origin. Initial passphrase setup is pending. No Google web-client
 credentials or real mailbox authorization have been provided.
 
+On 2026-10-12, the owner authorized transferring the one-time initialization
+link from the Mac Pro to the Linux client over Tailscale. The transfer completed
+and Milo opened on Linux with its setup code prefilled; the code was not printed
+in command output. A dedicated owner-controlled Google Cloud project named Milo
+was created, and Gmail API activation was confirmed in the Console. OAuth
+branding is prepared with an External audience. Completing its contact details,
+creating/importing the web OAuth client and authorizing a real mailbox remain
+pending. These configuration steps do not establish a successful mailbox sync.
+
 The tests do **not** prove:
 
 - Live interoperability with Gmail, iCloud, Exchange or another real provider.
@@ -59,5 +68,23 @@ The tests do **not** prove:
   email across a production service restart.
 - A working native iOS build, background delivery or push notifications.
 
-The overall product goal remains active. These are explicit future validation
+The overall product goal is paused at the owner's request while scoped fixes
+continue. These are explicit future validation
 gates, not claims established by the passing tests above.
+
+## Inbox improvements — 2026-10-12
+
+The scoped update groups conversations, includes sent replies, supports shared
+pin/theme/account-color preferences, renders sanitized HTML with CID images,
+and removes conversations immediately while retaining a durable trash operation.
+List responses contain metadata instead of MIME blobs and complete bodies.
+Skeletons cover initial loading, navigation, reading and AI requests, and the
+service reports active downloads separately from pending provider operations.
+
+The isolated suite passes 86 tests (including two Chromium tests); the nine
+existing browser flows pass separately on isolated demo and non-demo services.
+These checks cover thread identity between accounts, sent replies, pin ordering,
+HTML safety, dark-mode persistence, colors and removal before the DELETE response.
+The owner-authorized live diagnostic confirms successful Gmail profile/list
+responses and recovery of the previously reported account/outbox errors.
+This does not identify the original transient rejection's precise cause.

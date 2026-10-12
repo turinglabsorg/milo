@@ -44,6 +44,7 @@ class AccountUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=80)
     enabled: bool | None = None
+    color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     username: str | None = Field(default=None, min_length=1, max_length=254)
     password: str | None = Field(default=None, min_length=1, max_length=1024, repr=False)
     imap_host: str | None = Field(default=None, min_length=1, max_length=253)
@@ -66,8 +67,13 @@ class MessagePatch(BaseModel):
     read: bool | None = None
     starred: bool | None = None
     archived: bool | None = None
+    pinned: bool | None = None
     category: Literal["people", "updates", "newsletters"] | None = None
     snoozed_until: float | None = None
+
+
+class Appearance(BaseModel):
+    theme: Literal["system", "light", "dark"] = "system"
 
 
 class DraftInput(BaseModel):

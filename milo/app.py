@@ -20,6 +20,7 @@ from .models import (
     AccountInput,
     AccountUpdate,
     AISettings,
+    Appearance,
     DraftInput,
     GoogleStart,
     Login,
@@ -27,6 +28,7 @@ from .models import (
     RuleInput,
     SetupGrant,
 )
+from .render import render_html
 from .store import Store
 
 
@@ -38,6 +40,8 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     google = GoogleOAuth(store, public_url, google_client)
     sync_lock = asyncio.Lock()
     stop_worker = asyncio.Event()
+    wake_worker = asyncio.Event()
+    worker_loop = None
     attempts = {}
     sending = set()
     if demo:
@@ -49,21 +53,29 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
 
     async def worker():
         while not stop_worker.is_set():
+            wake_worker.clear()
             if not demo:
                 await sync()
             try:
-                await asyncio.wait_for(stop_worker.wait(), timeout=60)
+                await asyncio.wait_for(wake_worker.wait(), timeout=60)
             except TimeoutError:
                 continue
 
     @asynccontextmanager
     async def lifespan(app):
+        nonlocal worker_loop
+        worker_loop = asyncio.get_running_loop()
         task = asyncio.create_task(worker())
         yield
         # Do not close SQLite while a sync thread is still using it.
         stop_worker.set()
+        wake_worker.set()
         await task
         store.close()
+
+    def wake_sync():
+        if worker_loop and not demo:
+            worker_loop.call_soon_threadsafe(wake_worker.set)
 
     app = FastAPI(title="Milo", version="0.1.0", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.store, app.state.engine, app.state.ai, app.state.google = store, engine, ai, google
@@ -82,7 +94,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+            "img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
@@ -197,15 +209,16 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
 
     @app.get("/api/state", dependencies=[Depends(auth)])
     def state():
-        inbox = store.rows("SELECT COUNT(*) AS count,SUM(read=0) AS unread FROM messages WHERE hidden=0 AND archived=0 AND sent=0 "
+        inbox = store.rows("SELECT COUNT(DISTINCT account_id || ':' || COALESCE(thread_id,id)) AS count,SUM(read=0) AS unread FROM messages WHERE hidden=0 AND trashed=0 AND archived=0 AND sent=0 "
                            "AND (snoozed_until IS NULL OR snoozed_until<=?)", (time.time(),))[0]
         return {"accounts": store.accounts(), "ai": store.setting("ai"), "ai_error": store.setting("ai_error"),
+                "appearance": store.setting("appearance") or {"theme": "system"}, "sync": engine.status(),
                 "google": google.status(), "rules": store.rules(),
                 "pending": store.rows("SELECT kind,error,COUNT(*) AS count FROM outbox GROUP BY kind,error"),
                 "counts": {"inbox": inbox["count"], "unread": inbox["unread"] or 0,
-                           "starred": store.rows("SELECT COUNT(*) AS count FROM messages WHERE hidden=0 AND starred=1")[0]["count"],
+                           "starred": store.rows("SELECT COUNT(*) AS count FROM messages WHERE hidden=0 AND trashed=0 AND starred=1")[0]["count"],
                            "drafts": store.rows("SELECT COUNT(*) AS count FROM drafts")[0]["count"],
-                           "snoozed": store.rows("SELECT COUNT(*) AS count FROM messages WHERE hidden=0 AND snoozed_until>?",
+                           "snoozed": store.rows("SELECT COUNT(*) AS count FROM messages WHERE hidden=0 AND trashed=0 AND snoozed_until>?",
                                                  (time.time(),))[0]["count"]}}
 
     @app.post("/api/accounts", dependencies=[Depends(auth)])
@@ -222,7 +235,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     def update_account(account_id: str, data: AccountUpdate, background: BackgroundTasks):
         live()
         patch = data.model_dump(exclude_unset=True)
-        connection_fields = set(patch) - {"name", "enabled"}
+        connection_fields = set(patch) - {"name", "enabled", "color"}
         lock = engine.account_lock(account_id) if connection_fields else store.lock
         with lock:
             previous = store.account(account_id)
@@ -230,33 +243,36 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                 raise HTTPException(404, "Account non trovato")
             if any(value is None for value in patch.values()):
                 raise HTTPException(422, "Impostazioni account non valide")
-            if previous["provider"] == "google" and set(patch) - {"name", "enabled"}:
+            if previous["provider"] == "google" and set(patch) - {"name", "enabled", "color"}:
                 raise HTTPException(422, "Per aggiornare l'accesso Google usa Ricollega")
             changed = {key for key, value in patch.items() if key == "password" or previous.get(key) != value}
             try:
                 account = store.update_account(account_id, {key: patch[key] for key in changed})
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from exc
-            connection = changed - {"name", "enabled"}
+            connection = changed - {"name", "enabled", "color"}
             if account["enabled"] and (connection or ("enabled" in changed)):
                 background.add_task(engine.sync_account, account)
         return account
 
-    @app.post("/api/sync", dependencies=[Depends(auth)])
-    async def sync_now():
+    @app.post("/api/sync", dependencies=[Depends(auth)], status_code=202)
+    async def sync_now(background: BackgroundTasks):
         if demo:
             return {"results": [], "demo": True}
-        return {"results": await sync()}
+        if not sync_lock.locked():
+            background.add_task(sync)
+        return {"accepted": True}
 
     @app.get("/api/messages", dependencies=[Depends(auth)])
     def messages(view="inbox", category: str | None = None, account: str | None = None, search=""):
-        return {"messages": store.messages(view, category, account, search[:300])}
+        return {"messages": store.conversations(view, category, account, search[:300])}
 
     @app.get("/api/messages/{message_id}", dependencies=[Depends(auth)])
-    def get_message(message_id: str):
+    def get_message(message_id: str, load_images: bool = False):
         message = message_or_404(message_id, raw=True)
         raw = message.pop("raw")
         mail = email.message_from_bytes(raw, policy=policy.default)
+        message.update(render_html(mail, message_id, load_images))
         message["attachments"] = [{"index": i, "name": part.get_filename() or "allegato",
                                     "type": part.get_content_type()}
                                    for i, part in enumerate(mail.walk()) if part.get_filename()]
@@ -266,11 +282,55 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     def attachment(message_id: str, index: int):
         message = message_or_404(message_id, raw=True)
         parts = list(email.message_from_bytes(message["raw"], policy=policy.default).walk())
-        if index < 0 or index >= len(parts) or not parts[index].get_filename():
+        if index < 0 or index >= len(parts) or not (parts[index].get_filename() or parts[index].get("Content-ID")):
             raise HTTPException(404, "Allegato non trovato")
         part = parts[index]
-        return Response(part.get_payload(decode=True) or b"", media_type="application/octet-stream",
-                        headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote(part.get_filename(), safe="")})
+        inline = part.get_content_type() in {"image/png", "image/jpeg", "image/gif", "image/webp"}
+        return Response(part.get_payload(decode=True) or b"", media_type=part.get_content_type() if inline else "application/octet-stream",
+                        headers={"Content-Disposition": ("inline" if inline else "attachment") + "; filename*=UTF-8''" + quote(part.get_filename() or "immagine", safe="")})
+
+    @app.get("/api/messages/{message_id}/thread", dependencies=[Depends(auth)])
+    def get_thread(message_id: str, background: BackgroundTasks, load_images: bool = False):
+        message_or_404(message_id)
+        messages = store.conversation(message_id, raw=True)
+        for message in messages:
+            mail = email.message_from_bytes(message.pop("raw"), policy=policy.default)
+            message.update(render_html(mail, message["id"], load_images))
+            message["attachments"] = [{"index": i, "name": part.get_filename(), "type": part.get_content_type()}
+                                      for i, part in enumerate(mail.walk()) if part.get_filename()]
+        account = store.account(messages[0]["account_id"]) if messages else None
+        progress = engine.thread_status(message_id)
+        if not demo and account and account["provider"] == "google" and account["enabled"]:
+            if not progress or progress.get("updated", 0) < time.time() - 30:
+                progress = {"phase": "downloading"}
+                background.add_task(engine.sync_thread, message_id)
+        return {"messages": messages, "sync": progress}
+
+    @app.patch("/api/messages/{message_id}/thread", dependencies=[Depends(auth)])
+    def patch_thread(message_id: str, data: MessagePatch):
+        message_or_404(message_id)
+        patch = data.model_dump(exclude_unset=True)
+        if any(v is None for k, v in patch.items() if k != "snoozed_until"):
+            raise HTTPException(422, "Stato non valido")
+        store.patch_conversation(message_id, patch)
+        if set(patch) & {"read", "starred", "archived"}:
+            wake_sync()
+        return {"ok": True}
+
+    @app.delete("/api/messages/{message_id}/thread", dependencies=[Depends(auth)], status_code=202)
+    def trash_thread(message_id: str):
+        message_or_404(message_id)
+        store.trash_conversation(message_id)
+        if demo:
+            store.execute("DELETE FROM outbox WHERE message_id IN (SELECT id FROM messages WHERE trashed=1)")
+        else:
+            wake_sync()
+        return {"accepted": True}
+
+    @app.put("/api/settings/appearance", dependencies=[Depends(auth)])
+    def appearance(data: Appearance):
+        store.set_setting("appearance", data.model_dump())
+        return data
 
     @app.patch("/api/messages/{message_id}", dependencies=[Depends(auth)])
     def patch_message(message_id: str, data: MessagePatch):

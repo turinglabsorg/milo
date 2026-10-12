@@ -42,14 +42,22 @@ uv run milo --data .data/live
 ## What works
 
 - A responsive three-column inbox, search, categories and account filtering.
+- Conversations group received mail and sent replies. Pin a conversation to the
+  top, see which messages have AI analysis, and open formatted HTML email with
+  authenticated inline images. External images load only when requested.
+- Light, dark and system themes, shared account colors, loading skeletons and
+  live download status. Lists load metadata; bodies load when opened.
 - Google OAuth with PKCE, encrypted refresh tokens and native Gmail API sync.
   Read/unread, stars and archive changes use Gmail labels; expired history
   cursors trigger a fresh scan while retaining cached mail.
 - IMAP over TLS: import inbox, sent and archive folders, with UIDVALIDITY-aware
   identities, bounded backfill, flag reconciliation and remote deletion detection.
-- Durable queues for read/unread, stars and archive operations. Pending operations
+- Durable queues for read/unread, stars, archive and trash operations. Pending operations
   survive a restart; failed operations remain visible and are retried. Archiving
   requires the provider to expose an Archive folder and support IMAP MOVE.
+  Deleting a conversation removes it from the list immediately and queues a
+  move to the provider's trash in the background. IMAP requires a Trash folder
+  and MOVE; a failed move stays queued and the local conversation stays hidden.
 - Shared drafts and explicit SMTP sending over TLS/STARTTLS, reply headers and
   sent-mail caching. Ambiguous failures are never automatically resent.
 - Shared account names, pause/resume and encrypted IMAP credential updates.
