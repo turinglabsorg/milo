@@ -20,7 +20,7 @@ paths.pin='m8 3 8 0-1 6 4 4H5l4-4z M12 13v8';
 const icon = (name, extra = '') => `<svg class="icon ${extra}" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.mail}"/></svg>`;
 const googleIcon = () => '<svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285f4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.2h6.6c3.9-3.6 6.1-8.9 6.1-15.1z"/><path fill="#34a853" d="M24 44c5.5 0 10.1-1.8 13.5-4.9l-6.6-5.2c-1.8 1.2-4.1 1.9-6.9 1.9-5.3 0-9.8-3.6-11.4-8.4H5.8v5.3A20.4 20.4 0 0 0 24 44z"/><path fill="#fbbc05" d="M12.6 27.4a12.3 12.3 0 0 1 0-6.8v-5.3H5.8a20.4 20.4 0 0 0 0 17.4z"/><path fill="#ea4335" d="M24 12.2c3 0 5.7 1 7.8 3.1l5.9-5.9A19.8 19.8 0 0 0 24 4 20.4 20.4 0 0 0 5.8 15.3l6.8 5.3c1.6-4.8 6.1-8.4 11.4-8.4z"/></svg>';
 const logo = () => '<div class="logo"><img src="/static/icon.svg" alt="">milo<small>MAIL</small></div>';
-const S = {status:null, setupAuthorized:false, state:{accounts:[], counts:{}, ai:{}, sync:[]}, messages:[], selected:null, thread:[], threadSync:{}, readerAnchor:null, loadingMessage:false, loadingList:false, listVersion:0, readerVersion:0, optimistic:new Map(), view:'inbox', category:'', account:'', search:'', settingsTab:'accounts', menu:false, syncing:false, online:true, serverErrors:0, compose:null, theme:'system', images:false};
+const S = {status:null, setupAuthorized:false, state:{accounts:[], counts:{}, ai:{}, sync:[]}, messages:[], selected:null, thread:[], threadSync:{}, readerAnchor:null, loadingMessage:false, loadingList:false, listVersion:0, readerVersion:0, optimistic:new Map(), view:'inbox', category:'', account:'', search:'', settingsTab:'accounts', menu:false, syncing:false, online:true, serverErrors:0, compose:null, theme:'system', images:true};
 const MAX_SERVER_ERRORS=3;
 function updateOnlineState(){const wasOnline=S.online;S.online=navigator.onLine&&S.serverErrors<MAX_SERVER_ERRORS;if(wasOnline&&!S.online)renderChrome();}
 const categoryNames = {people:'Persone', updates:'Notifiche', newsletters:'Newsletter'};
@@ -272,7 +272,18 @@ function paintLocal(){
     for(const draft of S.pendingDrafts.values())drafts.set(draft.id,{...draft,pending:true});
     S.drafts=[...drafts.values()].filter(d=>!S.discardedDrafts.has(d.id));S.messages=[];
   }else S.messages=replica.select(currentQuery(),listPath(),S.optimistic);
-  S.loadingList=S.view!=='drafts'&&!replica.available;renderList();renderChrome();
+  S.loadingList=S.view!=='drafts'&&!replica.available;
+  const listData=S.view==='drafts'?S.drafts:S.messages;
+  const newListSignature=JSON.stringify([S.view,S.account,S.category,S.search,listData.map(m=>[m.id,m.read,m.starred,m.pinned,m.preview,m.subject,m.analyzed_count,m.pending,m.to,m.body?.slice(0,50)])]);
+  if(newListSignature!==S._lastListSignature){
+    S._lastListSignature=newListSignature;
+    renderList();
+  }
+  const newChromeSignature=JSON.stringify([S.state.counts,S.state.sync,S.online,S.syncing]);
+  if(newChromeSignature!==S._lastChromeSignature){
+    S._lastChromeSignature=newChromeSignature;
+    renderChrome();
+  }
   if(S.selected){const latest=replica.find(threadKey(S.selected));const fields=['subject','sender','sender_email','preview','date','read','starred','archived','pinned','category','message_count','analyzed_count'];if(latest&&!latest.deleted&&fields.some(field=>latest[field]!==S.selected[field])){S.selected={...S.selected,...Object.fromEntries(fields.map(field=>[field,latest[field]]))};renderReading();}}
 }
 replica.onChange(()=>{if(S.search)paintLocal();});
@@ -778,6 +789,18 @@ async function handleKeydown(event) {
     const key=event.key.toLowerCase();
     if(key==='/') { event.preventDefault();$('#search-input')?.focus(); }
     if(key==='c') { event.preventDefault();showCompose(); }
+    if(key==='arrowdown'||key==='arrowup') {
+      event.preventDefault();
+      const list=S.view==='drafts'?S.drafts:S.messages;
+      if(!list.length)return;
+      const currentIndex=S.selected?list.findIndex(m=>threadKey(m)===(S.selected?threadKey(S.selected):'')):-1;
+      let nextIndex;
+      if(key==='arrowdown') nextIndex=currentIndex+1>=list.length?0:currentIndex+1;
+      else nextIndex=currentIndex<=0?list.length-1:currentIndex-1;
+      if(currentIndex===-1) nextIndex=key==='arrowdown'?0:list.length-1;
+      const target=list[nextIndex];
+      if(target){selectMessage(target.id,false).catch(()=>{});document.querySelector(`[data-message="${target.id}"]`)?.scrollIntoView({block:'nearest',behavior:'smooth'});}
+    }
     if(S.selected) {
       try {
         if(key==='e') { event.preventDefault();await mutate({archived:true}); }
