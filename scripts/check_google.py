@@ -18,6 +18,10 @@ def main():
         for index, account in enumerate(store.accounts()):
             if account["provider"] != "google":
                 continue
+            print(json.dumps({"account": index + 1, "stored_error": account["error"],
+                              "messages": store.rows("SELECT COUNT(*) AS n FROM messages WHERE account_id=?", (account["id"],))[0]["n"],
+                              "pending": store.rows("SELECT kind,error,COUNT(*) AS n FROM outbox WHERE message_id IN "
+                                  "(SELECT id FROM messages WHERE account_id=?) GROUP BY kind,error", (account["id"],))}))
             client = Gmail(store, account["id"])
             try:
                 for endpoint in ("profile", "messages"):
