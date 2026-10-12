@@ -1,5 +1,5 @@
 import {deviceCache} from '/static/cache.js';
-const CACHE = 'milo-shell-v4';
+const CACHE = 'milo-shell-v5';
 const SHELL = ['/', '/static/style.css', '/static/app.js', '/static/cache.js', '/static/icon.svg', '/static/fonts/Geist.woff2'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
@@ -20,8 +20,13 @@ self.addEventListener('fetch', event => {
   }
   // API data is managed explicitly in the device's encrypted IndexedDB cache.
   if (url.origin !== self.location.origin || url.pathname.startsWith('/api/') || event.request.method !== 'GET') return;
-  event.respondWith(fetch(event.request).then(response=>{
-    if(response.status===401||response.status===404)caches.delete(CACHE);
-    return response;
-  }).catch(() => caches.match(event.request)));
+  // The installed app must start from the device even if a remote host stalls.
+  event.respondWith(caches.match(event.request).then(cached=>{
+    const fresh=fetch(event.request).then(async response=>{
+      if(response.status===401||response.status===404)await caches.delete(CACHE);
+      return response;
+    });
+    if(cached){event.waitUntil(fresh.catch(()=>{}));return cached;}
+    return fresh;
+  }));
 });
