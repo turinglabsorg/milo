@@ -51,11 +51,18 @@ screenshots verify a title and compact Recap action replace the limited list
 count and introductory copy, with account colors retained on avatar outlines
 without duplicate account dots.
 
-The latest read-only production check opened a conversation with a 100-message
+A read-only production check opened a conversation with a 100-message
 thread index including sent replies, at desktop 1440×1000 and mobile 390×844
 sizes. API writes were intercepted: draft saves were simulated and all other
 mutations blocked. Reply all opened inline without waiting for the full incoming
 body.
+
+After the shortcuts/navigation update, a separate read-only production check
+confirmed the current client assets, both error-free Google accounts, individual
+mailbox filters, the unified All accounts list, compact headers, absence of
+duplicate row dots and the saved recap. It observed no browser errors or API
+mutations. The replacement container is healthy and retains the existing archive,
+private port bindings and automatic restart policy.
 
 | Visible behavior | Desktop | Mobile viewport |
 | --- | ---: | ---: |
