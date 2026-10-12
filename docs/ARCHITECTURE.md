@@ -4,15 +4,18 @@
 
 Adding an account on Linux must not require adding it again on iOS. One private
 Milo service is authoritative for account credentials, imported mail, categories,
-AI results, filters, snooze and drafts. Clients hold only session cookies and
-rendered state. The service must stay reachable for other devices to use it.
+AI results, filters, snooze and drafts. Clients hold session cookies, rendered state and a local recovery copy of pending
+draft edits. Received mail and provider credentials stay on the server. The service must stay reachable for other devices to use it.
 
 ## Current implementation
 
 ```mermaid
 flowchart LR
-    Linux[Linux app window] --> API[Milo authenticated API]
-    Mobile[Responsive web client] --> API
+    Internet[Public domain] --> Landing[Landing and fixed OAuth relay]
+    Linux[Linux app window] --> Tail[Tailscale Serve with owner identity]
+    Mobile[Responsive private client] --> Tail
+    Tail --> API[Milo private loopback API]
+    Landing -->|Google callback only| Tail
     API --> SQLite[(Persistent archive)]
     Worker[Sync worker] --> SQLite
     Worker <--> Gmail[Gmail API with OAuth]
@@ -27,12 +30,14 @@ flowchart LR
 Python/FastAPI provides a same-origin API and static client. SQLite runs in WAL
 mode; threads share one connection behind a reentrant lock. Fernet encrypts
 provider passwords, OAuth client credentials and Google refresh tokens, using a host-side key. Sessions store only token hashes.
-The installed owner client authorizes first-start setup automatically through
-a private, one-time link. It exchanges the immediately removed URL fragment for
-a short-lived HttpOnly/SameSite=Strict cookie scoped to setup. The cookie is
-Secure in production and survives a reload. The visible form asks only for the
-owner's Milo password. Public visitors cannot initialize or claim the archive;
-successful password setup consumes the authorization and removes the cookie.
+The permanent Mac deployment separates the public landing on loopback port 8025
+from the archive backend on loopback port 8029. The backend accepts the exact
+owner identities from its private configuration, using Tailscale Serve's
+attested identity headers. Unknown identities receive 404 even with a valid
+Milo cookie. Password and setup endpoints are unavailable in this mode. The
+loopback binding and disabled forwarded-IP trust are required to prevent direct
+network clients from supplying trusted identity headers. Standalone local
+password onboarding remains available for development outside this deployment.
 
 For generic IMAP, the archive key is `(account, folder, UIDVALIDITY, UID)`, never a sequence number.
 A UIDVALIDITY reset invalidates local identities and queued operations before
@@ -46,7 +51,7 @@ AI metadata through Message-ID while the destination receives a new UID.
 
 The worker imports up to 200 new messages per folder per pass, newest first,
 then backfills older mail. It currently scans the UID/flags set rather than using
-CONDSTORE/QRESYNC or IDLE. Inbox queries return the most recent 500 messages;
+CONDSTORE/QRESYNC or IDLE. Inbox queries return metadata for the most recent 100 conversations;
 the archive continues to backfill beyond that UI limit. General custom folders,
 large mailbox pagination and provider-specific labels need further work.
 
@@ -93,11 +98,12 @@ later. Only run one service process against a given archive.
 
 ## Deployment and iOS
 
-The next deployment milestone is an always-on service behind HTTPS, reachable
-from Linux and a physical iPhone. Prefer a private network/VPN and a reverse
-proxy to a loopback listener. Bind remotely only with a firewall and TLS proxy.
-Enable `--secure-cookies` when using HTTPS. The proxy must preserve Host and
-Origin for same-origin checks. Do not expose the demo on a shared/public host.
+The permanent Grog supervisor runs the public presentation and private archive
+as separate processes. Tailscale Serve routes private HTTPS to the owner-protected
+loopback backend. The registered Google redirect stays public; a fixed relay
+returns the browser to the private callback, where PKCE, state and nonce are
+validated. See [deployment](DEPLOYMENT.md). Physical iPhone validation remains a
+separate milestone.
 
 PWA manifest and responsive navigation establish a portable UI, not a verified
 iOS product. Native iOS will use the same API and archive, with Keychain-backed
@@ -112,7 +118,7 @@ This is a single-owner service, not a multi-tenant SaaS. The host can read the
 mail database and decrypt provider credentials. It is not end-to-end encrypted
 across devices. TLS verifies provider certificates. Message HTML is sanitized
 with nh3, preserving tables and safe inline styles, then rendered in a sandboxed
-iframe with scripts, forms and external resources disabled. CID images use
+iframe with collapsed quoted history and intrinsic-height resizing. Scripts, forms and external resources disabled. CID images use
 authenticated attachment endpoints; HTTPS remote images require a user action.
 Cookies are HttpOnly/SameSite; cross-origin writes are rejected. Client assets
 use a restrictive CSP and bundled fonts; email scripts are never executable.
@@ -125,7 +131,7 @@ plus a durable provider operation, retaining identity and retries across restart
 
 Future work includes session/device revocation UI, account removal,
 passphrase recovery, encrypted backup, Microsoft OAuth, operational supervision, full mailbox pagination, incoming attachment
-size negotiation and concurrency/load validation. Account names and pause/resume settings are shared. The account management UI
+size negotiation and broader provider concurrency/load validation. Account names and pause/resume settings are shared. The account management UI
 updates encrypted IMAP credentials and offers Google reconnection bound to the
 existing email address. Pausing prevents later sync passes and automatic AI
 work; an already-running provider request/pass can finish. Cached mail, drafts

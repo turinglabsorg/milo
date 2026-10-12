@@ -31,7 +31,9 @@ stored accounts rather than holding Google refresh tokens themselves.
 
 The imported client secret and mailbox refresh tokens are encrypted with the
 service vault key. They never appear in the browser API or public repository.
-The Google callback uses PKCE, browser binding and one-time expiring state.
+In the private Mac deployment the public callback only relays to the fixed
+Tailscale origin. The private backend uses PKCE, browser binding and one-time
+expiring state; clients need Tailscale access for the return navigation.
 Reconnecting the same address retains its account identity and cached mail.
 Milo → Settings → Account → Manage lets you rename or pause the mailbox. Its
 Reconnect button suggests and validates that exact address, so choosing another

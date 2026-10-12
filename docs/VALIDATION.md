@@ -117,6 +117,14 @@ messages and the local development machine; they are not a guarantee of network
 or provider latency. Machine-readable measurements are written to the ignored
 `test-results/performance.json`.
 
-These local checks do not establish a completed production privacy cutover.
-Production Tailscale access and public landing deployment must be verified
-separately before reporting them as live.
+Production commit `ece2891` was activated on the Mac through the owner's saved
+VNC session over Tailscale. Public HTTPS returned the landing with
+`X-Milo-Surface: public`; `/api/login`, `/api/state`, `/api/messages` and
+`/static/app.js` all returned 404. The private loopback service reports a real
+initialized archive and Tailscale access; requests to its state API without an
+owner identity return 404. The existing Grog supervisor is retained.
+
+Tailscale Serve/HTTPS was not yet enabled in the owner's tailnet. The CLI requires
+owner authentication through Apple before activation. Public webmail is closed,
+but private HTTPS access from the Linux client remains awaiting that external
+step and is not yet claimed as verified.

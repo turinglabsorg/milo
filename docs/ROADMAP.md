@@ -1,6 +1,6 @@
 # Roadmap — the full product
 
-The goal remains a public, intelligent email client for Linux and iOS, with one
+The product is an open-source email client with a private owner archive for Linux and iOS, with one
 configuration and synchronized stored mail. This first foundation does not
 complete that goal.
 
