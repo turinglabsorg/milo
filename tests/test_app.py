@@ -31,6 +31,40 @@ def test_setup_requires_bootstrap_and_authentication(client):
     assert client.get("/api/state").status_code == 401
 
 
+def test_owner_link_authorizes_password_only_setup_and_is_consumed(tmp_path):
+    app = create_app(tmp_path / "secure", secure_cookies=True, public_url="https://milo.example")
+    token = app.state.store.bootstrap
+    with TestClient(app, base_url="https://milo.example") as owner:
+        visitor = TestClient(app, base_url="https://milo.example")
+        assert visitor.get("/api/setup/status").json() == {"authorized": False}
+        assert visitor.post("/api/setup", json={"password": "owner password chosen here"}).status_code == 403
+        response = owner.post("/api/setup/authorize", json={"token": token})
+        assert response.json() == {"ok": True} and token not in response.text
+        cookie = response.headers["set-cookie"]
+        assert all(attribute in cookie for attribute in ("HttpOnly", "Secure", "SameSite=strict", "Path=/api/setup"))
+        assert owner.get("/api/setup/status").json() == {"authorized": True}
+        assert owner.get("/api/setup/status").headers["cache-control"] == "no-store"
+        # The private cookie survives a reload; the form sends only the chosen password.
+        response = owner.post("/api/setup", json={"password": "owner password chosen here"})
+        assert response.status_code == 200
+        assert owner.cookies.get("milo_setup") is None
+        assert owner.get("/api/state").status_code == 200
+        visitor.cookies.set("milo_setup", token, path="/api/setup")
+        assert visitor.get("/api/setup/status").json() == {"authorized": False}
+        assert visitor.post("/api/setup", json={"password": "takeover password attempt"}).status_code == 403
+        assert visitor.post("/api/setup/authorize", json={"token": token}).status_code == 403
+
+
+def test_invalid_and_cross_origin_setup_links_do_not_authorize(client):
+    for token in ("wrong", "collegamento non valido è"):
+        assert client.post("/api/setup/authorize", json={"token": token}).status_code == 403
+    assert client.post("/api/setup/authorize", json={"token": client.app.state.store.bootstrap},
+                       headers={"Origin": "https://evil.example"}).status_code == 403
+    assert client.post("/api/setup/authorize", json={"token": client.app.state.store.bootstrap},
+                       headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+    assert client.get("/api/setup/status").json() == {"authorized": False}
+
+
 def test_csrf_guard_and_login_throttling(logged_in):
     client = logged_in
     assert client.post("/api/logout", headers={"Origin": "https://evil.example"}).status_code == 403

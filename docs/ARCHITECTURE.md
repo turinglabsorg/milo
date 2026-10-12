@@ -27,8 +27,12 @@ flowchart LR
 Python/FastAPI provides a same-origin API and static client. SQLite runs in WAL
 mode; threads share one connection behind a reentrant lock. Fernet encrypts
 provider passwords, OAuth client credentials and Google refresh tokens, using a host-side key. Sessions store only token hashes.
-The initial setup requires a random, one-time bootstrap code, printed locally;
-the Linux launcher passes it in an immediately removed URL fragment.
+The installed owner client authorizes first-start setup automatically through
+a private, one-time link. It exchanges the immediately removed URL fragment for
+a short-lived HttpOnly/SameSite=Strict cookie scoped to setup. The cookie is
+Secure in production and survives a reload. The visible form asks only for the
+owner's Milo password. Public visitors cannot initialize or claim the archive;
+successful password setup consumes the authorization and removes the cookie.
 
 For generic IMAP, the archive key is `(account, folder, UIDVALIDITY, UID)`, never a sequence number.
 A UIDVALIDITY reset invalidates local identities and queued operations before

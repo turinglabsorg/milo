@@ -5,7 +5,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class Login(BaseModel):
     password: str = Field(min_length=12, max_length=256)
-    bootstrap: str = ""
+    bootstrap: str = Field(default="", max_length=512)
+
+
+class SetupGrant(BaseModel):
+    token: str = Field(min_length=1, max_length=512)
 
 
 class AccountInput(BaseModel):

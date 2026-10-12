@@ -116,11 +116,12 @@ def test_ready_requires_https_and_unauthenticated_private_api(state_status, monk
     assert calls == [mac_server.ORIGIN + "/api/status", mac_server.ORIGIN + "/api/state"]
 
 
-def test_service_bootstrap_code_is_kept_out_of_logs(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("quiet", [True, False])
+def test_service_bootstrap_code_is_kept_out_of_logs(tmp_path, monkeypatch, capsys, quiet):
     code = "private-first-start-code"
     monkeypatch.setattr(cli, "create_app", lambda *args: SimpleNamespace(
         state=SimpleNamespace(store=SimpleNamespace(bootstrap=code))))
     monkeypatch.setattr(cli.uvicorn, "run", lambda *args, **kwargs: None)
-    monkeypatch.setattr(sys, "argv", ["milo", "--data", str(tmp_path), "--quiet-bootstrap"])
+    monkeypatch.setattr(sys, "argv", ["milo", "--data", str(tmp_path), *(["--quiet-bootstrap"] if quiet else [])])
     cli.main()
     assert code not in capsys.readouterr().out

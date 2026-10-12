@@ -49,6 +49,19 @@ def test_client_flows_and_responsive_layout(width, height):
 
 
 @pytest.mark.skipif(not os.environ.get("MILO_LIVE_TEST_URL"), reason="Set URL and DATA for an isolated non-demo test service")
+def test_first_access_without_owner_link_has_no_code_or_password_setup():
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(os.environ["MILO_LIVE_TEST_URL"])
+        expect(page.get_by_text("Milo aspetta il primo accesso.")).to_be_visible()
+        expect(page.locator('[name="bootstrap"]')).to_have_count(0)
+        expect(page.locator('[name="password"]')).to_have_count(0)
+        assert 'terminale' not in page.locator('#app').inner_text().lower()
+        browser.close()
+
+
+@pytest.mark.skipif(not os.environ.get("MILO_LIVE_TEST_URL"), reason="Set URL and DATA for an isolated non-demo test service")
 @pytest.mark.parametrize("width,height", [(1440, 1000), (900, 900), (390, 844)])
 def test_real_service_onboarding_and_google_connection_ui(width, height):
     import json
@@ -60,12 +73,18 @@ def test_real_service_onboarding_and_google_connection_ui(width, height):
         page = browser.new_page(viewport={"width": width, "height": height})
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
-        page.goto(os.environ["MILO_LIVE_TEST_URL"])
+        with sqlite3.connect(Path(os.environ["MILO_LIVE_TEST_DATA"]) / "mail.sqlite") as db:
+            bootstrap = json.loads(db.execute("SELECT value FROM settings WHERE key='bootstrap'").fetchone()[0])
+        url = os.environ["MILO_LIVE_TEST_URL"] + ("#setup=" + bootstrap if bootstrap else "")
+        page.goto(url)
         expect(page.locator("#login-form")).to_be_visible()
-        if page.locator('[name="bootstrap"]').count():
-            with sqlite3.connect(Path(os.environ["MILO_LIVE_TEST_DATA"]) / "mail.sqlite") as db:
-                bootstrap = json.loads(db.execute("SELECT value FROM settings WHERE key='bootstrap'").fetchone()[0])
-            page.locator('[name="bootstrap"]').fill(bootstrap)
+        expect(page.locator('[name="bootstrap"]')).to_have_count(0)
+        assert 'setup=' not in page.url
+        assert 'milo_setup' not in page.evaluate('document.cookie')
+        if bootstrap:
+            assert bootstrap not in page.content()
+            page.reload()
+            expect(page.locator("#login-form")).to_be_visible()
         page.locator('[name="password"]').fill("isolated browser test passphrase")
         page.locator('#login-form button[type="submit"]').click()
         expect(page.locator(".shell")).to_be_visible()
@@ -115,11 +134,10 @@ def test_account_management_browser_ui(width, height):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={'width': width, 'height': height})
-        page.goto(os.environ['MILO_LIVE_TEST_URL'])
-        if page.locator('[name="bootstrap"]').count():
-            with closing(Store(data)) as store:
-                bootstrap=store.bootstrap
-            page.locator('[name="bootstrap"]').fill(bootstrap)
+        with closing(Store(data)) as store:
+            bootstrap=store.bootstrap
+        page.goto(os.environ['MILO_LIVE_TEST_URL'] + ('#setup=' + bootstrap if bootstrap else ''))
+        expect(page.locator('#login-form')).to_be_visible()
         page.locator('[name="password"]').fill('isolated browser test passphrase')
         page.locator('#login-form button[type="submit"]').click()
         expect(page.locator('.shell')).to_be_visible()

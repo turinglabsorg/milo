@@ -160,9 +160,14 @@ class Store:
     def set_setting(self, key, value):
         self.execute("INSERT OR REPLACE INTO settings VALUES(?,?)", (key, json.dumps(value)))
 
+    def setup_allowed(self, token):
+        with self.lock:
+            return bool(token and self.bootstrap and not self.setting("password")
+                        and secrets.compare_digest(token.encode(), self.bootstrap.encode()))
+
     def setup(self, password, bootstrap):
         with self.lock:
-            if self.setting("password") or not secrets.compare_digest(bootstrap, self.bootstrap or ""):
+            if not self.setup_allowed(bootstrap):
                 return False
             salt = secrets.token_hex(16)
             self.set_setting("password", {"salt": salt, "hash": self.hash_password(password, salt)})

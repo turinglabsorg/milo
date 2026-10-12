@@ -28,8 +28,9 @@ sites file, preserves other sites, and reuses `space.grooooog.serve`. If that
 launch agent is absent, it creates one using the owner's installed Grog. It
 refuses conflicting domain/port settings and a custom Grog sites-file override.
 After HTTPS responds and the unauthenticated private API returns 401, it opens
-Milo in the Mac browser with the one-time setup code. Choose the passphrase in
-that browser, then configure Google and authorize each mailbox.
+Milo in the Mac browser with private first-start authorization. The interface
+asks only for the owner's Milo password; authorization happens automatically
+and survives a page reload. Then configure Google and authorize each mailbox.
 
 The server's default Mac archive is `~/Library/Application Support/Milo`, outside
 the checkout. A previously existing `.data/live` archive is retained. Keep one
@@ -70,10 +71,18 @@ without the query string and preserves the incoming Host header.
 
 ## Initialize and verify
 
-Read the first-start bootstrap code locally from the service host's private
-archive. Open the HTTPS origin, enter that one-time code and choose the owner's
-passphrase; never publish a bootstrap-bearing URL or a demo archive. Configure
-the Google web client using [Google setup](GOOGLE.md).
+Open Milo through the activation script or the paired Linux app and choose the
+owner's Milo password. There is no user-facing initialization code. A private
+owner link is exchanged for a short-lived Secure/HttpOnly cookie; a public
+visitor without that authorization cannot initialize or claim the server.
+Configure the Google web client using [Google setup](GOOGLE.md).
+
+For the owner's Linux installation, keep its first-start link in
+`.data/setup.url` with mode 0600. The launcher checks that the link belongs to
+the configured HTTPS origin and opens it automatically. The UI immediately
+removes the private fragment from the address and never places it in a form.
+Never publish this file or an owner link. After password setup, the authorization
+is consumed and the same installed app opens the normal login or inbox.
 
 Before treating deployment as ready:
 

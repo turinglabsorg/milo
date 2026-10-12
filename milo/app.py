@@ -25,6 +25,7 @@ from .models import (
     Login,
     MessagePatch,
     RuleInput,
+    SetupGrant,
 )
 from .store import Store
 
@@ -111,11 +112,26 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                             samesite="strict", max_age=30 * 86400)
         return {"ok": True}
 
-    @app.post("/api/setup")
-    def setup(data: Login, response: Response):
+    @app.post("/api/setup/authorize")
+    def setup_authorize(data: SetupGrant, response: Response):
         live()
-        if not store.setup(data.password, data.bootstrap):
-            raise HTTPException(403, "Codice di inizializzazione non valido o Milo già configurato")
+        if not store.setup_allowed(data.token):
+            raise HTTPException(403, "Il collegamento di attivazione non è più valido. Riapri l'app Milo.")
+        response.set_cookie("milo_setup", data.token, httponly=True, secure=secure_cookies,
+                            samesite="strict", max_age=1800, path="/api/setup")
+        return {"ok": True}
+
+    @app.get("/api/setup/status")
+    def setup_status(request: Request):
+        return {"authorized": store.setup_allowed(request.cookies.get("milo_setup", ""))}
+
+    @app.post("/api/setup")
+    def setup(data: Login, request: Request, response: Response):
+        live()
+        if not store.setup(data.password, data.bootstrap or request.cookies.get("milo_setup", "")):
+            raise HTTPException(403, "Riapri l'app Milo per configurare l'accesso, oppure accedi se è già configurato.")
+        response.delete_cookie("milo_setup", path="/api/setup", secure=secure_cookies,
+                               httponly=True, samesite="strict")
         return issue_session(response)
 
     @app.post("/api/login")

@@ -16,7 +16,7 @@ const paths = {
 };
 const icon = (name, extra = '') => `<svg class="icon ${extra}" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.mail}"/></svg>`;
 const logo = () => '<div class="logo"><img src="/static/icon.svg" alt="">milo<small>MAIL</small></div>';
-const S = {status:null, state:{accounts:[], counts:{}, ai:{}}, messages:[], selected:null, view:'inbox', category:'', account:'', search:'', settingsTab:'accounts', menu:false, syncing:false, online:true, compose:null};
+const S = {status:null, setupAuthorized:false, state:{accounts:[], counts:{}, ai:{}}, messages:[], selected:null, view:'inbox', category:'', account:'', search:'', settingsTab:'accounts', menu:false, syncing:false, online:true, compose:null};
 const categoryNames = {people:'Persone', updates:'Notifiche', newsletters:'Newsletter'};
 const viewNames = {inbox:'Smart inbox', starred:'Preferiti', drafts:'Bozze', sent:'Posta inviata', snoozed:'Per dopo', archive:'Archivio'};
 let toastTimer, searchTimer;
@@ -57,9 +57,11 @@ function closeModal() { $('#overlay').innerHTML=''; S.compose=null; }
 function renderLogin() {
   closeModal();
   const setup = !S.status.initialized;
-  const bootstrap = new URLSearchParams(location.hash.slice(1)).get('setup') || '';
-  if (bootstrap) history.replaceState(null, '', location.pathname);
-  $('#app').innerHTML=`<main class="login-page"><section class="login-story">${logo()}<h1>La tua posta.<br>Un po’ più leggera.</h1><p>Meno rumore, più spazio per quello che conta. Un’unica casa per le tue email, su tutti i tuoi dispositivi.</p><div class="story-features"><span>${icon('inbox')}Tutti gli account, una sola inbox</span><span>${icon('sparkle')}Un assistente che mette ordine</span><span>${icon('shield')}Il tuo archivio, sotto il tuo controllo</span></div></section><section class="login-area"><form class="login-form" id="login-form"><h2>${setup?'Benvenuto a casa.':'Bentornato.'}</h2><p>${setup?'Scegli una passphrase per accedere al tuo archivio da Linux e dagli altri dispositivi. La configurazione ti aspetterà qui.':'Accedi al tuo archivio. Account, preferenze e bozze sono già qui, come li hai lasciati.'}</p>${setup?`<label class="field"><span>Codice del primo avvio</span><input name="bootstrap" value="${esc(bootstrap)}" required autocomplete="off" placeholder="Il codice mostrato nel terminale"></label>`:''}<label class="field"><span>La tua passphrase</span><input type="password" name="password" minlength="12" maxlength="256" required autocomplete="${setup?'new-password':'current-password'}" placeholder="Almeno 12 caratteri"></label><div class="form-error" id="login-error" role="alert"></div><button type="submit" class="primary">${setup?'Crea il tuo Milo':'Entra in Milo'}${icon('arrow')}</button><div class="fineprint">${setup?'La passphrase protegge l’accesso al servizio. Conserva una copia sicura: il recupero automatico non è ancora disponibile.':'Lo stesso servizio, la stessa passphrase. Nessun account da riconfigurare.'}</div></form></section></main>`;
+  const form = setup && !S.setupAuthorized
+    ? `<section class="login-form"><h2>Milo aspetta il primo accesso.</h2><p>Apri l’app Milo sul dispositivo su cui è stata installata per scegliere la tua password. Poi potrai accedere anche da qui.</p><button class="primary" data-action="retry-login">Riprova ${icon('arrow')}</button></section>`
+    : `<form class="login-form" id="login-form"><h2>${setup?'Benvenuto a casa.':'Bentornato.'}</h2><p>${setup?'Scegli una password per Milo. Ti servirà per accedere al tuo archivio da Linux e dagli altri dispositivi.':'Accedi al tuo archivio. Account, preferenze e bozze sono già qui, come li hai lasciati.'}</p><label class="field"><span>Password di Milo</span><input type="password" name="password" minlength="12" maxlength="256" required autocomplete="${setup?'new-password':'current-password'}" placeholder="Almeno 12 caratteri"></label><div class="form-error" id="login-error" role="alert"></div><button type="submit" class="primary">${setup?'Crea il tuo Milo':'Entra in Milo'}${icon('arrow')}</button><div class="fineprint">${setup?'Conservala in un posto sicuro: ti servirà per accedere anche dagli altri dispositivi.':'Lo stesso servizio, la stessa password. Nessun account da riconfigurare.'}</div></form>`;
+  $('#app').innerHTML=`<main class="login-page"><section class="login-story">${logo()}<h1>La tua posta.<br>Un po’ più leggera.</h1><p>Meno rumore, più spazio per quello che conta. Un’unica casa per le tue email, su tutti i tuoi dispositivi.</p><div class="story-features"><span>${icon('inbox')}Tutti gli account, una sola inbox</span><span>${icon('sparkle')}Un assistente che mette ordine</span><span>${icon('shield')}Il tuo archivio, sotto il tuo controllo</span></div></section><section class="login-area">${form}</section></main>`;
+  $('#login-form input')?.focus();
 }
 
 function accountMarkup() {
@@ -263,6 +265,7 @@ document.addEventListener('click', async event => {
       try { const result=await api('/sync','POST');await refresh();renderShell();toast(result.results.some(r=>!r.ok)?'Sincronizzazione incompleta. Controlla gli account.':S.status.demo?'Demo aggiornata.':!result.results.length?'Nessuna casella attiva da sincronizzare.':'Posta sincronizzata.'); }
       finally { S.syncing=false;target.classList.remove('spinner');target.disabled=false; }
     }
+    if(action==='retry-login') { await boot(); }
     if(action==='logout') { await api('/logout','POST');S.status.authenticated=false;S.selected=null;S.messages=[];renderLogin(); }
   } catch(error) { toast(error.message); }
 });
@@ -346,9 +349,16 @@ document.addEventListener('keydown', async event => {
 async function boot() {
   try {
     const oauth=new URLSearchParams(location.hash.slice(1));
-    const oauthError=oauth.get('google_error'),connected=oauth.has('google_connected');
-    if(oauthError || connected) history.replaceState(null,'',location.pathname);
+    const oauthError=oauth.get('google_error'),connected=oauth.has('google_connected'),ownerToken=oauth.get('setup');
+    if(ownerToken || oauthError || connected) history.replaceState(null,'',location.pathname);
     S.status=await api('/status');
+    if(!S.status.initialized) {
+      if(ownerToken) {
+        try { await api('/setup/authorize','POST',{token:ownerToken}); }
+        catch(error) { if(error.status!==403) throw error;toast(error.message); }
+      }
+      S.setupAuthorized=(await api('/setup/status')).authorized;
+    }
     if(oauthError) toast(oauthError);
     if(connected) toast('Casella Google collegata. Sto sincronizzando la tua posta.');
     if(!S.status.authenticated) { renderLogin();return; }

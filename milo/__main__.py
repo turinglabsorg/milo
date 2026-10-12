@@ -40,7 +40,7 @@ def main():
                      args.secure_cookies, public_url, args.google_client)
     print(f"\nMilo → http://{args.host}:{args.port}", flush=True)
     if not args.demo and app.state.store.bootstrap and not args.quiet_bootstrap:
-        print(f"Codice di inizializzazione (solo primo avvio): {app.state.store.bootstrap}", flush=True)
+        print("Apri Milo dall'app installata per scegliere la tua password.", flush=True)
     logging = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)
     logging["formatters"]["access"]["()"] = PrivateAccessFormatter
     uvicorn.run(app, host=args.host, port=args.port, log_config=logging)

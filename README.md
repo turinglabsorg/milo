@@ -23,9 +23,11 @@ uv sync
 uv run python scripts/launch.py
 ```
 
-The launcher starts a local service at `http://127.0.0.1:8025`, opens Milo and
-fills the one-time setup code. Choose a passphrase of at least 12 characters,
-then add an account. To add Milo to the application launcher:
+The launcher starts a local service at `http://127.0.0.1:8025` and opens Milo
+directly on password setup. Choose your Milo password (at least 12 characters),
+then add an account. There is no terminal code to enter. The installed app
+handles its private first-start authorization automatically, including after
+refreshing the page. To add Milo to the application launcher:
 
 ```sh
 uv run python install.py
