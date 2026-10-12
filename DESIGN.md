@@ -49,9 +49,10 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
 - Primary actions are solid accent buttons; secondary actions have an accent
   label and subtle border. Reply, reply all and forwarding remain beside the
   conversation; reply composition follows the thread in an inline card.
-- Pin, analysis sparks, sent/replied markers and thread counts sit together in
-  the row marker area. Account dots, analysis sparks and pins sit in the sender
-  header beside the time; the sent/replied label follows the preview. Icons use current-color strokes with rounded joins.
+- Analysis sparks and pins sit in the sender header beside the time; account
+  color is shown by the avatar outline, without a duplicate dot in the row.
+  The sent/replied label follows the preview. Icons use current-color strokes
+  with rounded joins.
 - Closed thread messages show compact sender/time summaries. Opening one loads
   its body in place. Quotes stay collapsed until requested; HTML frames resize
   to content without changing sender formatting.
@@ -62,6 +63,15 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
   border and translucent blue focus halo. Motion stops for reduced-motion users.
 - Cached content renders immediately; refresh and missing offline content get
   explicit status text. Keep technical setup details out of ordinary mail flows.
+- List headers show only the folder title and, for the inbox, a compact Recap
+  action. Keep mailbox counts in navigation; never present the loaded list limit
+  as the mailbox total. No date eyebrow, introductory copy or separate recap card.
+- The account section starts with an explicit All accounts filter; choosing a
+  named account filters that mailbox, and All accounts restores the unified list.
+- Backspace/Delete trash the selected conversation; P toggles favorites. Show
+  these shortcuts in toolbar tooltips and accessible shortcut attributes. Ignore
+  typing, open editors/dialogs, composing input, modifier chords and held-key
+  repeats; shortcuts also work while focused on rendered email HTML.
 
 - Account connection actions form a full-width vertical stack with equal heights
   (42 px desktop, 44 px mobile). The Google action includes the multicolor G on a

@@ -36,11 +36,20 @@ spacing, header account/analysis indicators, no sidebar AI promotion, editable
 identity, readable recap priorities and matching full-width Google/IMAP buttons
 with the Google icon.
 
-The local suite passes **116 tests**; nine opt-in browser flows pass separately.
+The local suite passes **120 tests**; nine opt-in browser flows pass separately.
 This includes lightweight recipient-header extraction without body
 loading, Reply all owner-address exclusion, and encrypted inbox/body/inline-image
 reuse through a temporary HTTP 503 and app reload. Local Docker-host Ollama
 addresses retain local-model consent behavior; cloud models still require consent.
+
+Keyboard regressions verify Backspace/Delete remove a selected conversation
+before the HTTP response, P toggles favorites from rendered HTML, and typing,
+open drafts/dialogs, modifier chords, composition and held-key repeats leave mail
+unchanged. Account filtering restores the unified list through an explicit All
+accounts control and clears the previous reader selection. Desktop/mobile
+screenshots verify a title and compact Recap action replace the limited list
+count and introductory copy, with account colors retained on avatar outlines
+without duplicate account dots.
 
 The latest read-only production check opened a conversation with a 100-message
 thread index including sent replies, at desktop 1440×1000 and mobile 390×844

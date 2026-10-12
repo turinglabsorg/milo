@@ -34,7 +34,10 @@ def test_compact_black_settings_account_buttons_and_cached_recap(tmp_path, width
         expect(page.locator('.message-row')).to_have_count(2)
         expect(page.locator('.ai-card')).to_have_count(0)
         expect(page.locator('.sender-line .row-analysis')).to_have_count(1)
-        expect(page.locator('.sender-line .account-dot')).to_have_count(2)
+        expect(page.locator('.sender-line .account-dot')).to_have_count(0)
+        expect(page.locator('.title-row .badge, .subheading, .recap-card')).to_have_count(0)
+        expect(page.locator('.list-recap')).to_have_count(1)
+        expect(page.locator('.all-accounts')).to_have_attribute('aria-pressed', 'true')
         assert page.locator('.reading-panel').evaluate('(el)=>getComputedStyle(el).backgroundColor') == 'rgb(0, 0, 0)'
         assert max(page.locator('.message-row').evaluate_all('(els)=>els.map(el=>el.getBoundingClientRect().height)')) < 120
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')

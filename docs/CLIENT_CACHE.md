@@ -38,6 +38,12 @@ Thread metadata uses `/api/messages/{id}/thread?lazy=true`; content uses the
 existing authenticated message/attachment routes. `content_version` is a hash of
 stored MIME content. Cached content remains reusable when only flags change.
 
+Search currently runs on the server's SQLite archive with substring matching
+over sender, address, subject and body. Device-local IndexedDB retains query
+results by request URL, but has no full-text search index. A previously unseen
+query therefore requires connectivity; offline reading does not establish
+offline search over all downloaded messages.
+
 ## Native iOS implementation gate
 
 The future native iOS client must implement this same behavior using a persistent

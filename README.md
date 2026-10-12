@@ -193,3 +193,12 @@ The production server runs in Docker on the Mac Pro with the existing archive
 bind-mounted outside the image. Its boot supervisor and restart checks are in
 [DEPLOYMENT.md](docs/DEPLOYMENT.md). The Omarchy client executes on the laptop and
 retains its own device cache.
+
+Keyboard shortcuts act on the selected conversation: **Backspace/Delete** moves
+it to trash immediately while provider deletion runs in the background; **P**
+adds or removes it from favorites. They also work when reading HTML mail and are
+inactive in text fields, editable content, open drafts or dialogs. Modifier
+chords, text composition and held-key repeats do not change the mailbox.
+The account section offers an explicit **All accounts** filter for the unified
+list. Account colors appear on avatar outlines without duplicate row dots;
+folder headers retain the title and a compact Recap action.
