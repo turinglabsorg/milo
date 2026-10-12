@@ -2,33 +2,68 @@
 
 ## Current production result
 
-The Mac Pro serves the owner-only archive through private Tailscale HTTPS; the
-public domain serves the landing and fixed OAuth relay. Both real Google
-accounts are available without account errors. The installed Linux launcher opens
-the private client. Public account/message/login/client routes return 404, and
-the deployed JavaScript, cache module, stylesheet and service worker match the
-tested source. No real test email was sent.
+The Mac Pro runs the real server in a healthy, non-root Docker container with
+`unless-stopped` restart policy. Its existing archive remains mounted outside
+the image; both published ports bind only to host loopback. The owner-only
+archive is available through private Tailscale HTTPS. The public domain serves
+the landing and fixed OAuth relay; private account/message/login/client routes
+return 404. Both real Google accounts are available without account errors.
+The installed Omarchy launcher opens the private client and keeps its device
+cache on the laptop. The deployed JavaScript, cache module, stylesheet and
+service worker match the tested source. No real test email was sent.
 
-The client cache and Reply all update was verified on a real 19-message thread
-containing sent replies, at desktop 1440×1000 and mobile 390×844 sizes. API writes
-were intercepted: draft saves were simulated and all other mutations blocked.
+The system boot job is loaded and running as the archive owner, with explicit
+Python/Node paths and a dedicated Grog relay for Milo. A real Milo-only container
+restart preserved both accounts, identity/theme preferences, saved recap and
+inbox. An isolated Docker smoke check also verified owner rejection and archive
+persistence after restart. A full Mac power-cycle and pre-login Docker startup
+have **not** been exercised; container restart evidence does not establish that
+separate boot verification gate.
+
+Identity is configurable and shared: name, aliases, context and reply-language
+preference. No owner name or alias is hardcoded. Reply prompts identify connected
+owner addresses and sent replies, use the incoming conversation's language in
+automatic mode, and keep the reply in the owner's voice. The live configured
+model was checked with a fictional English conversation and configurable owner
+identity; this does not establish AI quality across the real mailbox.
+
+New mail wakes a background recap worker. Integration tests verify one persisted
+update for changed mail, unchanged-mail reuse, consent enforcement and retention
+of the previous result after a generation error. Opening the recap reads the
+saved result without generating it; the production snapshot is present and
+reports ready. Desktop/mobile screenshots verify true black surfaces, compact
+spacing, header account/analysis indicators, no sidebar AI promotion, editable
+identity, readable recap priorities and matching full-width Google/IMAP buttons
+with the Google icon.
+
+The local suite passes **116 tests**; nine opt-in browser flows pass separately.
+This includes lightweight recipient-header extraction without body
+loading, Reply all owner-address exclusion, and encrypted inbox/body/inline-image
+reuse through a temporary HTTP 503 and app reload. Local Docker-host Ollama
+addresses retain local-model consent behavior; cloud models still require consent.
+
+The latest read-only production check opened a conversation with a 100-message
+thread index including sent replies, at desktop 1440×1000 and mobile 390×844
+sizes. API writes were intercepted: draft saves were simulated and all other
+mutations blocked. Reply all opened inline without waiting for the full incoming
+body.
 
 | Visible behavior | Desktop | Mobile viewport |
 | --- | ---: | ---: |
-| First inbox load, empty device cache | 2,491 ms | 2,144 ms |
-| First conversation body | 1,587 ms | 605 ms |
-| Reopen downloaded conversation | 105 ms | 77 ms |
-| Inbox after app reload with cache | 68 ms | 58 ms |
-| Inbox after offline reload | 83 ms | 108 ms |
-| Downloaded conversation while offline | 116 ms | 103 ms |
-| Close long inline draft | 61 ms | 89 ms |
+| First inbox load, empty device cache | 1,859 ms | 1,870 ms |
+| First conversation body | 841 ms | 1,018 ms |
+| Reopen downloaded conversation | 99 ms | 72 ms |
+| Inbox after app reload with cache | 61 ms | 61 ms |
+| Inbox after offline reload | 90 ms | 119 ms |
+| Downloaded conversation while offline | 120 ms | 99 ms |
+| Close long inline draft | 62 ms | 82 ms |
 
 Repeated openings and offline reloads did not download the visible body again.
 Downloaded API payloads persisted encrypted in IndexedDB with a non-extractable
 key. Reply all appeared inline with To/Cc fields and excluded connected owner
 addresses. No browser exceptions occurred. The lightweight thread index was
-26,703 bytes before HTTP compression; list/index responses used gzip. Network
-list requests had a 638 ms median and 662 ms maximum in this sample.
+148,766 bytes before HTTP compression; list/index responses used gzip. Network
+list requests had a 614 ms median and 842 ms maximum in this sample.
 
 These are measured samples, not latency guarantees. First-time uncached content
 still depends on the network. Native iOS, physical iPhone behavior, push delivery
