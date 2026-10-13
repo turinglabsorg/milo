@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS messages(
     hidden INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, trashed INTEGER NOT NULL DEFAULT 0,
     content_version TEXT, UNIQUE(account_id, folder, uidvalidity, uid));
 CREATE INDEX IF NOT EXISTS messages_date ON messages(date DESC);
+CREATE INDEX IF NOT EXISTS messages_recent ON messages(date DESC,id DESC) WHERE hidden=0 AND trashed=0;
 CREATE UNIQUE INDEX IF NOT EXISTS messages_provider_id ON messages(account_id,provider_id) WHERE provider_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS messages_thread ON messages(account_id,thread_id);
 CREATE INDEX IF NOT EXISTS messages_conversation ON messages(account_id,(COALESCE(thread_id,id)));
@@ -612,13 +613,15 @@ class Store:
             GROUP BY account_id,COALESCE(thread_id,id)
         ), ranked AS ("""
         if chronological and view == "all" and not any((category, account, search, thread)):
-            eligible = """WITH latest AS (
-                SELECT id,account_id,COALESCE(thread_id,id) AS thread,date,
-                       ROW_NUMBER() OVER (PARTITION BY account_id,COALESCE(thread_id,id) ORDER BY date DESC,id) AS rank
-                FROM messages WHERE hidden=0 AND trashed=0
-            ), eligible AS MATERIALIZED (
-                SELECT account_id,thread FROM latest WHERE rank=1""" + cursor + """
-                ORDER BY date DESC,id DESC LIMIT ?
+            # Walk messages newest first and keep those with no newer sibling: a page
+            # stops after `limit` threads instead of ranking the whole archive.
+            eligible = """WITH eligible AS (
+                SELECT m.account_id,COALESCE(m.thread_id,m.id) AS thread FROM messages m
+                WHERE m.hidden=0 AND m.trashed=0""" + cursor.replace("date", "m.date").replace("id<", "m.id<") + """
+                AND NOT EXISTS (SELECT 1 FROM messages n WHERE n.account_id=m.account_id
+                    AND COALESCE(n.thread_id,n.id)=COALESCE(m.thread_id,m.id) AND n.hidden=0 AND n.trashed=0
+                    AND (n.date>m.date OR (n.date=m.date AND n.id<m.id)))
+                ORDER BY m.date DESC,m.id DESC LIMIT ?
             ), ranked AS ("""
             params.append(limit)
             cursor = ""
