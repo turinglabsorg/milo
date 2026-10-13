@@ -40,6 +40,10 @@ CREATE INDEX IF NOT EXISTS messages_thread ON messages(account_id,thread_id);
 CREATE INDEX IF NOT EXISTS messages_conversation ON messages(account_id,(COALESCE(thread_id,id)));
 CREATE INDEX IF NOT EXISTS messages_message_id ON messages(account_id,message_id);
 CREATE INDEX IF NOT EXISTS messages_sender ON messages(lower(sender_email)) WHERE hidden=0 AND trashed=0;
+CREATE INDEX IF NOT EXISTS messages_inbox ON messages(account_id,(COALESCE(thread_id,id)))
+    WHERE hidden=0 AND trashed=0 AND archived=0 AND sent=0;
+-- Flags are strongly correlated (most Gmail mail is archived): give the planner joint statistics.
+CREATE STATISTICS IF NOT EXISTS messages_flags (dependencies, mcv) ON archived, sent, hidden, trashed, category FROM messages;
 CREATE INDEX IF NOT EXISTS messages_analyzed ON messages(account_id,(COALESCE(thread_id,id)))
     WHERE analysis IS NOT NULL AND hidden=0 AND trashed=0;
 CREATE INDEX IF NOT EXISTS messages_catalogue ON messages(account_id,(COALESCE(thread_id,id)),date DESC,id)
@@ -619,7 +623,7 @@ class Store:
             params.append(limit)
             cursor = ""
         now = "EXTRACT(EPOCH FROM now())"
-        rows = self.rows(eligible + f"""
+        rows = self.rows(eligible.replace("WITH eligible AS (", "WITH eligible AS MATERIALIZED (") + f"""
                 SELECT m.id,m.account_id,m.thread_id,m.sender,m.sender_email,m.subject,m.preview,m.date,
                        m.read,m.content_version,MAX(m.starred) OVER w AS starred,m.archived,m.sent,m.category,
                        MAX(m.snoozed_until) OVER w AS snoozed_until,
@@ -631,24 +635,17 @@ class Store:
                        SUM((m.sent=0 AND m.read=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<={now}))::int) OVER w AS inbox_unread_count,
                        MAX(m.pinned) OVER w AS pinned,COUNT(*) OVER w AS message_count,
                        SUM((m.read=0 AND m.sent=0)::int) OVER w AS unread_count,
+                       COUNT(m.analysis) OVER w AS analyzed_count,
                        ROW_NUMBER() OVER (PARTITION BY m.account_id,COALESCE(m.thread_id,m.id) ORDER BY m.date DESC,m.id) AS rank
                 FROM messages m
                 JOIN eligible e ON m.account_id=e.account_id AND COALESCE(m.thread_id,m.id)=e.thread
                 WHERE m.hidden=0 AND m.trashed=0
                 WINDOW w AS (PARTITION BY m.account_id,COALESCE(m.thread_id,m.id))
-            ), counts AS (
-                SELECT m2.account_id,COALESCE(m2.thread_id,m2.id) AS thread,COUNT(*) AS analyzed_count
-                FROM messages m2
-                JOIN eligible e ON m2.account_id=e.account_id AND COALESCE(m2.thread_id,m2.id)=e.thread
-                WHERE m2.analysis IS NOT NULL AND m2.hidden=0 AND m2.trashed=0
-                GROUP BY m2.account_id,COALESCE(m2.thread_id,m2.id)
-            ) SELECT ranked.*,COALESCE(counts.analyzed_count,0) AS analyzed_count FROM ranked
-            LEFT JOIN counts ON counts.account_id=ranked.account_id
-                AND counts.thread=COALESCE(ranked.thread_id,ranked.id)
-            WHERE ranked.rank=1""" + cursor + " ORDER BY " + ordering + " LIMIT ?", (*params, limit))
+            ) SELECT ranked.* FROM ranked WHERE ranked.rank=1""" + cursor + " ORDER BY " + ordering + " LIMIT ?", (*params, limit))
         for row in rows:
             row.pop("rank")
-            for key in ("received_count", "inbox_count", "inbox_unread_count", "unread_count", "message_count"):
+            for key in ("received_count", "inbox_count", "inbox_unread_count", "unread_count", "message_count",
+                        "analyzed_count"):
                 row[key] = int(row[key] or 0)
             row["read"] = int(not row["unread_count"])
             row["replied"] = bool(row["sent"])
