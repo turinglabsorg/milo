@@ -118,7 +118,7 @@ class SyncEngine:
         self._locks = {}
         self._guard = threading.Lock()
         self._progress = {}
-        self._thread_progress = {}
+        self._rate_limited_until = {}
 
     def report(self, account_id, phase, downloaded=None):
         with self._guard:
@@ -131,43 +131,6 @@ class SyncEngine:
     def status(self):
         with self._guard:
             return [dict(progress) for progress in self._progress.values()]
-
-    def thread_status(self, message_id):
-        with self._guard:
-            return dict(self._thread_progress.get(message_id, {}))
-
-    def sync_thread(self, message_id):
-        from .google import Gmail
-
-        message = self.store.message(message_id)
-        if not message or not message.get("thread_id"):
-            return
-        account = self.store.account(message["account_id"])
-        if not account or account["provider"] != "google" or not account["enabled"]:
-            return
-        with self._guard:
-            current = self._thread_progress.get(message_id, {})
-            if current.get("phase") == "downloading" or current.get("updated", 0) > time.time() - 30:
-                return
-            self._thread_progress[message_id] = {"phase": "downloading", "updated": time.time()}
-        client = None
-        try:
-            client = Gmail(self.store, account["id"])
-            thread = client.request("GET", "threads/" + message["thread_id"], params={"format": "minimal"})
-            fetched = [(remote["id"], client.fetch_remote(remote["id"]))
-                       for remote in (thread or {}).get("messages", [])
-                       if "DRAFT" not in remote.get("labelIds", [])]
-            with self.store.transaction():
-                for remote_id, remote in fetched:
-                    client.apply_remote(remote_id, remote)
-            result = {"phase": "ready", "updated": time.time()}
-        except Exception as exc:
-            result = {"phase": "error", "error": safe_error(exc), "updated": time.time()}
-        finally:
-            if client:
-                client.close()
-        with self._guard:
-            self._thread_progress[message_id] = result
 
     def account_lock(self, account_id):
         with self._guard:
@@ -183,6 +146,8 @@ class SyncEngine:
             # or pause. Re-read only this account after acquiring its lock.
             current = self.store.account(account_id, private=True)
             if not current or not current["enabled"]:
+                return {"account_id": account_id, "ok": True, "paused": True, "added": 0}
+            if self._rate_limited_until.get(account_id, 0) > time.time():
                 return {"account_id": account_id, "ok": True, "paused": True, "added": 0}
             self.report(account_id, "connecting", 0)
             result = self._sync_google(current) if current["provider"] == "google" else self._sync_imap(current)
@@ -230,7 +195,7 @@ class SyncEngine:
                     break
 
     def _sync_google(self, account):
-        from .google import Gmail
+        from .google import Gmail, RateLimitError
 
         account_id = account["id"]
         client = None
@@ -239,6 +204,12 @@ class SyncEngine:
             result = client.sync()
             self.store.execute("UPDATE accounts SET last_sync=?,error=NULL WHERE id=?", (time.time(), account_id))
             return result
+        except RateLimitError as exc:
+            # Back off for five minutes instead of hammering Google every pass.
+            self._rate_limited_until[account_id] = time.time() + 300
+            error = safe_error(exc)
+            self.store.execute("UPDATE accounts SET error=? WHERE id=?", (error, account_id))
+            return {"account_id": account_id, "ok": False, "error": error}
         except Exception as exc:
             error = safe_error(exc)
             self.store.execute("UPDATE accounts SET error=? WHERE id=?", (error, account_id))

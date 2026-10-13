@@ -23,6 +23,10 @@ GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me/"
 HIDDEN_LABELS = {"TRASH", "SPAM", "DRAFT"}
 
 
+class RateLimitError(RuntimeError):
+    """Gmail asked us to slow down; the caller should back off, not retry at once."""
+
+
 def gmail_error(response):
     # Use structured reasons only; Google's free-form message can contain
     # account identifiers, URLs and request data.
@@ -162,7 +166,10 @@ class Gmail:
             if response.status_code == 404:
                 return None
             if response.status_code in {403, 429}:
-                raise RuntimeError(gmail_error(response))
+                message = gmail_error(response)
+                if response.status_code == 429 or message.startswith("Google ha limitato"):
+                    raise RateLimitError(message)
+                raise RuntimeError(message)
             response.raise_for_status()
             return response.json()
         except GoogleAuthError as exc:
@@ -198,19 +205,28 @@ class Gmail:
         page = self.request("GET", "messages", params=params)
         if page is None:
             raise RuntimeError("Impossibile leggere la casella Gmail")
-        fetched = []
-        for item in page.get("messages", []):
-            self.progress("downloading", self.downloaded)
-            if fetched:
-                time.sleep(0.25)
-            fetched.append((item["id"], self.fetch_remote(item["id"])))
-        added = 0
+        # Fetch and store in small batches: progress already downloaded is
+        # never lost when a later request in the page fails or is rate-limited.
+        added, batch, first = 0, [], True
+        try:
+            for item in page.get("messages", []):
+                self.progress("downloading", self.downloaded)
+                if not first:
+                    time.sleep(0.25)
+                first = False
+                batch.append((item["id"], self.fetch_remote(item["id"])))
+                if len(batch) >= 10:
+                    added += self._apply_batch(batch)
+                    batch = []
+        except Exception:
+            if batch:
+                self._apply_batch(batch)
+            raise
+        added += self._apply_batch(batch)
+        next_page = page.get("nextPageToken")
+        # Commit the cursor only after the entire page has been stored. A failed
+        # request retries the page idempotently instead of skipping messages.
         with self.store.transaction():
-            for remote_id, remote in fetched:
-                added += self.apply_remote(remote_id, remote)
-            next_page = page.get("nextPageToken")
-            # Commit the cursor only after the entire page has been stored. A failed
-            # request retries the page idempotently instead of skipping messages.
             self.store.execute("UPDATE gmail_sync SET backfill_page=?,backfill_complete=? WHERE account_id=?",
                                (next_page, int(not next_page), self.account_id))
             if not next_page:
@@ -236,15 +252,22 @@ class Gmail:
                 deleted.add(item["message"]["id"])
             for key in ("messagesAdded", "labelsAdded", "labelsRemoved"):
                 changed.update(item["message"]["id"] for item in record.get(key, []))
-        fetched = []
-        for remote_id in changed - deleted:
-            if fetched:
-                time.sleep(0.25)
-            fetched.append((remote_id, self.fetch_remote(remote_id)))
-        added = 0
+        added, batch, first = 0, [], True
+        try:
+            for remote_id in changed - deleted:
+                if not first:
+                    time.sleep(0.25)
+                first = False
+                batch.append((remote_id, self.fetch_remote(remote_id)))
+                if len(batch) >= 10:
+                    added += self._apply_batch(batch)
+                    batch = []
+        except Exception:
+            if batch:
+                self._apply_batch(batch)
+            raise
+        added += self._apply_batch(batch)
         with self.store.transaction():
-            for remote_id, remote in fetched:
-                added += self.apply_remote(remote_id, remote)
             for remote_id in deleted:
                 self.remove_message(remote_id)
             next_page = page.get("nextPageToken")
@@ -254,6 +277,13 @@ class Gmail:
                 history_id = page.get("historyId", state["history_id"])
                 self.store.execute("UPDATE gmail_sync SET history_id=?,history_page=NULL WHERE account_id=?",
                                    (history_id, self.account_id))
+        return added
+
+    def _apply_batch(self, batch):
+        added = 0
+        with self.store.transaction():
+            for remote_id, remote in batch:
+                added += self.apply_remote(remote_id, remote)
         return added
 
     def fetch_remote(self, remote_id):

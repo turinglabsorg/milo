@@ -183,6 +183,32 @@ def test_gmail_backfill_does_not_advance_cursor_on_partial_failure(store, monkey
     client.close()
 
 
+def test_gmail_backfill_keeps_partial_progress_when_rate_limited(store, monkeypatch):
+    from milo.google import RateLimitError
+
+    client = gmail(store)
+    store.execute("INSERT INTO gmail_sync VALUES(?, '10', NULL, NULL, 0)", (client.account_id,))
+    ids = [f"m{i}" for i in range(25)]
+    monkeypatch.setattr(client, "request", lambda *args, **kwargs: {"messages": [{"id": i} for i in ids],
+                                                                    "nextPageToken": "next"})
+
+    def fetch(message_id):
+        if message_id == "m15":
+            raise RateLimitError("Google ha limitato temporaneamente le richieste.")
+        return remote(message_id)
+
+    monkeypatch.setattr(client, "fetch_remote", fetch)
+    with pytest.raises(RateLimitError):
+        client.backfill()
+    assert len(store.rows("SELECT id FROM messages")) == 15
+    assert store.rows("SELECT backfill_page FROM gmail_sync")[0]["backfill_page"] is None
+    monkeypatch.setattr(client, "fetch_remote", lambda message_id: remote(message_id))
+    client.backfill()
+    assert len(store.rows("SELECT id FROM messages")) == 25
+    assert store.rows("SELECT backfill_page FROM gmail_sync")[0]["backfill_page"] == "next"
+    client.close()
+
+
 def test_gmail_history_pages_and_expired_cursor_retain_cache(store, monkeypatch):
     client = gmail(store)
     client.store_message(remote())

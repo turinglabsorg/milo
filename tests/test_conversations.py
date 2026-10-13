@@ -40,6 +40,24 @@ def test_threads_include_sent_replies_and_lightweight_list(logged_in, account_da
     assert store.message(later)['pinned']
 
 
+def test_reading_mail_never_calls_the_provider(logged_in, monkeypatch):
+    store = logged_in.app.state.store
+    account_id = store.google_account('mail@example.com', dict(CREDS))
+    received = add(store, account_id, 1, date=100)
+    add(store, account_id, 2, sent=True, date=200)
+
+    def forbidden(self, *args, **kwargs):
+        raise AssertionError('a read must not construct a provider client')
+
+    monkeypatch.setattr('milo.app.Gmail.__init__', forbidden)
+    thread = logged_in.get('/api/messages/' + received + '/thread?lazy=true')
+    assert thread.status_code == 200 and len(thread.json()['messages']) == 2
+    assert thread.json()['sync'] == {}
+    assert logged_in.get('/api/messages/' + received).status_code == 200
+    assert logged_in.get('/api/client/messages').status_code == 200
+    assert logged_in.get('/api/messages').status_code == 200
+
+
 def test_thread_identity_never_crosses_accounts(store, account_data):
     first = store.add_account(account_data)
     second = store.add_account({**account_data, 'email': 'another@example.com'})

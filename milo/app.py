@@ -386,7 +386,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                         headers={"Content-Disposition": ("inline" if inline else "attachment") + "; filename*=UTF-8''" + quote(part.get_filename() or "immagine", safe="")})
 
     @app.get("/api/messages/{message_id}/thread", dependencies=[Depends(auth)])
-    def get_thread(message_id: str, background: BackgroundTasks, load_images: bool = False, lazy: bool = False):
+    def get_thread(message_id: str, load_images: bool = False, lazy: bool = False):
         message_or_404(message_id, metadata=True)
         messages = store.conversation(message_id, raw=not lazy, metadata=lazy)
         if lazy and messages:
@@ -403,13 +403,10 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             message.update(render_html(mail, message["id"], load_images))
             message["attachments"] = [{"index": i, "name": part.get_filename(), "type": part.get_content_type()}
                                       for i, part in enumerate(mail.walk()) if part.get_filename()]
-        account = store.account(messages[0]["account_id"]) if messages else None
-        progress = engine.thread_status(message_id)
-        if not demo and account and account["provider"] == "google" and account["enabled"]:
-            if not progress or progress.get("updated", 0) < time.time() - 30:
-                progress = {"phase": "downloading"}
-                background.add_task(engine.sync_thread, message_id)
-        return {"messages": messages, "sync": progress}
+        # Reads serve only the server archive. Provider synchronization is
+        # exclusively the background worker's job; opening mail never fetches
+        # from Google or IMAP.
+        return {"messages": messages, "sync": {}}
 
     @app.patch("/api/messages/{message_id}/thread", dependencies=[Depends(auth)])
     def patch_thread(message_id: str, data: MessagePatch):
