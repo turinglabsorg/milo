@@ -250,19 +250,22 @@ class SyncEngine:
             uids_str = ",".join(str(uid) for uid in uid_batch)
             status, parts = client.uid("FETCH", uids_str, "(UID FLAGS BODY.PEEK[])")
             check(status)
-            # Parts are already downloaded; store the batch in one commit.
-            with self.store.transaction():
-                for part in parts or []:
-                    if isinstance(part, tuple) and isinstance(part[1], bytes):
-                        header_info = part[0].decode("utf-8", "replace") if isinstance(part[0], bytes) else str(part[0])
-                        uid_match = re.search(r"UID (\d+)", header_info)
-                        if not uid_match:
-                            continue
-                        uid = int(uid_match.group(1))
-                        if len(part[1]) > 25 * 1024 * 1024:
-                            raise RuntimeError("Messaggio oltre il limite di 25 MB")
-                        parsed = parse_message(part[1], account["id"], name, validity, uid, part[0],
-                                               folder["sent"], folder["archived"])
+            # Parse outside the writer lock, then commit in short chunks so
+            # readers and local edits never queue behind a large download.
+            parsed_batch = []
+            for part in parts or []:
+                if isinstance(part, tuple) and isinstance(part[1], bytes):
+                    header_info = part[0].decode("utf-8", "replace") if isinstance(part[0], bytes) else str(part[0])
+                    uid_match = re.search(r"UID (\d+)", header_info)
+                    if not uid_match:
+                        continue
+                    if len(part[1]) > 25 * 1024 * 1024:
+                        raise RuntimeError("Messaggio oltre il limite di 25 MB")
+                    parsed_batch.append(parse_message(part[1], account["id"], name, validity, int(uid_match.group(1)),
+                                                      part[0], folder["sent"], folder["archived"]))
+            for chunk_start in range(0, len(parsed_batch), 25):
+                with self.store.transaction():
+                    for parsed in parsed_batch[chunk_start:chunk_start + 25]:
                         message_id = self.store.upsert_message(parsed)
                         if parsed["message_id"]:
                             key = self.moved_key(account["id"], parsed["message_id"])

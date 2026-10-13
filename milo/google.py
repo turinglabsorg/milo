@@ -280,20 +280,21 @@ class Gmail:
         return added
 
     def _apply_batch(self, batch):
+        prepared = [(remote_id, remote, self.prepare(remote) if remote is not None else None) for remote_id, remote in batch]
         added = 0
         with self.store.transaction():
-            for remote_id, remote in batch:
-                added += self.apply_remote(remote_id, remote)
+            for remote_id, remote, data in prepared:
+                added += self.apply_remote(remote_id, remote, data)
         return added
 
     def fetch_remote(self, remote_id):
         return self.request("GET", "messages/" + quote(remote_id, safe=""), params={"format": "raw"})
 
-    def apply_remote(self, remote_id, remote):
+    def apply_remote(self, remote_id, remote, data=None):
         if remote is None:
             self.remove_message(remote_id)
             return 0
-        added = self.store_message(remote)
+        added = self.store_message(remote, data)
         self.downloaded += 1
         self.progress("downloading", self.downloaded)
         return added
@@ -302,7 +303,8 @@ class Gmail:
         self.progress("downloading", self.downloaded)
         return self.apply_remote(remote_id, self.fetch_remote(remote_id))
 
-    def store_message(self, remote):
+    def prepare(self, remote):
+        """Decode and parse outside the writer lock; parsing large mail is the slow part."""
         remote_id = remote["id"]
         labels = set(remote.get("labelIds", []))
         raw = decode_raw(remote["raw"])
@@ -315,6 +317,11 @@ class Gmail:
                     hidden=int(bool(labels & HIDDEN_LABELS)))
         if remote.get("internalDate"):
             data["date"] = int(remote["internalDate"]) / 1000
+        return data
+
+    def store_message(self, remote, data=None):
+        remote_id = remote["id"]
+        data = data or self.prepare(remote)
         with self.store.lock:
             existing = self.store.rows("SELECT id FROM messages WHERE account_id=? AND provider_id=?",
                                        (self.account_id, remote_id))

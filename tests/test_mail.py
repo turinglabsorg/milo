@@ -247,3 +247,26 @@ def test_existing_link_previews_are_rewritten_once(store, account_data):
     store.execute("PRAGMA user_version=0")
     store.migrate()
     assert store.rows("SELECT preview FROM messages WHERE id='m'")[0]["preview"] == "Ciao"
+
+
+def test_reads_do_not_wait_for_a_running_write(store, account_data):
+    import threading
+    account_id = store.add_account(account_data)
+    holding, release = threading.Event(), threading.Event()
+
+    def writer():
+        with store.transaction():
+            store.execute("UPDATE accounts SET name='Busy' WHERE id=?", (account_id,))
+            assert store.rows("SELECT name FROM accounts")[0]["name"] == "Busy"
+            holding.set()
+            release.wait(5)
+
+    thread = threading.Thread(target=writer)
+    thread.start()
+    assert holding.wait(5)
+    started = time.monotonic()
+    assert store.rows("SELECT name FROM accounts")[0]["name"] == "Personal"
+    assert time.monotonic() - started < 0.5
+    release.set()
+    thread.join()
+    assert store.rows("SELECT name FROM accounts")[0]["name"] == "Busy"

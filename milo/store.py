@@ -20,12 +20,44 @@ def preview_text(body):
     return re.sub(r"\s+", " ", LINK_NOISE.sub(" ", body or "")).strip()[:240]
 
 
+class WriterLock:
+    """Reentrant lock that knows its owner, so reads inside a write see that write."""
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._owner = None
+        self._depth = 0
+
+    def acquire(self, blocking=True, timeout=-1):
+        if not self._lock.acquire(blocking, timeout):
+            return False
+        self._owner = threading.get_ident()
+        self._depth += 1
+        return True
+
+    def release(self):
+        self._depth -= 1
+        if not self._depth:
+            self._owner = None
+        self._lock.release()
+
+    __enter__ = acquire
+
+    def __exit__(self, *exc):
+        self.release()
+
+    def owned(self):
+        return self._owner == threading.get_ident()
+
+
 class Store:
     def __init__(self, directory: Path):
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         directory.chmod(0o700)
         self.directory = directory
-        self.lock = threading.RLock()
+        self.lock = WriterLock()
+        self._local = threading.local()
+        self._readers = []
         self._txn_depth = 0
         self.on_mail_change = lambda: None
         key_path = directory / "vault.key"
@@ -177,9 +209,23 @@ class Store:
         cursor = self.execute(query, params)
         return secret if cursor.rowcount else None
 
+    def reader(self):
+        """Per-thread read-only connection: WAL readers never wait for the sync writer."""
+        connection = getattr(self._local, "db", None)
+        if connection is None:
+            connection = sqlite3.connect(self.directory / "mail.sqlite", check_same_thread=False)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA query_only=ON")
+            connection.execute("PRAGMA busy_timeout=5000")
+            self._local.db = connection
+            with self.lock:
+                self._readers.append(connection)
+        return connection
+
     def rows(self, query, params=()):
-        with self.lock:
+        if self.lock.owned():
             return [dict(row) for row in self.db.execute(query, params).fetchall()]
+        return [dict(row) for row in self.reader().execute(query, params).fetchall()]
 
     def execute(self, query, params=()):
         with self.lock:
@@ -515,4 +561,6 @@ class Store:
         return rule_id
 
     def close(self):
+        for connection in self._readers:
+            connection.close()
         self.db.close()

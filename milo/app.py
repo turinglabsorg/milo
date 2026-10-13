@@ -262,8 +262,13 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
 
     @app.get("/api/state", dependencies=[Depends(auth)])
     def state():
-        inbox = store.rows("SELECT COUNT(DISTINCT account_id || ':' || COALESCE(thread_id,id)) AS count,SUM(read=0) AS unread FROM messages WHERE hidden=0 AND trashed=0 AND archived=0 AND sent=0 "
-                           "AND (snoozed_until IS NULL OR snoozed_until<=?)", (time.time(),))[0]
+        now = time.time()
+        # Group on the covering catalogue index; COUNT(DISTINCT expr) needs a temp B-tree per call.
+        counts = store.rows("SELECT SUM(inbox) AS inbox,SUM(inbox*unread) AS unread,SUM(starred) AS starred,SUM(snoozed) AS snoozed "
+                            "FROM (SELECT MAX(archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?)) AS inbox,"
+                            "SUM(read=0 AND archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?)) AS unread,"
+                            "MAX(starred) AS starred,MAX(snoozed_until>?) AS snoozed FROM messages "
+                            "WHERE hidden=0 AND trashed=0 GROUP BY account_id,COALESCE(thread_id,id))", (now, now, now))[0]
         return {"accounts": store.accounts(), "ai": store.setting("ai"), "ai_error": store.setting("ai_error"),
                 "identity": store.setting("identity") or Identity().model_dump(),
                 "recap": {"generated_at": recaps.snapshot()["generated_at"],
@@ -271,11 +276,9 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                 "appearance": store.setting("appearance") or {"theme": "system"}, "sync": engine.status(),
                 "google": google.status(), "rules": store.rules(),
                 "pending": store.rows("SELECT kind,error,COUNT(*) AS count FROM outbox GROUP BY kind,error"),
-                "counts": {"inbox": inbox["count"], "unread": inbox["unread"] or 0,
-                           "starred": store.rows("SELECT COUNT(DISTINCT account_id || ':' || COALESCE(thread_id,id)) AS count FROM messages WHERE hidden=0 AND trashed=0 AND starred=1")[0]["count"],
-                           "drafts": store.rows("SELECT COUNT(*) AS count FROM drafts")[0]["count"],
-                           "snoozed": store.rows("SELECT COUNT(DISTINCT account_id || ':' || COALESCE(thread_id,id)) AS count FROM messages WHERE hidden=0 AND trashed=0 AND snoozed_until>?",
-                                                 (time.time(),))[0]["count"]}}
+                "counts": {"inbox": counts["inbox"] or 0, "unread": counts["unread"] or 0,
+                           "starred": counts["starred"] or 0, "snoozed": counts["snoozed"] or 0,
+                           "drafts": store.rows("SELECT COUNT(*) AS count FROM drafts")[0]["count"]}}
 
     @app.post("/api/accounts", dependencies=[Depends(auth)])
     def add_account(data: AccountInput, background: BackgroundTasks):
