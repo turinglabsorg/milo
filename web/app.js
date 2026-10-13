@@ -52,7 +52,16 @@ function syncMarkup() {
 }
 
 const temporarilyUnavailable=error=>!error.status||error.status>=500||[408,429].includes(error.status);
-function recordServerError(){S.serverErrors++;updateOnlineState();}
+let reachabilityProbe=null;
+function recordServerError(){
+  S.serverErrors++;
+  if(S.serverErrors<MAX_SERVER_ERRORS||!navigator.onLine||reachabilityProbe)return updateOnlineState();
+  // Slow responses during a large sync are not an outage: only call it offline when the service does not answer at all.
+  reachabilityProbe=fetch('/api/status',{signal:AbortSignal.timeout(5000),credentials:'same-origin',cache:'no-store'})
+    .then(response=>{if(response.ok)S.serverErrors=0;})
+    .catch(()=>{})
+    .finally(()=>{reachabilityProbe=null;updateOnlineState();});
+}
 function recordServerSuccess(){S.serverErrors=0;if(!S.online&&navigator.onLine){S.online=true;renderChrome();}}
 async function api(path, method='GET', body) {
   const started=replica.revision;
