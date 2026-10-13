@@ -373,4 +373,4 @@ class Gmail:
             raise RuntimeError("Google non ha confermato l'invio. Controlla la posta inviata prima di riprovare.")
         self.store_message({**result, "raw": raw, "labelIds": result.get("labelIds", ["SENT"]),
                             "internalDate": str(int(time.time()*1000))})
-        return result
+        return {**result, "rfc_message_id": mail["Message-ID"]}

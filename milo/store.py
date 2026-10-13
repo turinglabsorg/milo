@@ -107,7 +107,8 @@ class Store:
 
     def migrate(self):
         migrations = {
-            "accounts": {"provider": "TEXT NOT NULL DEFAULT 'imap'", "enabled": "INTEGER NOT NULL DEFAULT 1"},
+            "accounts": {"provider": "TEXT NOT NULL DEFAULT 'imap'", "enabled": "INTEGER NOT NULL DEFAULT 1",
+                         "removing": "INTEGER NOT NULL DEFAULT 0"},
             "messages": {"provider_id": "TEXT", "thread_id": "TEXT", "labels": "TEXT",
                          "hidden": "INTEGER NOT NULL DEFAULT 0", "pinned": "INTEGER NOT NULL DEFAULT 0",
                          "trashed": "INTEGER NOT NULL DEFAULT 0", "content_version": "TEXT"},
@@ -347,7 +348,7 @@ class Store:
         self.execute("DELETE FROM sessions WHERE token=?", (hashlib.sha256(token.encode()).hexdigest(),))
 
     def accounts(self, private=False):
-        accounts = self.rows("SELECT * FROM accounts ORDER BY rowid")
+        accounts = self.rows("SELECT * FROM accounts WHERE removing=0 ORDER BY rowid")
         return [self.public_account(account, private) for account in accounts]
 
     def account(self, account_id, private=False):

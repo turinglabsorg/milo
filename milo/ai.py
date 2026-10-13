@@ -31,6 +31,7 @@ Provide only the draft text, without commentary."""
 class AI:
     def __init__(self, store, endpoint="http://127.0.0.1:11434"):
         self.store, self.endpoint = store, endpoint.rstrip("/")
+        self.on_analysis = lambda message_id, analysis: None
 
     def owner_context(self):
         profile = self.store.setting("identity") or Identity().model_dump()
@@ -87,6 +88,8 @@ class AI:
             raise RuntimeError("Analisi AI non valida")
         result["model"] = self.store.setting("ai")["model"]
         self.store.execute("UPDATE messages SET analysis=? WHERE id=?", (json.dumps(result), message_id))
+        if not message["sent"]:
+            self.on_analysis(message_id, result)
         # Explicit user rules take precedence over AI categorization.
         matched_rule = False
         for rule in self.store.rules():
@@ -149,3 +152,62 @@ class AI:
         if not isinstance(result.get("body"), str) or not result["body"].strip():
             raise RuntimeError("Bozza AI non valida")
         return result
+
+    def suggestions(self, message_id):
+        message = self.store.message(message_id)
+        if not message:
+            raise ValueError("Email non trovata")
+        messages = self.store.conversation(message_id, limit=6, body_limit=3000)
+        source = {"target_message_id": message_id, "conversation": [
+            {key: item[key] for key in ("sender", "sender_email", "subject", "date", "sent", "body")} for item in messages]}
+        result = self.chat("Propose exactly three different short replies (one or two sentences each) the owner could "
+                           "send to target_message_id: for example accept, ask a clarification, decline or postpone. "
+                           "Each must stand alone as a complete email body.\n" + json.dumps(source, ensure_ascii=False),
+                           {"type": "object", "properties": {"replies": {"type": "array", "items": {"type": "string"}}},
+                            "required": ["replies"]}, system=REPLY_SYSTEM)
+        replies = [reply.strip() for reply in result.get("replies", []) if isinstance(reply, str) and reply.strip()][:3]
+        if not replies:
+            raise RuntimeError("Suggerimenti AI non validi")
+        return {"replies": replies}
+
+    def ask(self, question):
+        plan = self.chat("Extract search terms to find emails that answer this question. Return up to six short "
+                         "keywords or names (no stop words) in the language they would appear in the mail.\n" +
+                         json.dumps({"question": question}, ensure_ascii=False),
+                         {"type": "object", "properties": {"keywords": {"type": "array", "items": {"type": "string"}}},
+                          "required": ["keywords"]})
+        terms = [term.strip() for term in plan.get("keywords", []) if isinstance(term, str) and 2 <= len(term.strip()) <= 60][:6]
+        if not terms:
+            terms = [word for word in question.split() if len(word) > 3][:6]
+        candidates = {}
+        clause = " OR ".join("(subject LIKE ? OR sender LIKE ? OR sender_email LIKE ? OR preview LIKE ?)" for _ in terms)
+        params = [value for term in terms for value in [f"%{term}%"] * 4]
+        for row in self.store.rows("SELECT id,subject,sender,sender_email,preview,date FROM messages INDEXED BY "
+                                   f"messages_client_catalogue WHERE hidden=0 AND trashed=0 AND ({clause}) "
+                                   "ORDER BY date DESC LIMIT 200", params):
+            text = " ".join(str(row[key] or "") for key in ("subject", "sender", "sender_email", "preview")).casefold()
+            candidates[row["id"]] = (sum(term.casefold() in text for term in terms) * 2, row["date"])
+        body_clause = " OR ".join("body LIKE ?" for _ in terms)
+        for row in self.store.rows(f"SELECT id,date FROM messages WHERE hidden=0 AND trashed=0 AND date>? AND ({body_clause}) "
+                                   "ORDER BY date DESC LIMIT 100",
+                                   (datetime.now(timezone.utc).timestamp() - 180 * 86400, *[f"%{term}%" for term in terms])):
+            score, date = candidates.get(row["id"], (0, row["date"]))
+            candidates[row["id"]] = (score + 1, date)
+        ranked = sorted(candidates, key=lambda key: candidates[key], reverse=True)[:10]
+        sources = [message for message in (self.store.message(message_id) for message_id in ranked) if message]
+        if not sources:
+            return {"answer": "Non ho trovato email che rispondano a questa domanda.", "sources": []}
+        result = self.chat("Answer the owner's question in Italian using only these emails. Be concise. If they do not "
+                           "contain the answer, say so. Return the ids of the emails you used.\n" + json.dumps(
+                               {"question": question, "emails": [{"id": m["id"], "sender": m["sender"], "sender_email": m["sender_email"],
+                                                                  "subject": m["subject"], "date": m["date"], "sent": m["sent"],
+                                                                  "body": (m["body"] or "")[:1500]} for m in sources]},
+                               ensure_ascii=False),
+                           {"type": "object", "properties": {"answer": {"type": "string"},
+                                                              "message_ids": {"type": "array", "items": {"type": "string"}}},
+                            "required": ["answer", "message_ids"]})
+        if not isinstance(result.get("answer"), str):
+            raise RuntimeError("Risposta AI non valida")
+        known = {m["id"]: m for m in sources}
+        used = [known[i] for i in result.get("message_ids", []) if isinstance(i, str) and i in known] or sources[:3]
+        return {"answer": result["answer"], "sources": [{key: m[key] for key in ("id", "sender", "subject", "date")} for m in used]}

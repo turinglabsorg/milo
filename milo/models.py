@@ -121,3 +121,51 @@ class RuleInput(BaseModel):
     field: Literal["sender", "subject", "body"]
     contains: str = Field(min_length=1, max_length=300)
     category: Literal["people", "updates", "newsletters"]
+
+
+class ScheduleInput(BaseModel):
+    send_at: float
+    followup_days: int | None = Field(default=None, ge=1, le=60)
+
+
+class TodoPatch(BaseModel):
+    done: bool
+
+
+class SenderPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["approved", "blocked"] | None = None
+    vip: bool | None = None
+
+
+class SenderAction(BaseModel):
+    action: Literal["archive", "trash", "read"]
+
+
+class Signatures(BaseModel):
+    signatures: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("signatures")
+    @classmethod
+    def signatures_valid(cls, values):
+        if len(values) > 20 or any(len(key) > 64 or len(value) > 4000 for key, value in values.items()):
+            raise ValueError("Firme troppo lunghe")
+        return values
+
+
+class Template(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    body: str = Field(min_length=1, max_length=8000)
+
+
+class Templates(BaseModel):
+    templates: list[Template] = Field(default_factory=list, max_length=50)
+
+
+class ScreenerSettings(BaseModel):
+    enabled: bool = False
+
+
+class Question(BaseModel):
+    question: str = Field(min_length=3, max_length=500)

@@ -13,6 +13,7 @@ from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
+import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +21,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from .ai import AI
 from .demo import seed_demo
+from .features import Features
 from .google import Gmail, GoogleOAuth
 from .mail import SyncEngine, parse_message, safe_error, send_mail
 from .models import (
@@ -32,8 +34,16 @@ from .models import (
     Identity,
     Login,
     MessagePatch,
+    Question,
     RuleInput,
+    ScheduleInput,
+    ScreenerSettings,
+    SenderAction,
+    SenderPatch,
     SetupGrant,
+    Signatures,
+    Templates,
+    TodoPatch,
 )
 from .recap import RecapWorker
 from .render import render_html
@@ -56,7 +66,9 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         raise ValueError("Private access requires HTTPS and secure cookies")
     client_url = (private_url or public_url).rstrip("/")
     store = Store(directory)
+    features = Features(store)
     ai = AI(store, ollama_url)
+    ai.on_analysis = features.sync_todos
     recaps = RecapWorker(store, ai)
     store.on_mail_change = recaps.wake
     engine = SyncEngine(store, ai)
@@ -85,6 +97,31 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             except TimeoutError:
                 continue
 
+    def feature_tick(minute):
+        for draft_id in features.due():
+            try:
+                deliver(draft_id)
+            except HTTPException as exc:
+                features.schedule_failed(draft_id, str(exc.detail))
+        if minute:
+            features.check_followups()
+            features.enforce_blocked()
+
+    async def feature_worker():
+        last = 0
+        while not stop_worker.is_set():
+            minute = time.time() - last >= 60
+            if minute:
+                last = time.time()
+            try:
+                await asyncio.to_thread(feature_tick, minute)
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(stop_worker.wait(), timeout=5)
+            except TimeoutError:
+                continue
+
     @asynccontextmanager
     async def lifespan(app):
         nonlocal worker_loop
@@ -92,8 +129,12 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         def background_migrations():
             store.rewrite_link_previews(stop=stop_worker.is_set)
             store.move_raw_out(stop=stop_worker.is_set)
+            features.backfill_todos(stop=stop_worker.is_set)
+            for account in store.rows("SELECT id FROM accounts WHERE removing=1"):
+                features.purge_account(account["id"], stop=stop_worker.is_set)
 
         previews = asyncio.create_task(asyncio.to_thread(background_migrations))
+        feature_task = asyncio.create_task(feature_worker()) if not demo else None
         task = asyncio.create_task(worker())
         recap_task = asyncio.create_task(recaps.run()) if not demo else None
         yield
@@ -102,6 +143,8 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         wake_worker.set()
         recaps.stop()
         await task
+        if feature_task:
+            await feature_task
         await previews
         if recap_task:
             await recap_task
@@ -115,6 +158,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                   openapi_url=None)
     app.state.recaps = recaps
     app.state.store, app.state.engine, app.state.ai, app.state.google = store, engine, ai, google
+    app.state.features, app.state.feature_tick = features, feature_tick
     app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=4)
 
     def owner(request):
@@ -269,6 +313,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     @app.get("/api/state", dependencies=[Depends(auth)])
     def state():
         now = time.time()
+        screening = features.screening()
         # Group on the covering catalogue index; COUNT(DISTINCT expr) needs a temp B-tree per call.
         counts = store.rows("SELECT SUM(inbox) AS inbox,SUM(inbox*unread) AS unread,SUM(starred) AS starred,SUM(snoozed) AS snoozed "
                             "FROM (SELECT MAX(archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?)) AS inbox,"
@@ -282,9 +327,13 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                 "appearance": store.setting("appearance") or {"theme": "system"}, "sync": engine.status(),
                 "google": google.status(), "rules": store.rules(),
                 "pending": store.rows("SELECT kind,error,COUNT(*) AS count FROM outbox GROUP BY kind,error"),
+                "signatures": store.setting("signatures") or {}, "templates": store.setting("templates") or [],
+                "screener": {**features.screener(), "pending": [row["email"] for row in screening]},
+                "vips": features.vips(),
                 "counts": {"inbox": counts["inbox"] or 0, "unread": counts["unread"] or 0,
                            "starred": counts["starred"] or 0, "snoozed": counts["snoozed"] or 0,
-                           "drafts": store.rows("SELECT COUNT(*) AS count FROM drafts")[0]["count"]}}
+                           "drafts": store.rows("SELECT COUNT(*) AS count FROM drafts")[0]["count"],
+                           "todo": features.todo_count(), "screener": len(screening)}}
 
     @app.post("/api/accounts", dependencies=[Depends(auth)])
     def add_account(data: AccountInput, background: BackgroundTasks):
@@ -381,18 +430,21 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         message["attachments"] = [{"index": i, "name": part.get_filename() or "allegato",
                                     "type": part.get_content_type()}
                                    for i, part in enumerate(mail.walk()) if part.get_filename()]
+        message["unsubscribe"] = None if message["sent"] else features.unsubscribe_options(store.message_headers(message_id))
         return message
 
     @app.get("/api/messages/{message_id}/attachments/{index}", dependencies=[Depends(auth)])
-    def attachment(message_id: str, index: int):
+    def attachment(message_id: str, index: int, preview: bool = False):
         message = message_or_404(message_id, raw=True)
         parts = list(email.message_from_bytes(message["raw"], policy=policy.default).walk())
         if index < 0 or index >= len(parts) or not (parts[index].get_filename() or parts[index].get("Content-ID")):
             raise HTTPException(404, "Allegato non trovato")
         part = parts[index]
-        inline = part.get_content_type() in {"image/png", "image/jpeg", "image/gif", "image/webp"}
+        inline = part.get_content_type() in {"image/png", "image/jpeg", "image/gif", "image/webp"} or (
+            preview and part.get_content_type() == "application/pdf")
         return Response(part.get_payload(decode=True) or b"", media_type=part.get_content_type() if inline else "application/octet-stream",
-                        headers={"Content-Disposition": ("inline" if inline else "attachment") + "; filename*=UTF-8''" + quote(part.get_filename() or "immagine", safe="")})
+                        headers={"Content-Disposition": ("inline" if inline else "attachment") + "; filename*=UTF-8''" + quote(part.get_filename() or "immagine", safe=""),
+                                 "X-Content-Type-Options": "nosniff"})
 
     @app.get("/api/messages/{message_id}/thread", dependencies=[Depends(auth)])
     def get_thread(message_id: str, load_images: bool = False, lazy: bool = False):
@@ -514,7 +566,9 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
 
     @app.get("/api/drafts", dependencies=[Depends(auth)])
     def drafts():
-        return {"drafts": [{**json.loads(row["data"]), "id": row["id"], "updated": row["updated"]}
+        schedules = features.schedules()
+        return {"drafts": [{**json.loads(row["data"]), "id": row["id"], "updated": row["updated"],
+                            "scheduled": schedules.get(row["id"])}
                            for row in store.rows("SELECT * FROM drafts ORDER BY updated DESC")]}
 
     @app.put("/api/drafts", dependencies=[Depends(auth)])
@@ -534,9 +588,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         store.execute("DELETE FROM drafts WHERE id=?", (draft_id,))
         return {"ok": True}
 
-    @app.post("/api/drafts/{draft_id}/send", dependencies=[Depends(auth)])
-    def send(draft_id: str):
-        live()
+    def deliver(draft_id):
         # One explicit send at a time per draft, never automatically retried.
         with store.lock:
             if draft_id in sending:
@@ -550,32 +602,183 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             if not account:
                 raise HTTPException(404, "Account non trovato")
             sending.add(draft_id)
+            # A send that started can no longer be undone.
+            store.execute("UPDATE scheduled SET error='Invio in corso' WHERE draft_id=?", (draft_id,))
         try:
             original = store.message(draft["reply_to_id"]) if draft.get("reply_to_id") else None
             if account["provider"] == "google":
                 client = Gmail(store, account["id"])
                 try:
-                    client.send(account, draft, original)
+                    result = client.send(account, draft, original)
                 finally:
                     client.close()
+                rfc_message_id, thread_id = result.get("rfc_message_id"), result.get("threadId")
             else:
                 with engine.account_lock(account["id"]):
                     account = store.account(account["id"], private=True)
                     mail = send_mail(account, draft, original)
-                    store.upsert_message(parse_message(mail.as_bytes(), account["id"], "Milo/Sent", "local", time.time_ns(),
-                                                       b"\\Seen", sent=True))
+                    parsed = parse_message(mail.as_bytes(), account["id"], "Milo/Sent", "local", time.time_ns(),
+                                           b"\\Seen", sent=True)
+                    store.upsert_message(parsed)
+                rfc_message_id, thread_id = mail["Message-ID"], parsed["thread_id"]
             # A second device may save a newer version during this explicit
             # send. Delete only the version that was actually submitted.
             store.execute("DELETE FROM drafts WHERE id=? AND data=?", (draft_id, saved_data))
+            features.sent(draft_id, account["id"], draft, rfc_message_id, thread_id)
             return {"ok": True}
         except ValueError as exc:
+            store.execute("UPDATE scheduled SET error=? WHERE draft_id=?", (str(exc), draft_id))
             raise HTTPException(422, str(exc)) from exc
         except Exception as exc:
-            raise HTTPException(502, safe_error(exc) + " L'invio non viene ripetuto automaticamente; "
-                                "controlla la posta inviata prima di riprovare.") from exc
+            message = safe_error(exc) + " L'invio non viene ripetuto automaticamente; controlla la posta inviata prima di riprovare."
+            store.execute("UPDATE scheduled SET error=? WHERE draft_id=?", (message, draft_id))
+            raise HTTPException(502, message) from exc
         finally:
             with store.lock:
                 sending.discard(draft_id)
+
+    @app.post("/api/drafts/{draft_id}/send", dependencies=[Depends(auth)])
+    def send(draft_id: str):
+        live()
+        return deliver(draft_id)
+
+    @app.put("/api/drafts/{draft_id}/schedule", dependencies=[Depends(auth)])
+    def schedule_draft(draft_id: str, data: ScheduleInput):
+        live()
+        try:
+            return features.schedule(draft_id, data.send_at, data.followup_days)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.delete("/api/drafts/{draft_id}/schedule", dependencies=[Depends(auth)])
+    def unschedule_draft(draft_id: str):
+        with store.lock:
+            if draft_id in sending or not features.unschedule(draft_id):
+                raise HTTPException(409, "Il messaggio è già in invio e non può essere annullato")
+        return {"ok": True}
+
+    @app.get("/api/todos", dependencies=[Depends(auth)])
+    def todos():
+        return {"todos": features.todos()}
+
+    @app.patch("/api/todos/{todo_id}", dependencies=[Depends(auth)])
+    def patch_todo(todo_id: str, data: TodoPatch):
+        if not features.set_todo(todo_id, data.done):
+            raise HTTPException(404, "Attività non trovata")
+        return {"ok": True}
+
+    @app.get("/api/senders/newsletters", dependencies=[Depends(auth)])
+    def newsletter_senders():
+        return {"senders": features.newsletter_senders()}
+
+    @app.get("/api/screener", dependencies=[Depends(auth)])
+    def screener_list():
+        return {"senders": features.screening(), **features.screener()}
+
+    @app.put("/api/settings/screener", dependencies=[Depends(auth)])
+    def screener_settings(data: ScreenerSettings):
+        return features.set_screener(data.enabled)
+
+    @app.patch("/api/senders/{email}", dependencies=[Depends(auth)])
+    def patch_sender(email: str, data: SenderPatch):
+        patch = data.model_dump(exclude_unset=True)
+        try:
+            result = features.set_sender(email, **patch)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        wake_sync()
+        return result
+
+    @app.post("/api/senders/{email}/action", dependencies=[Depends(auth)])
+    def sender_action(email: str, data: SenderAction):
+        count = features.sender_action(email, data.action)
+        wake_sync()
+        return {"conversations": count}
+
+    @app.post("/api/messages/{message_id}/unsubscribe", dependencies=[Depends(auth)])
+    def unsubscribe(message_id: str):
+        live()
+        message = message_or_404(message_id, metadata=True)
+        options = features.unsubscribe_options(store.message_headers(message_id))
+        if not options:
+            raise HTTPException(404, "Questo mittente non offre una disiscrizione automatica")
+        try:
+            if options["one_click"]:
+                features.one_click(options["url"])
+                method = "one-click"
+            elif options["mailto"]:
+                draft = features.mailto_draft(options["mailto"], message["account_id"])
+                draft_id = uuid.uuid4().hex
+                store.execute("INSERT INTO drafts VALUES(?,?,?)", (draft_id, json.dumps({**draft, "id": draft_id}), time.time()))
+                deliver(draft_id)
+                method = "email"
+            else:
+                features.mark_unsubscribed(message["sender_email"])
+                return {"method": "link", "url": options["url"]}
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except (RuntimeError, httpx.HTTPError) as exc:
+            raise HTTPException(502, str(exc) if isinstance(exc, RuntimeError) else "Il mittente non risponde. Riprova più tardi.") from exc
+        features.mark_unsubscribed(message["sender_email"])
+        return {"method": method}
+
+    @app.put("/api/settings/signatures", dependencies=[Depends(auth)])
+    def settings_signatures(data: Signatures):
+        accounts = {account["id"] for account in store.accounts()}
+        value = {key: text for key, text in data.signatures.items() if key in accounts}
+        store.set_setting("signatures", value)
+        return {"signatures": value}
+
+    @app.put("/api/settings/templates", dependencies=[Depends(auth)])
+    def settings_templates(data: Templates):
+        value = [template.model_dump() for template in data.templates]
+        store.set_setting("templates", value)
+        return {"templates": value}
+
+    @app.post("/api/messages/{message_id}/suggestions", dependencies=[Depends(auth)])
+    def suggestions(message_id: str):
+        live()
+        message_or_404(message_id)
+        try:
+            return ai.suggestions(message_id)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+
+    @app.post("/api/ask", dependencies=[Depends(auth)])
+    def ask(data: Question):
+        live()
+        try:
+            return ai.ask(data.question)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+
+    @app.delete("/api/accounts/{account_id}", dependencies=[Depends(auth)], status_code=202)
+    def remove_account(account_id: str, background: BackgroundTasks):
+        live()
+        if not store.account(account_id):
+            raise HTTPException(404, "Account non trovato")
+        store.execute("UPDATE accounts SET removing=1,enabled=0 WHERE id=?", (account_id,))
+        background.add_task(features.purge_account, account_id, stop_worker.is_set)
+        return {"accepted": True}
+
+    @app.get("/api/backup", dependencies=[Depends(auth)])
+    def backup():
+        return Response(json.dumps(features.export(), ensure_ascii=False), media_type="application/json",
+                        headers={"Content-Disposition": "attachment; filename=milo-configurazione.json",
+                                 "Cache-Control": "no-store"})
+
+    @app.post("/api/backup/restore", dependencies=[Depends(auth)])
+    async def restore(request: Request):
+        body = await request.body()
+        if len(body) > 200_000_000:
+            raise HTTPException(413, "File troppo grande")
+        try:
+            data = json.loads(body)
+            return await asyncio.to_thread(features.restore, data)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(422, str(exc) if isinstance(exc, ValueError) else "File di configurazione non valido") from exc
 
     source_web = Path(__file__).resolve().parent.parent / "web"
     web = source_web if source_web.exists() else Path(__file__).resolve().parent / "web"
