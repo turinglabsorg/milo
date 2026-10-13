@@ -89,7 +89,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     async def lifespan(app):
         nonlocal worker_loop
         worker_loop = asyncio.get_running_loop()
-        previews = asyncio.create_task(asyncio.to_thread(store.rewrite_link_previews))
+        previews = asyncio.create_task(asyncio.to_thread(store.rewrite_link_previews, stop=stop_worker.is_set))
         task = asyncio.create_task(worker())
         recap_task = asyncio.create_task(recaps.run()) if not demo else None
         yield

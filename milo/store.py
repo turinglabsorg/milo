@@ -142,20 +142,23 @@ class Store:
                     WHERE hidden=0 AND trashed=0;
             """)
 
-    def rewrite_link_previews(self, batch=200):
-        """One-time background rewrite; startup must never scan the whole archive."""
+    def rewrite_link_previews(self, batch=200, stop=lambda: False):
+        """One-time background rewrite. Candidates come from the covering catalogue
+        index so the archive's large body and raw columns are only read for them."""
         if self.rows("PRAGMA user_version")[0]["user_version"] >= 1:
             return
-        last = 0
-        while True:
-            rows = self.rows("SELECT rowid,id,body FROM messages WHERE rowid>? AND (preview LIKE '%http%' "
-                             "OR preview LIKE '%www.%' OR preview LIKE '%[image%') ORDER BY rowid LIMIT ?", (last, batch))
-            if not rows:
-                break
+        ids = [row["id"] for row in self.rows(
+            "SELECT id FROM messages INDEXED BY messages_client_catalogue WHERE hidden=0 AND trashed=0 "
+            "AND (preview LIKE '%http%' OR preview LIKE '%www.%' OR preview LIKE '%[image%')")]
+        for start in range(0, len(ids), batch):
+            if stop():
+                return
+            chunk = ids[start:start + batch]
+            rows = self.rows(f"SELECT id,body FROM messages WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+            updates = [(preview_text(row["body"]), row["id"]) for row in rows]
             with self.transaction():
-                for row in rows:
-                    self.db.execute("UPDATE messages SET preview=? WHERE id=?", (preview_text(row["body"]), row["id"]))
-            last = rows[-1]["rowid"]
+                self.db.executemany("UPDATE messages SET preview=? WHERE id=?", updates)
+            time.sleep(0.05)
         with self.lock:
             self.db.execute("PRAGMA user_version=1")
 
