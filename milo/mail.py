@@ -260,12 +260,21 @@ class SyncEngine:
             self.store.execute("DELETE FROM messages WHERE id=?", (by_uid[uid],))
         added = []
         # Newest first, then backfill in bounded batches without losing older mail.
-        for uid in sorted(remote_uids - by_uid.keys(), reverse=True)[:200]:
+        new_uids = sorted(remote_uids - by_uid.keys(), reverse=True)
+        batch_size = 500
+        for batch_start in range(0, len(new_uids), batch_size):
             self.report(account["id"], "downloading")
-            status, parts = client.uid("FETCH", str(uid), "(UID FLAGS BODY.PEEK[])")
+            uid_batch = new_uids[batch_start:batch_start + batch_size]
+            uids_str = ",".join(str(uid) for uid in uid_batch)
+            status, parts = client.uid("FETCH", uids_str, "(UID FLAGS BODY.PEEK[])")
             check(status)
             for part in parts or []:
                 if isinstance(part, tuple) and isinstance(part[1], bytes):
+                    header_info = part[0].decode("utf-8", "replace") if isinstance(part[0], bytes) else str(part[0])
+                    uid_match = re.search(r"UID (\d+)", header_info)
+                    if not uid_match:
+                        continue
+                    uid = int(uid_match.group(1))
                     if len(part[1]) > 25 * 1024 * 1024:
                         raise RuntimeError("Messaggio oltre il limite di 25 MB")
                     parsed = parse_message(part[1], account["id"], name, validity, uid, part[0],
@@ -285,7 +294,6 @@ class SyncEngine:
                     added.append(message_id)
                     with self._guard:
                         self._progress[account["id"]]["downloaded"] += 1
-                    break
         known = sorted(remote_uids & by_uid.keys())
         for start in range(0, len(known), 100):
             uids = ",".join(str(uid) for uid in known[start:start + 100])

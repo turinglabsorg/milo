@@ -278,6 +278,7 @@ function paintLocal(){
   if(newListSignature!==S._lastListSignature){
     S._lastListSignature=newListSignature;
     renderList();
+    preloadListBodies();
   }
   const newChromeSignature=JSON.stringify([S.state.counts,S.state.sync,S.online,S.syncing]);
   if(newChromeSignature!==S._lastChromeSignature){
@@ -285,6 +286,30 @@ function paintLocal(){
     renderChrome();
   }
   if(S.selected){const latest=replica.find(threadKey(S.selected));const fields=['subject','sender','sender_email','preview','date','read','starred','archived','pinned','category','message_count','analyzed_count'];if(latest&&!latest.deleted&&fields.some(field=>latest[field]!==S.selected[field])){S.selected={...S.selected,...Object.fromEntries(fields.map(field=>[field,latest[field]]))};renderReading();}}
+}
+
+let preloadVersion=0;
+function preloadListBodies(){
+  const version=++preloadVersion;
+  const list=S.view==='drafts'?[]:S.messages;
+  if(!list.length||S.view==='drafts')return;
+  const toPreload=list.slice(0,15).map(m=>m.id);
+  setTimeout(async()=>{
+    const concurrency=4;
+    const queue=[...toPreload];
+    const workers=Array.from({length:Math.min(concurrency,queue.length)},async()=>{
+      while(queue.length&&version===preloadVersion&&navigator.onLine&&!document.hidden){
+        const id=queue.shift();
+        if(!id)break;
+        try{
+          const cached=await deviceCache.get('api:'+bodyPath(id));
+          if(cached)continue;
+          await api(bodyPath(id));
+        }catch{}
+      }
+    });
+    await Promise.all(workers);
+  },500);
 }
 replica.onChange(()=>{if(S.search)paintLocal();});
 function revalidateView(query=currentQuery()){
@@ -328,7 +353,7 @@ async function refreshCatalogue(){
       const started=replica.revision,ticket=++S.remoteTicket;
       const data=await api('/client/messages'+(cursor?'?'+new URLSearchParams(cursor):''));
       if(!S.status?.authenticated)return;
-      replica.merge(data.messages,'all',started,ticket);for(const row of data.messages)seen.add(threadKey(row));paintLocal();cursor=data.next;if(cursor)await new Promise(resolve=>setTimeout(resolve,50));
+      replica.merge(data.messages,'all',started,ticket);for(const row of data.messages)seen.add(threadKey(row));paintLocal();cursor=data.next;if(cursor)await new Promise(resolve=>setTimeout(resolve,20));
     }while(cursor&&navigator.onLine);
     for(const id of previous.filter(id=>!seen.has(id))){
       const row=replica.find(id),started=replica.revision,ticket=++S.remoteTicket;try{const data=await api('/client/thread?'+new URLSearchParams({account:row.account_id,thread:row.thread_id||row.id}));if(S.status?.authenticated)replica.merge([data.message],'all',started,ticket);}
@@ -338,7 +363,7 @@ async function refreshCatalogue(){
   }catch{}finally{feeding=false;}
 }
 const bodyRequests=new Map();
-const bodyPath=id=>'/messages/'+encodeURIComponent(id)+(S.images?'?load_images=true':'');
+function bodyPath(id){return '/messages/'+encodeURIComponent(id)+(S.images?'?load_images=true':'');}
 function bodyMarkup(item){
   if(!item.body_loaded)return item.body_error?`<div class="offline-note">${esc(item.body_error)}</div><button class="secondary" data-download-body="${esc(item.id)}">Riprova</button>`:skeleton(3,'message-body','Scarico il messaggio…');
   return `${item.remote_images&&!S.images?'<button class="image-permission" data-action="load-images">Carica immagini esterne</button>':''}${item.html?`<iframe class="email-html" title="Contenuto di ${esc(item.subject)}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc="${esc(htmlDocument(item.html))}"></iframe>`:quotedText(item.body)}${item.attachments?.length?`<div class="attachments">${item.attachments.map(a=>`<a class="attachment" href="/api/messages/${encodeURIComponent(item.id)}/attachments/${a.index}">${icon('paperclip')}${esc(a.name)}</a>`).join('')}</div>`:''}`;
@@ -372,7 +397,18 @@ async function ensureBody(id,background=false){
 let warmingVersion=0;
 function warmThread(){
   const version=++warmingVersion,ids=S.thread.filter(m=>!m.body_loaded).map(m=>m.id).reverse();
-  setTimeout(async()=>{for(const id of ids){if(version!==warmingVersion||!navigator.onLine||document.hidden)break;try{await ensureBody(id,true);}catch{break;}}},1200);
+  const concurrency=3;
+  setTimeout(async()=>{
+    const queue=[...ids];
+    const workers=Array.from({length:Math.min(concurrency,queue.length)},async()=>{
+      while(queue.length&&version===warmingVersion&&navigator.onLine&&!document.hidden){
+        const id=queue.shift();
+        if(!id)break;
+        try{await ensureBody(id,true);}catch{break;}
+      }
+    });
+    await Promise.all(workers);
+  },300);
 }
 async function applyThread(result,id,version,cached=false){
   if(!cached)replica.observe(result.messages);
