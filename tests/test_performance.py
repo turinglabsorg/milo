@@ -49,6 +49,8 @@ def test_large_archive_api_and_client_latency(tmp_path):
         app_store[0].conversations(view='all',limit=201,chronological=True)
         app_store[0].rows=original
         assert any('messages_client_catalogue' in plan for plan in query_plans)
+        assert not any(('SCAN messages' in plan or 'SEARCH m ' in plan) and 'COVERING' not in plan
+                       for plan in query_plans), query_plans
         rows = response.json()['messages']
         assert len(rows) == 100 and len(response.content) < 100000
         p95 = sorted(durations)[-2]

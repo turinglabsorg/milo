@@ -69,10 +69,14 @@ class Store:
         }
         with self.lock, self.db:
             for table, columns in migrations.items():
-                existing = {row["name"] for row in self.db.execute(f"PRAGMA table_info({table})")}
+                existing = {row["name"] for row in self.db.execute(f"PRAGMA table_xinfo({table})")}
                 for name, definition in columns.items():
                     if name not in existing:
                         self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+            existing = self.db.execute("SELECT sql FROM sqlite_master WHERE type='index' "
+                                       "AND name='messages_client_catalogue'").fetchone()
+            if existing and "CONTENT_VERSION" not in (existing[0] or "").upper():
+                self.db.execute("DROP INDEX messages_client_catalogue")
             self.db.executescript("""
                 CREATE UNIQUE INDEX IF NOT EXISTS messages_provider_id ON messages(account_id,provider_id)
                     WHERE provider_id IS NOT NULL;
@@ -86,8 +90,13 @@ class Store:
                     provider_id TEXT, PRIMARY KEY(account_id,provider_id));
                 CREATE INDEX IF NOT EXISTS messages_thread ON messages(account_id,thread_id);
                 CREATE INDEX IF NOT EXISTS messages_conversation ON messages(account_id,COALESCE(thread_id,id));
+                CREATE INDEX IF NOT EXISTS messages_analyzed
+                    ON messages(account_id,COALESCE(thread_id,id))
+                    WHERE analysis IS NOT NULL AND hidden=0 AND trashed=0;
                 CREATE INDEX IF NOT EXISTS messages_client_catalogue
-                    ON messages(account_id,COALESCE(thread_id,id),date DESC,id)
+                    ON messages(account_id,COALESCE(thread_id,id),date DESC,id,
+                                thread_id,sender,sender_email,subject,preview,read,starred,archived,sent,
+                                category,snoozed_until,pinned,content_version)
                     WHERE hidden=0 AND trashed=0;
             """)
 
@@ -439,12 +448,21 @@ class Store:
                        SUM(m.sent=0 AND m.read=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<=CAST(strftime('%s','now') AS REAL))) OVER w AS inbox_unread_count,
                        MAX(m.pinned) OVER w AS pinned,COUNT(*) OVER w AS message_count,
                        SUM(m.read=0 AND m.sent=0) OVER w AS unread_count,
-                       SUM(m.analysis IS NOT NULL) OVER w AS analyzed_count,
                        ROW_NUMBER() OVER (PARTITION BY m.account_id,COALESCE(m.thread_id,m.id) ORDER BY m.date DESC,m.id) AS rank
-                FROM messages m JOIN eligible e ON m.account_id=e.account_id AND COALESCE(m.thread_id,m.id)=e.thread
+                FROM messages m INDEXED BY messages_client_catalogue
+                JOIN eligible e ON m.account_id=e.account_id AND COALESCE(m.thread_id,m.id)=e.thread
                 WHERE m.hidden=0 AND m.trashed=0
                 WINDOW w AS (PARTITION BY m.account_id,COALESCE(m.thread_id,m.id))
-            ) SELECT * FROM ranked WHERE rank=1""" + cursor + " ORDER BY " + ordering + " LIMIT ?", (*params, limit))
+            ), counts AS (
+                SELECT m2.account_id,COALESCE(m2.thread_id,m2.id) AS thread,COUNT(*) AS analyzed_count
+                FROM messages m2 INDEXED BY messages_analyzed
+                JOIN eligible e ON m2.account_id=e.account_id AND COALESCE(m2.thread_id,m2.id)=e.thread
+                WHERE m2.analysis IS NOT NULL AND m2.hidden=0 AND m2.trashed=0
+                GROUP BY m2.account_id,thread
+            ) SELECT ranked.*,COALESCE(counts.analyzed_count,0) AS analyzed_count FROM ranked
+            LEFT JOIN counts ON counts.account_id=ranked.account_id
+                AND counts.thread=COALESCE(ranked.thread_id,ranked.id)
+            WHERE ranked.rank=1""" + cursor + " ORDER BY " + ordering + " LIMIT ?", (*params, limit))
         for row in rows:
             row.pop("rank")
             row["read"] = int(not row["unread_count"])
