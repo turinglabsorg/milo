@@ -183,8 +183,44 @@ function emptyMarkup(symbol,title,description,add=false) {
 function subjectCore(subject) {
   return String(subject||'').replace(/^\s*(?:(?:re|aw|sv|r|fw|fwd)(?:\[\d+\])?\s*:\s*)+/i,'').trim()||'Senza oggetto';
 }
+const LINK_PATTERN=/\bhttps?:\/\/[^\s<>"'()\[\]]+/gi;
+function realLink(url){
+  // Text copied out of Gmail carries google.com/url?q=… wrappers: open and show the real destination.
+  try{const parsed=new URL(url);if(/(^|\.)google\.[a-z.]+$/i.test(parsed.hostname)&&parsed.pathname==='/url'){const target=parsed.searchParams.get('q')||parsed.searchParams.get('url');if(target&&/^https?:\/\//i.test(target))return target;}}catch{}
+  return url;
+}
+function linkLabel(url){
+  try{const parsed=new URL(url);for(const key of [...parsed.searchParams.keys()])if(/^utm_/i.test(key))parsed.searchParams.delete(key);return (parsed.host+parsed.pathname+parsed.search).replace(/\/$/,'');}catch{return url;}
+}
+function splitLinks(text){
+  const parts=[];let last=0;
+  for(const match of text.matchAll(LINK_PATTERN)){
+    let url=match[0];const trailing=/[.,;:!?]+$/.exec(url)?.[0]||'';url=url.slice(0,url.length-trailing.length);
+    parts.push(text.slice(last,match.index),{url});last=match.index+url.length;
+  }
+  parts.push(text.slice(last));return parts;
+}
+function linkifyText(text){return splitLinks(text).map(part=>typeof part==='string'?esc(part):`<a href="${esc(realLink(part.url))}" target="_blank" rel="noopener noreferrer">${esc(linkLabel(realLink(part.url)))}</a>`).join('');}
+function linkifyDocument(doc){
+  for(const anchor of doc.body.querySelectorAll('a[href]')){
+    const href=anchor.getAttribute('href'),target=realLink(href);
+    if(target!==href){anchor.setAttribute('href',target);if(anchor.textContent.trim()===href)anchor.textContent=linkLabel(target);}
+  }
+  const walker=doc.createTreeWalker(doc.body,NodeFilter.SHOW_TEXT),nodes=[];
+  while(walker.nextNode()){const node=walker.currentNode;if(!node.parentElement?.closest('a,style,script')&&LINK_PATTERN.test(node.nodeValue))nodes.push(node);LINK_PATTERN.lastIndex=0;}
+  for(const node of nodes){
+    const fragment=doc.createDocumentFragment();
+    for(const part of splitLinks(node.nodeValue)){
+      if(typeof part==='string'){if(part)fragment.append(part);continue;}
+      const anchor=doc.createElement('a'),target=realLink(part.url);
+      anchor.href=target;anchor.target='_blank';anchor.rel='noopener noreferrer';anchor.textContent=linkLabel(target);fragment.append(anchor);
+    }
+    node.replaceWith(fragment);
+  }
+}
 function quotedHTML(html) {
   const doc=new DOMParser().parseFromString(html,'text/html');
+  linkifyDocument(doc);
   const selectors='.gmail_quote,.gmail_quote_container,.yahoo_quoted,.protonmail_quote,blockquote[type="cite"],blockquote';
   const roots=[...doc.body.querySelectorAll(selectors)].filter(node=>!node.parentElement?.closest(selectors));
   for(const node of roots){
@@ -204,8 +240,8 @@ function quotedHTML(html) {
 function quotedText(body) {
   const text=String(body||'');
   const match=/^(?:On [^\n]{0,300}wrote:|Il giorno [^\n]{0,300}ha scritto:|Le [^\n]{0,300}[ée]crit\s*:|Am [^\n]{0,300}schrieb[^\n]*:|>\s)/mi.exec(text);
-  if(!match||match.index===0)return `<div class="mail-body">${esc(text)}</div>`;
-  return `<div class="mail-body">${esc(text.slice(0,match.index).trimEnd())}</div><details class="quoted-history"><summary>Mostra il testo citato</summary><div class="mail-body">${esc(text.slice(match.index))}</div></details>`;
+  if(!match||match.index===0)return `<div class="mail-body">${linkifyText(text)}</div>`;
+  return `<div class="mail-body">${linkifyText(text.slice(0,match.index).trimEnd())}</div><details class="quoted-history"><summary>Mostra il testo citato</summary><div class="mail-body">${linkifyText(text.slice(match.index))}</div></details>`;
 }
 function htmlDocument(html) {
   const images=S.images?"'self' https:":"'self'";
