@@ -24,3 +24,10 @@ external action. That file is the single source of global agent instructions.
 - Deploy: push `main`, fast-forward `~/Sites/milo` on the Mac, `docker compose
   build`, then bootout `system/space.grooooog.milo.server`, `compose up -d
   --no-build --wait`, bootstrap the plist again (docs/DEPLOYMENT.md).
+- Original MIME lives in `message_raw` (read via `store.RAW`, which falls back
+  to `messages.raw` for unmigrated rows). Write it only through
+  `upsert_message`/`set_raw`; never add large columns back to `messages`.
+- Heavy archive rewrites saturate Docker Desktop's bind-mount I/O and trip the
+  health check. Back up with an APFS clone (`cp -c`, container stopped) and run
+  bulk migrations natively on the Mac with the container stopped (the 10 GB
+  raw move took ~6 minutes), then restart.
