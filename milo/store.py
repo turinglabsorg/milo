@@ -141,12 +141,23 @@ class Store:
                                 category,snoozed_until,pinned,content_version)
                     WHERE hidden=0 AND trashed=0;
             """)
-            if self.db.execute("PRAGMA user_version").fetchone()[0] < 1:
-                rows = self.db.execute("SELECT id,body FROM messages WHERE preview LIKE '%http%' "
-                                       "OR preview LIKE '%www.%' OR preview LIKE '%[image%'").fetchall()
-                self.db.executemany("UPDATE messages SET preview=? WHERE id=?",
-                                    [(preview_text(row["body"]), row["id"]) for row in rows])
-                self.db.execute("PRAGMA user_version=1")
+
+    def rewrite_link_previews(self, batch=200):
+        """One-time background rewrite; startup must never scan the whole archive."""
+        if self.rows("PRAGMA user_version")[0]["user_version"] >= 1:
+            return
+        last = 0
+        while True:
+            rows = self.rows("SELECT rowid,id,body FROM messages WHERE rowid>? AND (preview LIKE '%http%' "
+                             "OR preview LIKE '%www.%' OR preview LIKE '%[image%') ORDER BY rowid LIMIT ?", (last, batch))
+            if not rows:
+                break
+            with self.transaction():
+                for row in rows:
+                    self.db.execute("UPDATE messages SET preview=? WHERE id=?", (preview_text(row["body"]), row["id"]))
+            last = rows[-1]["rowid"]
+        with self.lock:
+            self.db.execute("PRAGMA user_version=1")
 
     def encrypt_json(self, value):
         return self.vault.encrypt(json.dumps(value).encode()).decode()

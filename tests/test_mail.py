@@ -245,7 +245,7 @@ def test_existing_link_previews_are_rewritten_once(store, account_data):
     store.execute("INSERT INTO messages(id,account_id,folder,uidvalidity,uid,body,preview) VALUES('m',?,'INBOX','1',1,?,?)",
                   (account_id, "<https://t.example/x> Ciao", "<https://t.example/x> Ciao"))
     store.execute("PRAGMA user_version=0")
-    store.migrate()
+    store.rewrite_link_previews(batch=1)
     assert store.rows("SELECT preview FROM messages WHERE id='m'")[0]["preview"] == "Ciao"
 
 
