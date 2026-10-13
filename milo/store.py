@@ -12,6 +12,9 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet
 
+# Original MIME lives in message_raw so list and count scans stay small. Rows not yet
+# moved by the background migration still carry it in messages.raw.
+RAW = "COALESCE((SELECT r.raw FROM message_raw r WHERE r.id=messages.id),messages.raw)"
 LINK_NOISE = re.compile(r"<\s*(?:https?|mailto):[^>]*>|\[(?:image|cid|https?)\b[^\]]*\]|\(\s*https?://[^)]*\)|(?:https?://|www\.)\S+", re.I)
 
 
@@ -123,6 +126,8 @@ class Store:
                 CREATE UNIQUE INDEX IF NOT EXISTS messages_provider_id ON messages(account_id,provider_id)
                     WHERE provider_id IS NOT NULL;
                 CREATE TABLE IF NOT EXISTS oauth_states(state TEXT PRIMARY KEY, data TEXT, expires REAL);
+                CREATE TABLE IF NOT EXISTS message_raw(
+                    id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE ON UPDATE CASCADE, raw BLOB NOT NULL);
                 CREATE TABLE IF NOT EXISTS gmail_sync(
                     account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
                     history_id TEXT, history_page TEXT, backfill_page TEXT,
@@ -141,6 +146,35 @@ class Store:
                                 category,snoozed_until,pinned,content_version)
                     WHERE hidden=0 AND trashed=0;
             """)
+
+    def set_raw(self, message_id, raw):
+        with self.transaction():
+            self.execute("INSERT OR REPLACE INTO message_raw VALUES(?,?)", (message_id, raw))
+            self.execute("UPDATE messages SET raw=NULL WHERE id=?", (message_id,))
+
+    def move_raw_out(self, batch=25, stop=lambda: False):
+        """Move original MIME out of the messages table in short, resumable batches."""
+        if self.rows("PRAGMA user_version")[0]["user_version"] >= 2:
+            return
+        last = 0
+        while not stop():
+            ids = self.rows("SELECT rowid,id FROM messages WHERE rowid>? AND raw IS NOT NULL ORDER BY rowid LIMIT ?",
+                            (last, batch))
+            if not ids:
+                with self.lock:
+                    self.db.execute("PRAGMA user_version=2")
+                return
+            marks = ",".join("?" * len(ids))
+            chunk = [row["id"] for row in ids]
+            started = time.monotonic()
+            with self.transaction():
+                self.db.execute(f"INSERT OR IGNORE INTO message_raw SELECT id,raw FROM messages "
+                                f"WHERE id IN ({marks}) AND raw IS NOT NULL", chunk)
+                self.db.execute(f"UPDATE messages SET raw=NULL WHERE id IN ({marks})", chunk)
+            last = ids[-1]["rowid"]
+            # Leave the disk idle twice as long as each batch took, so mail sync,
+            # reads and the container health check keep most of the I/O.
+            time.sleep(max(0.05, 2 * (time.monotonic() - started)))
 
     def rewrite_link_previews(self, batch=200, stop=lambda: False):
         """One-time background rewrite. Candidates come from the covering catalogue
@@ -252,6 +286,13 @@ class Store:
     def transaction(self):
         """Batch writes into one commit. Callers must not do network I/O inside."""
         with self.lock:
+            if self._txn_depth:
+                self._txn_depth += 1
+                try:
+                    yield
+                finally:
+                    self._txn_depth -= 1
+                return
             self._txn_depth += 1
             try:
                 with self.db:
@@ -359,7 +400,8 @@ class Store:
     @staticmethod
     def message_fields(metadata=False, raw=False):
         fields = "id,account_id,thread_id,provider_id,message_id,sender,sender_email,recipients,subject,preview,date,read,starred,archived,sent,category,snoozed_until,analysis,pinned,trashed,hidden,content_version"
-        return "*" if raw else fields if metadata else fields + ",folder,uidvalidity,uid,body,labels"
+        full = fields + ",folder,uidvalidity,uid,body,labels"
+        return full + f",{RAW} AS raw" if raw else fields if metadata else full
 
     @staticmethod
     def public_message(row, raw=False):
@@ -394,7 +436,7 @@ class Store:
             params.extend([f"%{search}%"] * 4)
         where = " AND ".join(clauses) or "1"
         return [self.public_message(row) for row in self.rows(
-            f"SELECT * FROM messages WHERE {where} ORDER BY date DESC LIMIT ?", (*params, limit))]
+            f"SELECT {self.message_fields()} FROM messages WHERE {where} ORDER BY date DESC LIMIT ?", (*params, limit))]
 
     def upsert_message(self, data):
         with self.lock:
@@ -415,9 +457,12 @@ class Store:
                 if rule["contains"].casefold() in field.casefold():
                     data["category"] = rule["category"]
                     break
+            raw = data.pop("raw")
             columns = list(data)
-            self.execute(f"INSERT INTO messages({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
-                         tuple(data.values()))
+            with self.transaction():
+                self.execute(f"INSERT INTO messages({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
+                             tuple(data.values()))
+                self.execute("INSERT INTO message_raw VALUES(?,?)", (data["id"], raw))
             self.on_mail_change()
             return data["id"]
 
@@ -456,7 +501,7 @@ class Store:
     def message_headers(self, message_id):
         size = 65536
         while True:
-            rows = self.rows("SELECT substr(raw,1,?) AS headers FROM messages WHERE id=?", (size, message_id))
+            rows = self.rows(f"SELECT substr({RAW},1,?) AS headers FROM messages WHERE id=?", (size, message_id))
             headers = rows[0]["headers"] or b"" if rows else b""
             for separator in (b"\r\n\r\n", b"\n\n"):
                 if separator in headers:

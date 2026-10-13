@@ -164,7 +164,8 @@ def test_downloaded_body_search_is_local_and_survives_offline_restart(tmp_path):
         body = 'Only the downloaded body contains uniquebodyneedle.'
         mail = EmailMessage()
         mail.set_content(body)
-        app.state.store.execute('UPDATE messages SET body=?,raw=? WHERE id=?', (body, mail.as_bytes(), sent))
+        app.state.store.set_raw(sent, mail.as_bytes())
+        app.state.store.execute('UPDATE messages SET body=? WHERE id=?', (body, sent))
 
     with service(tmp_path, prepare) as (url, sent), sync_playwright() as p:
         browser = p.chromium.launch()

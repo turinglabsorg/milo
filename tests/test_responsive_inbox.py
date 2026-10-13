@@ -30,7 +30,7 @@ def service(tmp_path, prepare=None, live=False):
     mail = EmailMessage()
     mail.set_content('Original text')
     mail.add_alternative('<table><tr><td style="color:rgb(255, 0, 0)"><strong>HTML reply</strong></td></tr></table><script>parent.window.unsafe=true</script>', subtype='html')
-    store.execute('UPDATE messages SET raw=? WHERE id=?', (mail.as_bytes(), sent))
+    store.set_raw(sent, mail.as_bytes())
     if prepare:
         prepare(app, received, sent)
     with socket() as sock:
@@ -131,7 +131,7 @@ def test_ai_reply_stays_inline_and_does_not_replace_user_edits(tmp_path):
         mail = EmailMessage()
         mail['Reply-To'] = 'Support <support@example.com>'
         mail.set_content('Original incoming text')
-        app.state.store.execute('UPDATE messages SET raw=? WHERE id=?', (mail.as_bytes(), received))
+        app.state.store.set_raw(received, mail.as_bytes())
         app.state.store.set_setting('ai', {'model': 'local', 'cloud_consent': False, 'automatic': False})
 
     with service(tmp_path, prepare, live=True) as (url, sent), sync_playwright() as p:
@@ -176,8 +176,8 @@ def test_large_forward_quoted_history_and_failed_close_recovery(tmp_path, width,
         mail.set_content(body)
         mail.add_alternative('<p>Latest reply</p><div class="gmail_quote">On Monday wrote:'
                              '<blockquote>' + '<p>Earlier reply</p>' * 100 + '</blockquote></div>', subtype='html')
-        app.state.store.execute('UPDATE messages SET raw=?,body=?,subject=? WHERE id=?',
-                               (mail.as_bytes(), body, 'Re: Re: Fwd: Re: Project', sent))
+        app.state.store.set_raw(sent, mail.as_bytes())
+        app.state.store.execute('UPDATE messages SET body=?,subject=? WHERE id=?', (body, 'Re: Re: Fwd: Re: Project', sent))
 
     with service(tmp_path, prepare) as (url, sent), sync_playwright() as p:
         browser = p.chromium.launch()

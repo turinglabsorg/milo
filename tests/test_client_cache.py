@@ -13,7 +13,8 @@ def prepare_reply(app, received, sent):
     mail['To'] = 'Owner <you@example.com>, Colleague <colleague@example.com>'
     mail['Cc'] = 'Copy <copy@example.com>, support@example.com, you@example.com'
     mail.set_content('Reply-all original content')
-    app.state.store.execute('UPDATE messages SET raw=?,content_version=NULL WHERE id=?', (mail.as_bytes(), received))
+    app.state.store.set_raw(received, mail.as_bytes())
+    app.state.store.execute('UPDATE messages SET content_version=NULL WHERE id=?', (received,))
 
 
 def test_reply_all_includes_cc_excludes_self_and_retains_draft(tmp_path):
@@ -87,7 +88,8 @@ def test_lazy_thread_index_excludes_mime_and_bodies(logged_in, account_data):
     sent = None
     for i in range(18):
         sent = add(store, account, i + 20, sent=i % 2 == 1, date=i)
-        store.execute('UPDATE messages SET body=?,raw=? WHERE id=?', ('LONG-CONTENT' * 20000, b'MIME-BLOB' * 20000, sent))
+        store.set_raw(sent, b'MIME-BLOB' * 20000)
+        store.execute('UPDATE messages SET body=? WHERE id=?', ('LONG-CONTENT' * 20000, sent))
     result = logged_in.get('/api/messages/' + sent + '/thread?lazy=true')
     assert result.status_code == 200 and len(result.content) < 40000
     messages = result.json()['messages']
@@ -129,7 +131,8 @@ def test_downloaded_inline_image_remains_available_offline(tmp_path):
         mail.set_content('Inline image')
         mail.add_alternative('<p>Offline inline image</p><img src="cid:image" alt="cached image">', subtype='html')
         mail.get_payload()[1].add_related(png, maintype='image', subtype='png', cid='<image>')
-        app.state.store.execute('UPDATE messages SET raw=?,content_version=NULL WHERE id=?', (mail.as_bytes(), sent))
+        app.state.store.set_raw(sent, mail.as_bytes())
+        app.state.store.execute('UPDATE messages SET content_version=NULL WHERE id=?', (sent,))
 
     with service(tmp_path, prepare) as (url, sent), sync_playwright() as p:
         browser = p.chromium.launch()
@@ -165,7 +168,7 @@ def test_server_restart_503_preserves_downloaded_inbox_and_body(tmp_path):
         mail.set_content('Server restart fixture')
         mail.add_alternative('<p>HTML reply</p><img src="cid:image" alt="restart image">', subtype='html')
         mail.get_payload()[1].add_related(png, maintype='image', subtype='png', cid='<image>')
-        app.state.store.execute('UPDATE messages SET raw=? WHERE id=?', (mail.as_bytes(), sent))
+        app.state.store.set_raw(sent, mail.as_bytes())
         app.state.outage = False
 
         @app.middleware('http')

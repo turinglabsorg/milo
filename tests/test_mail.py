@@ -270,3 +270,22 @@ def test_reads_do_not_wait_for_a_running_write(store, account_data):
     release.set()
     thread.join()
     assert store.rows("SELECT name FROM accounts")[0]["name"] == "Busy"
+
+
+def test_original_mime_moves_out_of_messages_without_losing_access(store, account_data):
+    account_id = store.add_account(account_data)
+    legacy, current = raw_mail("Legacy", "<legacy@example.com>"), raw_mail("Current", "<current@example.com>")
+    store.execute("INSERT INTO messages(id,account_id,folder,uidvalidity,uid,subject,raw) VALUES('old',?,'INBOX','1',1,'Legacy',?)",
+                  (account_id, legacy))
+    new_id = store.upsert_message(parse_message(current, account_id, "INBOX", "1", 2))
+    store.execute("PRAGMA user_version=1")
+    assert store.message("old", raw=True)["raw"] == legacy
+    assert store.rows("SELECT raw FROM messages WHERE id=?", (new_id,))[0]["raw"] is None
+    assert store.message(new_id, raw=True)["raw"] == current
+    store.move_raw_out(batch=1)
+    assert store.rows("PRAGMA user_version")[0]["user_version"] == 2
+    assert not store.rows("SELECT id FROM messages WHERE raw IS NOT NULL")
+    assert store.message("old", raw=True)["raw"] == legacy
+    assert store.message_headers("old").startswith(b"From:")
+    store.execute("DELETE FROM messages WHERE id='old'")
+    assert not store.rows("SELECT id FROM message_raw WHERE id='old'")
