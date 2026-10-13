@@ -89,6 +89,7 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        umask 077
         while true; do
           PGPASSWORD="$$(cat /archive/db-password)" pg_dump -Fc -f /backups/milo.tmp && \
             mv /backups/milo.tmp "/backups/milo-$$(date +%Y%m%d).dump" && \
