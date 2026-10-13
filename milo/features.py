@@ -30,24 +30,6 @@ class Features:
         self.store = store
         self._screening = (0, [])
         self._contacts = (0, set())
-        with store.lock:
-            store.db.executescript("""
-                CREATE TABLE IF NOT EXISTS scheduled(
-                    draft_id TEXT PRIMARY KEY, send_at REAL NOT NULL, followup_days INTEGER,
-                    error TEXT, created REAL);
-                CREATE TABLE IF NOT EXISTS senders(
-                    email TEXT PRIMARY KEY, status TEXT, vip INTEGER NOT NULL DEFAULT 0,
-                    unsubscribed REAL, updated REAL);
-                CREATE TABLE IF NOT EXISTS todos(
-                    id TEXT PRIMARY KEY, message_id TEXT NOT NULL, text TEXT NOT NULL, priority TEXT,
-                    kind TEXT NOT NULL DEFAULT 'action', created REAL, done REAL);
-                CREATE INDEX IF NOT EXISTS todos_open ON todos(done, message_id);
-                CREATE INDEX IF NOT EXISTS todos_message ON todos(message_id);
-                CREATE TABLE IF NOT EXISTS followups(
-                    id TEXT PRIMARY KEY, account_id TEXT NOT NULL, rfc_message_id TEXT, thread_id TEXT,
-                    subject TEXT, recipients TEXT, created REAL, due REAL, resolved REAL);
-                CREATE INDEX IF NOT EXISTS followups_open ON followups(resolved, due);
-            """)
 
     # Scheduled sending and undo
 
@@ -56,7 +38,8 @@ class Features:
             raise LookupError("Bozza non trovata")
         if not time.time() - 60 <= send_at <= time.time() + 366 * 86400:
             raise ValueError("Scegli una data entro un anno")
-        self.store.execute("INSERT OR REPLACE INTO scheduled VALUES(?,?,?,NULL,?)",
+        self.store.execute("INSERT INTO scheduled VALUES(?,?,?,NULL,?) ON CONFLICT(draft_id) DO UPDATE SET "
+                           "send_at=excluded.send_at,followup_days=excluded.followup_days,error=NULL,created=excluded.created",
                            (draft_id, send_at, followup_days, time.time()))
         return {"draft_id": draft_id, "send_at": send_at, "followup_days": followup_days}
 
@@ -99,7 +82,7 @@ class Features:
                 self.store.execute("UPDATE followups SET resolved=? WHERE id=?", (time.time(), row["id"]))
             elif row["due"] <= time.time() and sent:
                 with self.store.transaction():
-                    self.store.execute("INSERT INTO todos VALUES(?,?,?,?,?,?,NULL)",
+                    self.store.execute("INSERT INTO todos(id,message_id,text,priority,kind,created,done) VALUES(?,?,?,?,?,?,NULL)",
                                        (uuid.uuid4().hex, sent[0]["id"], "Nessuna risposta: " + (row["subject"] or "senza oggetto"),
                                         "high", "followup", time.time()))
                     self.store.execute("UPDATE followups SET resolved=? WHERE id=?", (time.time(), row["id"]))
@@ -115,14 +98,14 @@ class Features:
             self.store.execute("DELETE FROM todos WHERE message_id=? AND kind='action' AND done IS NULL", (message_id,))
             for item in items:
                 if item not in done:
-                    self.store.execute("INSERT INTO todos VALUES(?,?,?,?,'action',?,NULL)",
+                    self.store.execute("INSERT INTO todos(id,message_id,text,priority,kind,created,done) VALUES(?,?,?,?,'action',?,NULL)",
                                        (uuid.uuid4().hex, message_id, item[:500], priority, time.time()))
 
     def backfill_todos(self, stop=lambda: False):
         if self.store.setting("todos_backfilled"):
             return
         rows = self.store.rows(
-            "SELECT id,analysis FROM messages INDEXED BY messages_analyzed WHERE analysis IS NOT NULL AND hidden=0 "
+            "SELECT id,analysis FROM messages WHERE analysis IS NOT NULL AND hidden=0 "
             "AND trashed=0 AND sent=0 AND date>? AND id NOT IN (SELECT message_id FROM todos)", (time.time() - TODO_WINDOW,))
         for row in rows:
             if stop():
@@ -137,7 +120,7 @@ class Features:
         rows = self.store.rows(
             "SELECT t.id,t.message_id,t.text,t.priority,t.kind,t.created,m.sender,m.sender_email,m.subject,m.date,"
             "m.account_id,m.thread_id FROM todos t JOIN messages m ON m.id=t.message_id "
-            "WHERE t.done IS NULL AND m.trashed=0 AND m.hidden=0 ORDER BY t.rowid DESC LIMIT 300")
+            "WHERE t.done IS NULL AND m.trashed=0 AND m.hidden=0 ORDER BY t.seq DESC LIMIT 300")
         # Newest first overall; items of one message keep the order the analysis gave them.
         return sorted(reversed(rows), key=lambda row: (PRIORITY.get(row["priority"], 1), -(row["date"] or 0)))
 
@@ -156,7 +139,7 @@ class Features:
         if "@" not in email or len(email) > 254:
             raise ValueError("Indirizzo non valido")
         with self.store.transaction():
-            self.store.execute("INSERT OR IGNORE INTO senders(email,updated) VALUES(?,?)", (email, time.time()))
+            self.store.execute("INSERT INTO senders(email,updated) VALUES(?,?) ON CONFLICT DO NOTHING", (email, time.time()))
             if status is not ...:
                 self.store.execute("UPDATE senders SET status=?,updated=? WHERE email=?", (status, time.time(), email))
             if vip is not ...:
@@ -172,7 +155,7 @@ class Features:
     def sender_threads(self, email):
         seen, ids = set(), []
         for row in self.store.rows(
-                "SELECT id,account_id,COALESCE(thread_id,id) AS thread FROM messages INDEXED BY messages_client_catalogue "
+                "SELECT id,account_id,COALESCE(thread_id,id) AS thread FROM messages "
                 "WHERE hidden=0 AND trashed=0 AND sent=0 AND archived=0 AND lower(sender_email)=?", (email.lower(),)):
             if (row["account_id"], row["thread"]) not in seen:
                 seen.add((row["account_id"], row["thread"]))
@@ -195,8 +178,8 @@ class Features:
     def newsletter_senders(self):
         rows = self.store.rows(
             "SELECT lower(sender_email) AS email,MAX(sender) AS name,COUNT(DISTINCT account_id||':'||COALESCE(thread_id,id)) AS threads,"
-            "SUM(read=0) AS unread,SUM(archived=0) AS inbox,MAX(date) AS last,MAX(id) AS sample_id "
-            "FROM messages INDEXED BY messages_client_catalogue WHERE hidden=0 AND trashed=0 AND sent=0 "
+            "SUM((read=0)::int) AS unread,SUM((archived=0)::int) AS inbox,MAX(date) AS last,MAX(id) AS sample_id "
+            "FROM messages WHERE hidden=0 AND trashed=0 AND sent=0 "
             "AND category='newsletters' GROUP BY lower(sender_email) ORDER BY threads DESC LIMIT 300")
         known = {row["email"]: row for row in self.store.rows("SELECT * FROM senders")}
         for row in rows:
@@ -242,7 +225,7 @@ class Features:
         contacts = self.contacts()
         rows = self.store.rows(
             "SELECT lower(sender_email) AS email,MAX(sender) AS name,MIN(date) AS first,COUNT(*) AS count,MAX(id) AS sample_id "
-            "FROM messages INDEXED BY messages_client_catalogue WHERE hidden=0 AND trashed=0 AND sent=0 AND archived=0 "
+            "FROM messages WHERE hidden=0 AND trashed=0 AND sent=0 AND archived=0 "
             "GROUP BY lower(sender_email) HAVING MIN(date)>=?", (settings["since"],))
         result = [row for row in rows if row["email"] not in decided and row["email"] not in contacts][:200]
         self._screening = (time.time(), result)
@@ -282,7 +265,7 @@ class Features:
 
     def mark_unsubscribed(self, email):
         email = email.strip().lower()
-        self.store.execute("INSERT OR IGNORE INTO senders(email,updated) VALUES(?,?)", (email, time.time()))
+        self.store.execute("INSERT INTO senders(email,updated) VALUES(?,?) ON CONFLICT DO NOTHING", (email, time.time()))
         self.store.execute("UPDATE senders SET unsubscribed=?,updated=? WHERE email=?", (time.time(), time.time(), email))
 
     # Configuration export and restore. Mail itself comes back from the providers.
@@ -332,7 +315,8 @@ class Features:
                 self.store.add_rule({key: rule[key] for key in ("name", "field", "contains", "category")})
                 counts["rules"] += 1
         for sender in data.get("senders") or []:
-            self.store.execute("INSERT OR REPLACE INTO senders VALUES(?,?,?,?,?)",
+            self.store.execute("INSERT INTO senders VALUES(?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET status=excluded.status,"
+                               "vip=excluded.vip,unsubscribed=excluded.unsubscribed,updated=excluded.updated",
                                (str(sender["email"]).lower(), sender.get("status"), int(bool(sender.get("vip"))),
                                 sender.get("unsubscribed"), sender.get("updated") or time.time()))
             counts["senders"] += 1
@@ -363,7 +347,7 @@ class Features:
         for entry in data.get("todos") or []:
             message_id = local(entry)
             if message_id and not self.store.rows("SELECT 1 FROM todos WHERE message_id=? AND text=?", (message_id, entry["text"])):
-                self.store.execute("INSERT INTO todos VALUES(?,?,?,?,?,?,?)",
+                self.store.execute("INSERT INTO todos(id,message_id,text,priority,kind,created,done) VALUES(?,?,?,?,?,?,?)",
                                    (uuid.uuid4().hex, message_id, entry["text"], entry.get("priority"),
                                     entry.get("kind") or "action", entry.get("created") or time.time(), entry.get("done")))
                 counts["todos"] += 1
@@ -377,7 +361,7 @@ class Features:
             started = time.monotonic()
             with self.store.transaction():
                 deleted = self.store.execute(
-                    "DELETE FROM messages WHERE rowid IN (SELECT rowid FROM messages WHERE account_id=? LIMIT 200)",
+                    "DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE account_id=? LIMIT 200)",
                     (account_id,)).rowcount
             if not deleted:
                 break

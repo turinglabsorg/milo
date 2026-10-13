@@ -12,21 +12,25 @@ external action. That file is the single source of global agent instructions.
   inside `srcdoc`. Height is fitted from the parent with a `ResizeObserver`.
 - External images load by default; body cache keys therefore include
   `?load_images=true`, and background warming must use `bodyPath()`.
-- One-time data migrations use SQLite `PRAGMA user_version` in `Store.migrate`.
+- Tests run against a real PostgreSQL: set `MILO_TEST_DATABASE_URL`; every
+  archive directory gets its own throwaway database (`tests/conftest.py`).
 - Test unreleased frontend changes on the real archive with Playwright
   (`service_workers="block"`, route `/static/*.js|css` to local `web/`).
-- Reads must never wait for mailbox sync: `Store.rows()` uses a per-thread
-  read-only WAL connection unless the thread already holds `store.lock`.
+- Storage is PostgreSQL (`MILO_DATABASE_URL`, password via
+  `MILO_DATABASE_PASSWORD_FILE`). Reads must never wait for mailbox sync:
+  `Store.rows()` uses a per-thread connection unless the thread already holds
+  `store.lock`. Queries use `?` placeholders (translated by `store.sql`), integer
+  0/1 flags (cast boolean expressions with `::int` inside aggregates) and
+  `ILIKE` for search. Never reintroduce SQLite.
   Parse mail before taking the writer lock and keep write transactions short.
 - Never scan the archive at startup: the Docker health check restarts a slow
-  container. One-time rewrites run in background batches and find candidates
-  through the covering `messages_client_catalogue` index (body/raw are huge).
+  container. One-time rewrites run in background batches.
 - Deploy: push `main`, fast-forward `~/Sites/milo` on the Mac, `docker compose
   build`, then bootout `system/space.grooooog.milo.server`, `compose up -d
   --no-build --wait`, bootstrap the plist again (docs/DEPLOYMENT.md).
-- Original MIME lives in `message_raw` (read via `store.RAW`, which falls back
-  to `messages.raw` for unmigrated rows). Write it only through
-  `upsert_message`/`set_raw`; never add large columns back to `messages`.
+- Original MIME lives in compressed files under `blobs/` (`Store.blobs`), read
+  via `message(..., raw=True)`/`message_headers`. Write it only through
+  `upsert_message`/`set_raw`; never store originals in the database.
 - Heavy archive rewrites saturate Docker Desktop's bind-mount I/O and trip the
   health check. Back up with an APFS clone (`cp -c`, container stopped) and run
   bulk migrations natively on the Mac with the container stopped (the 10 GB

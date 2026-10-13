@@ -190,9 +190,10 @@ class Gmail:
         profile = self.request("GET", "profile")
         if not profile or not profile.get("historyId"):
             raise RuntimeError("Gmail non ha restituito lo stato della casella")
-        with self.store.lock, self.store.db:
-            self.store.db.execute("DELETE FROM gmail_scan WHERE account_id=?", (self.account_id,))
-            self.store.db.execute("INSERT OR REPLACE INTO gmail_sync VALUES(?,?,NULL,NULL,0)",
+        with self.store.transaction():
+            self.store.execute("DELETE FROM gmail_scan WHERE account_id=?", (self.account_id,))
+            self.store.execute("INSERT INTO gmail_sync VALUES(?,?,NULL,NULL,0) ON CONFLICT(account_id) DO UPDATE SET "
+                               "history_id=excluded.history_id,history_page=NULL,backfill_page=NULL,backfill_complete=0",
                                   (self.account_id, profile["historyId"]))
 
     def backfill(self):
@@ -333,7 +334,7 @@ class Gmail:
                         self.store.execute(f"UPDATE messages SET {key}=? WHERE id=?", (data[key], message_id))
             else:
                 self.store.upsert_message(data)
-            self.store.execute("INSERT OR IGNORE INTO gmail_scan VALUES(?,?)", (self.account_id, remote_id))
+            self.store.execute("INSERT INTO gmail_scan VALUES(?,?) ON CONFLICT DO NOTHING", (self.account_id, remote_id))
             return int(not existing)
 
     def remove_message(self, remote_id):

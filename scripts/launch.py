@@ -4,7 +4,6 @@ import json
 import os
 import re
 import shutil
-import sqlite3
 import subprocess
 import sys
 import time
@@ -104,9 +103,12 @@ def main():
         else:
             raise RuntimeError(f"Milo did not start. Check {log}")
     # A fragment is never sent to the HTTP server or access logs. The UI removes it immediately.
-    connection = sqlite3.connect(DATA / "mail.sqlite")
-    bootstrap = connection.execute("SELECT value FROM settings WHERE key='bootstrap'").fetchone()
-    connection.close()
+    sys.path.insert(0, str(ROOT))
+    import psycopg
+
+    from milo.store import database_url
+    with psycopg.connect(database_url(DATA)) as connection:
+        bootstrap = connection.execute("SELECT value FROM settings WHERE key='bootstrap'").fetchone()
     url = URL
     if bootstrap and json.loads(bootstrap[0]) and not DEMO:
         url += "#setup=" + json.loads(bootstrap[0])

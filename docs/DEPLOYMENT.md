@@ -106,3 +106,26 @@ job from its saved plist. This prevents the availability supervisor from trying
 to restart a container while Compose is replacing it. Restore the job even if an
 update fails. The client retains downloaded content during temporary gateway
 failures; authorization denials remain distinct from server unavailability.
+
+## PostgreSQL and original messages
+
+Compose runs `postgres:18.4-alpine` as `db` on the same private bridge, with its
+data in the named volume `milo-postgres` (inside Docker's VM disk: databases on
+the macOS bind mount are slow). It is published only on `127.0.0.1:55433` for
+administration and migrations. The password lives in `db-password` (mode 0600)
+in the archive; Milo reads it through `MILO_DATABASE_PASSWORD_FILE`, and Compose
+uses `MILO_DB_PASSWORD` only to initialize an empty volume. The `backup` service
+writes a `pg_dump` every 24 hours to `backups/postgres` and keeps seven.
+
+Original messages are compressed files in the archive's `blobs/` directory.
+
+### Moving an existing SQLite archive
+
+1. Stop the supervisor and the server, then take an APFS clone of the archive
+   (`cp -c mail.sqlite backups/…`); the SQLite file is only read and stays.
+2. Create `db-password`, start only `db` with `MILO_DB_PASSWORD` exported.
+3. Run `scripts/migrate_sqlite.py "$MILO_ARCHIVE" postgresql://milo:…@127.0.0.1:55433/milo`
+   natively on the Mac (a virtualenv with `psycopg[binary]` and `cryptography`).
+   It refuses to run on a database that already has messages, verifies row
+   counts and a sample of originals, and runs `ANALYZE`.
+4. Start the server and the supervisor again.

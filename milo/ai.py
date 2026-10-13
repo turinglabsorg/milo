@@ -180,14 +180,14 @@ class AI:
         if not terms:
             terms = [word for word in question.split() if len(word) > 3][:6]
         candidates = {}
-        clause = " OR ".join("(subject LIKE ? OR sender LIKE ? OR sender_email LIKE ? OR preview LIKE ?)" for _ in terms)
+        clause = " OR ".join("(subject ILIKE ? OR sender ILIKE ? OR sender_email ILIKE ? OR preview ILIKE ?)" for _ in terms)
         params = [value for term in terms for value in [f"%{term}%"] * 4]
-        for row in self.store.rows("SELECT id,subject,sender,sender_email,preview,date FROM messages INDEXED BY "
-                                   f"messages_client_catalogue WHERE hidden=0 AND trashed=0 AND ({clause}) "
+        for row in self.store.rows("SELECT id,subject,sender,sender_email,preview,date FROM messages "
+                                   f"WHERE hidden=0 AND trashed=0 AND ({clause}) "
                                    "ORDER BY date DESC LIMIT 200", params):
             text = " ".join(str(row[key] or "") for key in ("subject", "sender", "sender_email", "preview")).casefold()
             candidates[row["id"]] = (sum(term.casefold() in text for term in terms) * 2, row["date"])
-        body_clause = " OR ".join("body LIKE ?" for _ in terms)
+        body_clause = " OR ".join("body ILIKE ?" for _ in terms)
         for row in self.store.rows(f"SELECT id,date FROM messages WHERE hidden=0 AND trashed=0 AND date>? AND ({body_clause}) "
                                    "ORDER BY date DESC LIMIT 100",
                                    (datetime.now(timezone.utc).timestamp() - 180 * 86400, *[f"%{term}%" for term in terms])):

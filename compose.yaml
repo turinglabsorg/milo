@@ -9,9 +9,14 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       MILO_DATA: /data
       MILO_CONTAINER: "1"
+      MILO_DATABASE_URL: postgresql://milo@db:5432/milo
+      MILO_DATABASE_PASSWORD_FILE: /data/db-password
       MILO_PROXY_PEER: "10.241.84.1"
       MILO_PUBLIC_URL: https://milo.grooooog.space
       MILO_OLLAMA_URL: "${MILO_OLLAMA_URL:-http://host.docker.internal:11434}"
@@ -42,6 +47,73 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+  db:
+    image: postgres:18.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: milo
+      POSTGRES_DB: milo
+      # Used only to initialize an empty volume; Milo reads the password from the archive.
+      POSTGRES_PASSWORD: "${MILO_DB_PASSWORD:-}"
+    command: ["postgres", "-c", "shared_buffers=512MB", "-c", "effective_cache_size=2GB",
+              "-c", "max_connections=200", "-c", "listen_addresses=*"]
+    shm_size: 256m
+    volumes:
+      - milo-postgres:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:${MILO_DB_PORT:-55433}:5432"
+    networks:
+      - server
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "milo", "-d", "milo"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+  backup:
+    image: postgres:18.4-alpine
+    restart: unless-stopped
+    user: "${MILO_UID:-501}:${MILO_GID:-20}"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: milo
+      PGDATABASE: milo
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          PGPASSWORD="$$(cat /archive/db-password)" pg_dump -Fc -f /backups/milo.tmp && \
+            mv /backups/milo.tmp "/backups/milo-$$(date +%Y%m%d).dump" && \
+            ls -1t /backups/milo-*.dump | tail -n +8 | xargs -r rm
+          sleep 86400
+        done
+    volumes:
+      - type: bind
+        source: "${MILO_ARCHIVE:?Set MILO_ARCHIVE to the existing archive}"
+        target: /archive
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${MILO_ARCHIVE:?Set MILO_ARCHIVE to the existing archive}/backups/postgres"
+        target: /backups
+    networks:
+      - server
+    logging:
+      driver: json-file
+      options:
+        max-size: 1m
+        max-file: "2"
+volumes:
+  milo-postgres:
 networks:
   server:
     ipam:

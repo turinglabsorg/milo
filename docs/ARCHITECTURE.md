@@ -16,8 +16,10 @@ flowchart LR
     Mobile[Responsive private client] --> Tail
     Tail --> API[Milo private loopback API]
     Landing -->|Google callback only| Tail
-    API --> SQLite[(Persistent archive)]
-    Worker[Sync worker] --> SQLite
+    API --> Postgres[(PostgreSQL)]
+    Worker[Sync worker] --> Postgres
+    API --> Blobs[(Compressed originals)]
+    Worker --> Blobs
     Worker <--> Gmail[Gmail API with OAuth]
     API --> Gmail
     Worker <--> IMAP[Provider IMAP over TLS]
@@ -27,8 +29,13 @@ flowchart LR
     Ollama --> Mistral[Mistral Large 4 Cloud]
 ```
 
-Python/FastAPI provides a same-origin API and static client. SQLite runs in WAL
-mode; threads share one connection behind a reentrant lock. Fernet encrypts
+Python/FastAPI provides a same-origin API and static client. PostgreSQL holds
+metadata, bodies, settings, drafts and the sync queues. Writes go through one
+connection behind a reentrant lock (so check-then-write sequences stay atomic);
+every reading thread has its own connection and never waits for the sync
+writer. Original MIME is stored outside the database as zlib-compressed files,
+one per message, written before the row; a daily sweep removes orphans older
+than an hour. Fernet encrypts
 provider passwords, OAuth client credentials and Google refresh tokens, using a host-side key. Sessions store only token hashes.
 The permanent Mac deployment separates the public landing on loopback port 8025
 from the archive backend on loopback port 8029. The backend accepts the exact
@@ -162,7 +169,7 @@ valid result. GET/POST `/api/recap` read that snapshot and never invoke the mode
 The worker is separate from synchronization and HTTP request handling, so model
 latency does not block the inbox or provider receipt. Consent is checked before
 cloud generation, and shutdown waits for active storage users before closing
-SQLite.
+the database connections.
 
 The Docker service publishes only host loopback ports. Tailscale's attested owner
 header is accepted only from loopback or the explicitly configured dedicated

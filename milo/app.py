@@ -106,6 +106,9 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         if minute:
             features.check_followups()
             features.enforce_blocked()
+            if time.time() - (store.setting("blobs_swept") or 0) > 86400:
+                store.sweep_blobs(stop_worker.is_set)
+                store.set_setting("blobs_swept", time.time())
 
     async def feature_worker():
         last = 0
@@ -127,8 +130,8 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         nonlocal worker_loop
         worker_loop = asyncio.get_running_loop()
         def background_migrations():
-            store.rewrite_link_previews(stop=stop_worker.is_set)
-            store.move_raw_out(stop=stop_worker.is_set)
+            # Fresh statistics keep conversation queries on indexes after bulk imports.
+            store.execute("ANALYZE")
             features.backfill_todos(stop=stop_worker.is_set)
             for account in store.rows("SELECT id FROM accounts WHERE removing=1"):
                 features.purge_account(account["id"], stop=stop_worker.is_set)
@@ -316,9 +319,9 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         screening = features.screening()
         # Group on the covering catalogue index; COUNT(DISTINCT expr) needs a temp B-tree per call.
         counts = store.rows("SELECT SUM(inbox) AS inbox,SUM(inbox*unread) AS unread,SUM(starred) AS starred,SUM(snoozed) AS snoozed "
-                            "FROM (SELECT MAX(archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?)) AS inbox,"
-                            "SUM(read=0 AND archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?)) AS unread,"
-                            "MAX(starred) AS starred,MAX(snoozed_until>?) AS snoozed FROM messages "
+                            "FROM (SELECT MAX((archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?))::int) AS inbox,"
+                            "SUM((read=0 AND archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?))::int) AS unread,"
+                            "MAX(starred) AS starred,MAX((snoozed_until>?)::int) AS snoozed FROM messages "
                             "WHERE hidden=0 AND trashed=0 GROUP BY account_id,COALESCE(thread_id,id))", (now, now, now))[0]
         return {"accounts": store.accounts(), "ai": store.setting("ai"), "ai_error": store.setting("ai_error"),
                 "identity": store.setting("identity") or Identity().model_dump(),
@@ -580,7 +583,8 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             existing = store.rows("SELECT data FROM drafts WHERE id=?", (draft_id,))
             if existing and data.revision and json.loads(existing[0]["data"]).get("revision", 0) > data.revision:
                 raise HTTPException(409, "Questa bozza contiene modifiche più recenti. La tua copia resta nelle bozze in attesa.")
-            store.execute("INSERT OR REPLACE INTO drafts VALUES(?,?,?)", (draft_id, data.model_dump_json(), time.time()))
+            store.execute("INSERT INTO drafts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,updated=excluded.updated",
+                          (draft_id, data.model_dump_json(), time.time()))
         return {"id": draft_id}
 
     @app.delete("/api/drafts/{draft_id}", dependencies=[Depends(auth)])

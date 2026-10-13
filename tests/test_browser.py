@@ -65,15 +65,16 @@ def test_first_access_without_owner_link_has_no_code_or_password_setup():
 @pytest.mark.parametrize("width,height", [(1440, 1000), (900, 900), (390, 844)])
 def test_real_service_onboarding_and_google_connection_ui(width, height):
     import json
-    import sqlite3
     from urllib.parse import parse_qs, urlsplit
+
+    import psycopg
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": width, "height": height})
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
-        with sqlite3.connect(Path(os.environ["MILO_LIVE_TEST_DATA"]) / "mail.sqlite") as db:
+        with psycopg.connect(os.environ["MILO_DATABASE_URL"]) as db:
             bootstrap = json.loads(db.execute("SELECT value FROM settings WHERE key='bootstrap'").fetchone()[0])
         url = os.environ["MILO_LIVE_TEST_URL"] + ("#setup=" + bootstrap if bootstrap else "")
         page.goto(url)

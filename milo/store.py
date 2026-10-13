@@ -3,24 +3,161 @@ import json
 import os
 import re
 import secrets
-import sqlite3
 import threading
 import time
 import uuid
+import zlib
 from contextlib import contextmanager
 from pathlib import Path
 
+import psycopg
 from cryptography.fernet import Fernet
+from psycopg.adapt import Dumper
+from psycopg.rows import dict_row
 
-# Original MIME lives in message_raw so list and count scans stay small. Rows not yet
-# moved by the background migration still carry it in messages.raw.
-RAW = "COALESCE((SELECT r.raw FROM message_raw r WHERE r.id=messages.id),messages.raw)"
 LINK_NOISE = re.compile(r"<\s*(?:https?|mailto):[^>]*>|\[(?:image|cid|https?)\b[^\]]*\]|\(\s*https?://[^)]*\)|(?:https?://|www\.)\S+", re.I)
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, expires DOUBLE PRECISION NOT NULL);
+CREATE TABLE IF NOT EXISTS accounts(
+    seq BIGSERIAL, id TEXT PRIMARY KEY, name TEXT, email TEXT, username TEXT, secret TEXT,
+    imap_host TEXT, imap_port INTEGER, smtp_host TEXT, smtp_port INTEGER, smtp_security TEXT, color TEXT,
+    last_sync DOUBLE PRECISION, error TEXT, provider TEXT NOT NULL DEFAULT 'imap',
+    enabled INTEGER NOT NULL DEFAULT 1, removing INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS messages(
+    seq BIGSERIAL, id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    folder TEXT NOT NULL, uidvalidity TEXT NOT NULL, uid BIGINT NOT NULL,
+    message_id TEXT, sender TEXT, sender_email TEXT, recipients TEXT, subject TEXT,
+    body TEXT, preview TEXT, date DOUBLE PRECISION, read INTEGER DEFAULT 0, starred INTEGER DEFAULT 0,
+    archived INTEGER DEFAULT 0, sent INTEGER DEFAULT 0, category TEXT DEFAULT 'people',
+    snoozed_until DOUBLE PRECISION, analysis TEXT, provider_id TEXT, thread_id TEXT, labels TEXT,
+    hidden INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, trashed INTEGER NOT NULL DEFAULT 0,
+    content_version TEXT, UNIQUE(account_id, folder, uidvalidity, uid));
+CREATE INDEX IF NOT EXISTS messages_date ON messages(date DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS messages_provider_id ON messages(account_id,provider_id) WHERE provider_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS messages_thread ON messages(account_id,thread_id);
+CREATE INDEX IF NOT EXISTS messages_conversation ON messages(account_id,(COALESCE(thread_id,id)));
+CREATE INDEX IF NOT EXISTS messages_message_id ON messages(account_id,message_id);
+CREATE INDEX IF NOT EXISTS messages_sender ON messages(lower(sender_email)) WHERE hidden=0 AND trashed=0;
+CREATE INDEX IF NOT EXISTS messages_analyzed ON messages(account_id,(COALESCE(thread_id,id)))
+    WHERE analysis IS NOT NULL AND hidden=0 AND trashed=0;
+CREATE INDEX IF NOT EXISTS messages_catalogue ON messages(account_id,(COALESCE(thread_id,id)),date DESC,id)
+    INCLUDE (thread_id,sender,sender_email,subject,preview,read,starred,archived,sent,category,
+             snoozed_until,pinned,content_version)
+    WHERE hidden=0 AND trashed=0;
+CREATE TABLE IF NOT EXISTS outbox(
+    id TEXT PRIMARY KEY, message_id TEXT REFERENCES messages(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    kind TEXT, value TEXT, created DOUBLE PRECISION, error TEXT);
+CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY, data TEXT, updated DOUBLE PRECISION);
+CREATE TABLE IF NOT EXISTS rules(seq BIGSERIAL, id TEXT PRIMARY KEY, data TEXT);
+CREATE TABLE IF NOT EXISTS oauth_states(state TEXT PRIMARY KEY, data TEXT, expires DOUBLE PRECISION);
+CREATE TABLE IF NOT EXISTS gmail_sync(
+    account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    history_id TEXT, history_page TEXT, backfill_page TEXT, backfill_complete INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS gmail_scan(
+    account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE, provider_id TEXT, PRIMARY KEY(account_id,provider_id));
+CREATE TABLE IF NOT EXISTS scheduled(
+    draft_id TEXT PRIMARY KEY, send_at DOUBLE PRECISION NOT NULL, followup_days INTEGER, error TEXT,
+    created DOUBLE PRECISION);
+CREATE TABLE IF NOT EXISTS senders(
+    email TEXT PRIMARY KEY, status TEXT, vip INTEGER NOT NULL DEFAULT 0, unsubscribed DOUBLE PRECISION,
+    updated DOUBLE PRECISION);
+CREATE TABLE IF NOT EXISTS todos(
+    seq BIGSERIAL, id TEXT PRIMARY KEY, message_id TEXT NOT NULL, text TEXT NOT NULL, priority TEXT,
+    kind TEXT NOT NULL DEFAULT 'action', created DOUBLE PRECISION, done DOUBLE PRECISION);
+CREATE INDEX IF NOT EXISTS todos_open ON todos(message_id) WHERE done IS NULL;
+CREATE INDEX IF NOT EXISTS todos_message ON todos(message_id);
+CREATE TABLE IF NOT EXISTS followups(
+    id TEXT PRIMARY KEY, account_id TEXT NOT NULL, rfc_message_id TEXT, thread_id TEXT, subject TEXT,
+    recipients TEXT, created DOUBLE PRECISION, due DOUBLE PRECISION, resolved DOUBLE PRECISION);
+CREATE INDEX IF NOT EXISTS followups_open ON followups(due) WHERE resolved IS NULL;
+"""
 
 
 def preview_text(body):
     """List previews show readable text, not the tracking links newsletters open with."""
     return re.sub(r"\s+", " ", LINK_NOISE.sub(" ", body or "")).strip()[:240]
+
+
+def database_url(directory):
+    """The archive's Postgres. The password stays in a file next to the data, never in the URL."""
+    url = os.environ.get("MILO_DATABASE_URL")
+    if not url:
+        raise RuntimeError("MILO_DATABASE_URL non configurato: Milo usa PostgreSQL.")
+    password_file = os.environ.get("MILO_DATABASE_PASSWORD_FILE")
+    if password_file:
+        return psycopg.conninfo.make_conninfo(url, password=Path(password_file).read_text().strip())
+    return url
+
+
+def sql(query, params=()):
+    """Queries are written with ? placeholders; psycopg wants %s and, with parameters, literal % doubled."""
+    return query.replace("%", "%%").replace("?", "%s") if params else query
+
+
+class FlagDumper(Dumper):
+    """Flags are INTEGER columns: store Python booleans as 0/1."""
+    oid = psycopg.adapters.types["int4"].oid
+
+    def dump(self, obj):
+        return b"1" if obj else b"0"
+
+
+def clean(value):
+    return value.replace("\x00", "") if isinstance(value, str) else value
+
+
+class Blobs:
+    """Original MIME as compressed files, one per message, outside the database."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    def path(self, message_id):
+        return self.root / message_id[:2] / f"{message_id}.eml.z"
+
+    def put(self, message_id, raw):
+        path = self.path(message_id)
+        path.parent.mkdir(exist_ok=True, mode=0o700)
+        temporary = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(zlib.compress(raw, 6))
+        os.replace(temporary, path)
+
+    def get(self, message_id):
+        try:
+            return zlib.decompress(self.path(message_id).read_bytes())
+        except FileNotFoundError:
+            return None
+
+    def head(self, message_id, size):
+        try:
+            data = self.path(message_id).read_bytes()
+        except FileNotFoundError:
+            return b""
+        decompressor = zlib.decompressobj()
+        return decompressor.decompress(data, size)
+
+    def sweep(self, known, stop=lambda: False):
+        """Remove files whose message no longer exists (deleted, purged or replaced)."""
+        removed = 0
+        for directory in self.root.iterdir():
+            if stop():
+                break
+            if not directory.is_dir():
+                continue
+            for path in directory.iterdir():
+                message_id = path.name.split(".", 1)[0]
+                # Originals are written before their row: only files older than an hour can be orphans.
+                if time.time() - path.stat().st_mtime < 3600:
+                    continue
+                if path.suffix == ".tmp" or (path.name.endswith(".eml.z") and message_id not in known):
+                    path.unlink(missing_ok=True)
+                    removed += 1
+        return removed
 
 
 class WriterLock:
@@ -54,10 +191,11 @@ class WriterLock:
 
 
 class Store:
-    def __init__(self, directory: Path):
+    def __init__(self, directory: Path, dsn=None):
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         directory.chmod(0o700)
         self.directory = directory
+        self.dsn = dsn or database_url(directory)
         self.lock = WriterLock()
         self._local = threading.local()
         self._readers = []
@@ -69,34 +207,15 @@ class Store:
             with os.fdopen(fd, "wb") as stream:
                 stream.write(Fernet.generate_key())
         self.vault = Fernet(key_path.read_bytes())
-        self.db = sqlite3.connect(directory / "mail.sqlite", check_same_thread=False)
-        self.db.row_factory = sqlite3.Row
-        self.db.executescript("""
-            PRAGMA journal_mode=WAL;
-            PRAGMA foreign_keys=ON;
-            CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, expires REAL NOT NULL);
-            CREATE TABLE IF NOT EXISTS accounts(
-                id TEXT PRIMARY KEY, name TEXT, email TEXT, username TEXT, secret TEXT,
-                imap_host TEXT, imap_port INTEGER, smtp_host TEXT, smtp_port INTEGER,
-                smtp_security TEXT, color TEXT, last_sync REAL, error TEXT);
-            CREATE TABLE IF NOT EXISTS messages(
-                id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-                folder TEXT NOT NULL, uidvalidity TEXT NOT NULL, uid INTEGER NOT NULL,
-                message_id TEXT, sender TEXT, sender_email TEXT, recipients TEXT, subject TEXT,
-                body TEXT, preview TEXT, date REAL, read INTEGER DEFAULT 0, starred INTEGER DEFAULT 0,
-                archived INTEGER DEFAULT 0, sent INTEGER DEFAULT 0, category TEXT DEFAULT 'people',
-                snoozed_until REAL, analysis TEXT, raw BLOB,
-                UNIQUE(account_id, folder, uidvalidity, uid));
-            CREATE INDEX IF NOT EXISTS messages_date ON messages(date DESC);
-            CREATE TABLE IF NOT EXISTS outbox(
-                id TEXT PRIMARY KEY, message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
-                kind TEXT, value TEXT, created REAL, error TEXT);
-            CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY, data TEXT, updated REAL);
-            CREATE TABLE IF NOT EXISTS rules(id TEXT PRIMARY KEY, data TEXT);
-        """)
-        self.migrate()
-        (directory / "mail.sqlite").chmod(0o600)
+        self.blobs = Blobs(directory / "blobs")
+        self.db = self.connect()
+        with self.lock:
+            # Serialize schema creation across processes sharing the archive.
+            self.db.execute("SELECT pg_advisory_lock(80250)")
+            try:
+                self.db.execute(SCHEMA)
+            finally:
+                self.db.execute("SELECT pg_advisory_unlock(80250)")
         self.bootstrap = self.setting("bootstrap")
         if not self.setting("password") and not self.bootstrap:
             self.bootstrap = secrets.token_urlsafe(24)
@@ -105,97 +224,63 @@ class Store:
             self.set_setting("ai", {"model": "mistral-large-4:cloud", "automatic": False,
                                     "cloud_consent": False})
 
-    def migrate(self):
-        migrations = {
-            "accounts": {"provider": "TEXT NOT NULL DEFAULT 'imap'", "enabled": "INTEGER NOT NULL DEFAULT 1",
-                         "removing": "INTEGER NOT NULL DEFAULT 0"},
-            "messages": {"provider_id": "TEXT", "thread_id": "TEXT", "labels": "TEXT",
-                         "hidden": "INTEGER NOT NULL DEFAULT 0", "pinned": "INTEGER NOT NULL DEFAULT 0",
-                         "trashed": "INTEGER NOT NULL DEFAULT 0", "content_version": "TEXT"},
-        }
-        with self.lock, self.db:
-            for table, columns in migrations.items():
-                existing = {row["name"] for row in self.db.execute(f"PRAGMA table_xinfo({table})")}
-                for name, definition in columns.items():
-                    if name not in existing:
-                        self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
-            existing = self.db.execute("SELECT sql FROM sqlite_master WHERE type='index' "
-                                       "AND name='messages_client_catalogue'").fetchone()
-            if existing and "CONTENT_VERSION" not in (existing[0] or "").upper():
-                self.db.execute("DROP INDEX messages_client_catalogue")
-            self.db.executescript("""
-                CREATE UNIQUE INDEX IF NOT EXISTS messages_provider_id ON messages(account_id,provider_id)
-                    WHERE provider_id IS NOT NULL;
-                CREATE TABLE IF NOT EXISTS oauth_states(state TEXT PRIMARY KEY, data TEXT, expires REAL);
-                CREATE TABLE IF NOT EXISTS message_raw(
-                    id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE ON UPDATE CASCADE, raw BLOB NOT NULL);
-                CREATE TABLE IF NOT EXISTS gmail_sync(
-                    account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
-                    history_id TEXT, history_page TEXT, backfill_page TEXT,
-                    backfill_complete INTEGER NOT NULL DEFAULT 0);
-                CREATE TABLE IF NOT EXISTS gmail_scan(
-                    account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
-                    provider_id TEXT, PRIMARY KEY(account_id,provider_id));
-                CREATE INDEX IF NOT EXISTS messages_thread ON messages(account_id,thread_id);
-                CREATE INDEX IF NOT EXISTS messages_conversation ON messages(account_id,COALESCE(thread_id,id));
-                CREATE INDEX IF NOT EXISTS messages_analyzed
-                    ON messages(account_id,COALESCE(thread_id,id))
-                    WHERE analysis IS NOT NULL AND hidden=0 AND trashed=0;
-                CREATE INDEX IF NOT EXISTS messages_client_catalogue
-                    ON messages(account_id,COALESCE(thread_id,id),date DESC,id,
-                                thread_id,sender,sender_email,subject,preview,read,starred,archived,sent,
-                                category,snoozed_until,pinned,content_version)
-                    WHERE hidden=0 AND trashed=0;
-            """)
+    def connect(self):
+        connection = psycopg.connect(self.dsn, autocommit=True, row_factory=dict_row,
+                                     application_name="milo")
+        connection.adapters.register_dumper(bool, FlagDumper)
+        return connection
+
+    def writer(self):
+        if self.db.closed or self.db.broken:
+            self.db = self.connect()
+        return self.db
+
+    def reader(self):
+        """Per-thread connection: readers never wait for the sync writer."""
+        connection = getattr(self._local, "db", None)
+        if connection is None or connection.closed or connection.broken:
+            connection = self.connect()
+            self._local.db = connection
+            with self.lock:
+                self._readers.append(connection)
+        return connection
+
+    def rows(self, query, params=()):
+        connection = self.writer() if self.lock.owned() else self.reader()
+        return connection.execute(sql(query, params), params or None).fetchall()
+
+    def execute(self, query, params=()):
+        with self.lock:
+            return self.writer().execute(sql(query, params), tuple(clean(value) for value in params) or None)
+
+    def executemany(self, query, params):
+        with self.lock, self.writer().cursor() as cursor:
+            cursor.executemany(sql(query, True), [tuple(clean(value) for value in row) for row in params])
+
+    @contextmanager
+    def transaction(self):
+        """Batch writes into one commit. Callers must not do network I/O inside."""
+        with self.lock:
+            if self._txn_depth:
+                self._txn_depth += 1
+                try:
+                    yield
+                finally:
+                    self._txn_depth -= 1
+                return
+            self._txn_depth += 1
+            try:
+                with self.writer().transaction():
+                    yield
+            finally:
+                self._txn_depth -= 1
 
     def set_raw(self, message_id, raw):
-        with self.transaction():
-            self.execute("INSERT OR REPLACE INTO message_raw VALUES(?,?)", (message_id, raw))
-            self.execute("UPDATE messages SET raw=NULL WHERE id=?", (message_id,))
+        self.blobs.put(message_id, raw)
 
-    def move_raw_out(self, batch=25, stop=lambda: False):
-        """Move original MIME out of the messages table in short, resumable batches."""
-        if self.rows("PRAGMA user_version")[0]["user_version"] >= 2:
-            return
-        last = 0
-        while not stop():
-            ids = self.rows("SELECT rowid,id FROM messages WHERE rowid>? AND raw IS NOT NULL ORDER BY rowid LIMIT ?",
-                            (last, batch))
-            if not ids:
-                with self.lock:
-                    self.db.execute("PRAGMA user_version=2")
-                return
-            marks = ",".join("?" * len(ids))
-            chunk = [row["id"] for row in ids]
-            started = time.monotonic()
-            with self.transaction():
-                self.db.execute(f"INSERT OR IGNORE INTO message_raw SELECT id,raw FROM messages "
-                                f"WHERE id IN ({marks}) AND raw IS NOT NULL", chunk)
-                self.db.execute(f"UPDATE messages SET raw=NULL WHERE id IN ({marks})", chunk)
-            last = ids[-1]["rowid"]
-            # Leave the disk idle twice as long as each batch took, so mail sync,
-            # reads and the container health check keep most of the I/O.
-            time.sleep(max(0.05, 2 * (time.monotonic() - started)))
-
-    def rewrite_link_previews(self, batch=200, stop=lambda: False):
-        """One-time background rewrite. Candidates come from the covering catalogue
-        index so the archive's large body and raw columns are only read for them."""
-        if self.rows("PRAGMA user_version")[0]["user_version"] >= 1:
-            return
-        ids = [row["id"] for row in self.rows(
-            "SELECT id FROM messages INDEXED BY messages_client_catalogue WHERE hidden=0 AND trashed=0 "
-            "AND (preview LIKE '%http%' OR preview LIKE '%www.%' OR preview LIKE '%[image%')")]
-        for start in range(0, len(ids), batch):
-            if stop():
-                return
-            chunk = ids[start:start + batch]
-            rows = self.rows(f"SELECT id,body FROM messages WHERE id IN ({','.join('?' * len(chunk))})", chunk)
-            updates = [(preview_text(row["body"]), row["id"]) for row in rows]
-            with self.transaction():
-                self.db.executemany("UPDATE messages SET preview=? WHERE id=?", updates)
-            time.sleep(0.05)
-        with self.lock:
-            self.db.execute("PRAGMA user_version=1")
+    def sweep_blobs(self, stop=lambda: False):
+        known = {row["id"] for row in self.rows("SELECT id FROM messages")}
+        return self.blobs.sweep(known, stop)
 
     def encrypt_json(self, value):
         return self.vault.encrypt(json.dumps(value).encode()).decode()
@@ -258,55 +343,13 @@ class Store:
         cursor = self.execute(query, params)
         return secret if cursor.rowcount else None
 
-    def reader(self):
-        """Per-thread read-only connection: WAL readers never wait for the sync writer."""
-        connection = getattr(self._local, "db", None)
-        if connection is None:
-            connection = sqlite3.connect(self.directory / "mail.sqlite", check_same_thread=False)
-            connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA query_only=ON")
-            connection.execute("PRAGMA busy_timeout=5000")
-            self._local.db = connection
-            with self.lock:
-                self._readers.append(connection)
-        return connection
-
-    def rows(self, query, params=()):
-        if self.lock.owned():
-            return [dict(row) for row in self.db.execute(query, params).fetchall()]
-        return [dict(row) for row in self.reader().execute(query, params).fetchall()]
-
-    def execute(self, query, params=()):
-        with self.lock:
-            if self._txn_depth:
-                return self.db.execute(query, params)
-            with self.db:
-                return self.db.execute(query, params)
-
-    @contextmanager
-    def transaction(self):
-        """Batch writes into one commit. Callers must not do network I/O inside."""
-        with self.lock:
-            if self._txn_depth:
-                self._txn_depth += 1
-                try:
-                    yield
-                finally:
-                    self._txn_depth -= 1
-                return
-            self._txn_depth += 1
-            try:
-                with self.db:
-                    yield
-            finally:
-                self._txn_depth -= 1
-
     def setting(self, key):
         rows = self.rows("SELECT value FROM settings WHERE key=?", (key,))
         return json.loads(rows[0]["value"]) if rows else None
 
     def set_setting(self, key, value):
-        self.execute("INSERT OR REPLACE INTO settings VALUES(?,?)", (key, json.dumps(value)))
+        self.execute("INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                     (key, json.dumps(value)))
 
     def setup_allowed(self, token):
         with self.lock:
@@ -348,7 +391,7 @@ class Store:
         self.execute("DELETE FROM sessions WHERE token=?", (hashlib.sha256(token.encode()).hexdigest(),))
 
     def accounts(self, private=False):
-        accounts = self.rows("SELECT * FROM accounts WHERE removing=0 ORDER BY rowid")
+        accounts = self.rows("SELECT * FROM accounts WHERE removing=0 ORDER BY seq")
         return [self.public_account(account, private) for account in accounts]
 
     def account(self, account_id, private=False):
@@ -356,6 +399,7 @@ class Store:
         return self.public_account(rows[0], private) if rows else None
 
     def public_account(self, account, private=False):
+        account.pop("seq", None)
         encrypted = account.pop("secret")
         if private and account["provider"] == "imap":
             account["password"] = self.vault.decrypt(encrypted.encode()).decode()
@@ -396,18 +440,17 @@ class Store:
         rows = self.rows(f"SELECT {fields} FROM messages WHERE id=?", (message_id,))
         if not rows:
             return None
-        return self.public_message(rows[0], raw)
+        return self.public_message(rows[0], raw, self.blobs)
 
     @staticmethod
     def message_fields(metadata=False, raw=False):
         fields = "id,account_id,thread_id,provider_id,message_id,sender,sender_email,recipients,subject,preview,date,read,starred,archived,sent,category,snoozed_until,analysis,pinned,trashed,hidden,content_version"
-        full = fields + ",folder,uidvalidity,uid,body,labels"
-        return full + f",{RAW} AS raw" if raw else fields if metadata else full
+        return fields if metadata and not raw else fields + ",folder,uidvalidity,uid,body,labels"
 
     @staticmethod
-    def public_message(row, raw=False):
-        if not raw:
-            row.pop("raw", None)
+    def public_message(row, raw=False, blobs=None):
+        if raw and blobs:
+            row["raw"] = blobs.get(row["id"]) or b""
         if row.get("analysis"):
             row["analysis"] = json.loads(row["analysis"])
         return row
@@ -433,50 +476,54 @@ class Store:
             clauses.append("account_id=?")
             params.append(account)
         if search:
-            clauses.append("(sender LIKE ? OR sender_email LIKE ? OR subject LIKE ? OR body LIKE ?)")
+            clauses.append("(sender ILIKE ? OR sender_email ILIKE ? OR subject ILIKE ? OR body ILIKE ?)")
             params.extend([f"%{search}%"] * 4)
-        where = " AND ".join(clauses) or "1"
+        where = " AND ".join(clauses)
         return [self.public_message(row) for row in self.rows(
             f"SELECT {self.message_fields()} FROM messages WHERE {where} ORDER BY date DESC LIMIT ?", (*params, limit))]
 
     def upsert_message(self, data):
+        existing = self.rows("SELECT id FROM messages WHERE account_id=? AND folder=? AND uidvalidity=? AND uid=?",
+                             (data["account_id"], data["folder"], data["uidvalidity"], data["uid"]))
+        if existing:
+            return existing[0]["id"]
+        data = dict(data)
+        raw = data.pop("raw")
+        data["content_version"] = hashlib.sha256(raw).hexdigest()
+        data["id"] = uuid.uuid4().hex
+        # Write the original before the row: a crash leaves at most an orphan file, never a row without mail.
+        self.blobs.put(data["id"], raw)
         with self.lock:
             existing = self.rows("SELECT id FROM messages WHERE account_id=? AND folder=? AND uidvalidity=? AND uid=?",
                                  (data["account_id"], data["folder"], data["uidvalidity"], data["uid"]))
             if existing:
                 return existing[0]["id"]
-            data = dict(data)
-            data["content_version"] = hashlib.sha256(data["raw"]).hexdigest()
             if data.get("thread_id"):
                 pinned = self.rows("SELECT MAX(pinned) AS pinned FROM messages WHERE account_id=? AND thread_id=?",
                                    (data["account_id"], data["thread_id"]))
                 data["pinned"] = pinned[0]["pinned"] or 0
-            data["id"] = uuid.uuid4().hex
             for rule in self.rules():
                 field = {"sender": data.get("sender_email", ""), "subject": data.get("subject", ""),
                          "body": data.get("body", "")}[rule["field"]]
-                if rule["contains"].casefold() in field.casefold():
+                if rule["contains"].casefold() in (field or "").casefold():
                     data["category"] = rule["category"]
                     break
-            raw = data.pop("raw")
             columns = list(data)
-            with self.transaction():
-                self.execute(f"INSERT INTO messages({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
-                             tuple(data.values()))
-                self.execute("INSERT INTO message_raw VALUES(?,?)", (data["id"], raw))
+            self.execute(f"INSERT INTO messages({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
+                         tuple(data.values()))
             self.on_mail_change()
             return data["id"]
 
     def patch_message(self, message_id, patch):
-        with self.lock, self.db:
-            if not self.message(message_id):
+        with self.transaction():
+            if not self.message(message_id, metadata=True):
                 return False
             for key, value in patch.items():
-                self.db.execute(f"UPDATE messages SET {key}=? WHERE id=?", (value, message_id))
+                self.execute(f"UPDATE messages SET {key}=? WHERE id=?", (value, message_id))
                 if key in {"read", "starred", "archived"}:
-                    self.db.execute("DELETE FROM outbox WHERE message_id=? AND kind=?", (message_id, key))
-                    self.db.execute("INSERT INTO outbox VALUES(?,?,?,?,?,NULL)",
-                                    (uuid.uuid4().hex, message_id, key, json.dumps(value), time.time()))
+                    self.execute("DELETE FROM outbox WHERE message_id=? AND kind=?", (message_id, key))
+                    self.execute("INSERT INTO outbox VALUES(?,?,?,?,?,NULL)",
+                                 (uuid.uuid4().hex, message_id, key, json.dumps(value), time.time()))
             return True
 
     def conversation(self, message_id, raw=False, metadata=False, limit=None, body_limit=None):
@@ -494,7 +541,7 @@ class Store:
         order = "date DESC,id DESC LIMIT ?" if limit else "date,id"
         if limit:
             params.append(limit)
-        result = [self.public_message(row, raw=raw) for row in self.rows(
+        result = [self.public_message(row, raw, self.blobs) for row in self.rows(
             f"SELECT {fields} FROM messages WHERE account_id=? AND thread_id=? AND hidden=0 AND trashed=0 ORDER BY {order}",
             params)]
         return list(reversed(result)) if limit else result
@@ -502,8 +549,7 @@ class Store:
     def message_headers(self, message_id):
         size = 65536
         while True:
-            rows = self.rows(f"SELECT substr({RAW},1,?) AS headers FROM messages WHERE id=?", (size, message_id))
-            headers = rows[0]["headers"] or b"" if rows else b""
+            headers = self.blobs.head(message_id, size)
             for separator in (b"\r\n\r\n", b"\n\n"):
                 if separator in headers:
                     return headers.split(separator, 1)[0] + separator
@@ -514,20 +560,20 @@ class Store:
             size *= 2
 
     def patch_conversation(self, message_id, patch):
-        with self.lock, self.db:
-            messages = self.conversation(message_id)
+        with self.transaction():
+            messages = self.conversation(message_id, metadata=True)
             for message in messages:
                 self.patch_message(message["id"], patch)
             return bool(messages)
 
     def trash_conversation(self, message_id):
-        with self.lock, self.db:
-            messages = self.conversation(message_id)
+        with self.transaction():
+            messages = self.conversation(message_id, metadata=True)
             for message in messages:
-                self.db.execute("UPDATE messages SET trashed=1 WHERE id=?", (message["id"],))
-                self.db.execute("DELETE FROM outbox WHERE message_id=?", (message["id"],))
-                self.db.execute("INSERT INTO outbox VALUES(?,?,?,?,?,NULL)",
-                                (uuid.uuid4().hex, message["id"], "trash", "true", time.time()))
+                self.execute("UPDATE messages SET trashed=1 WHERE id=?", (message["id"],))
+                self.execute("DELETE FROM outbox WHERE message_id=?", (message["id"],))
+                self.execute("INSERT INTO outbox VALUES(?,?,?,?,?,NULL)",
+                             (uuid.uuid4().hex, message["id"], "trash", "true", time.time()))
             return bool(messages)
 
     def conversations(self, view="inbox", category=None, account=None, search="", limit=100,
@@ -551,7 +597,7 @@ class Store:
             clauses.append("COALESCE(thread_id,id)=?")
             params.append(thread)
         if search:
-            clauses.append("(sender LIKE ? OR sender_email LIKE ? OR subject LIKE ? OR body LIKE ?)")
+            clauses.append("(sender ILIKE ? OR sender_email ILIKE ? OR subject ILIKE ? OR body ILIKE ?)")
             params.extend([f"%{search}%"] * 4)
         cursor = " AND (date<? OR (date=? AND id<?))" if before else ""
         ordering = "date DESC,id DESC" if chronological else "pinned DESC,date DESC"
@@ -572,35 +618,38 @@ class Store:
             ), ranked AS ("""
             params.append(limit)
             cursor = ""
-        rows = self.rows(eligible + """
+        now = "EXTRACT(EPOCH FROM now())"
+        rows = self.rows(eligible + f"""
                 SELECT m.id,m.account_id,m.thread_id,m.sender,m.sender_email,m.subject,m.preview,m.date,
                        m.read,m.content_version,MAX(m.starred) OVER w AS starred,m.archived,m.sent,m.category,
                        MAX(m.snoozed_until) OVER w AS snoozed_until,
-                       MAX(m.sent=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<=CAST(strftime('%s','now') AS REAL))) OVER w AS has_inbox,
-                       MAX(m.sent=0 AND m.archived=1) OVER w AS has_archive,
-                       MAX(m.sent=1) OVER w AS has_sent,
-                       SUM(m.sent=0) OVER w AS received_count,
-                       SUM(m.sent=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<=CAST(strftime('%s','now') AS REAL))) OVER w AS inbox_count,
-                       SUM(m.sent=0 AND m.read=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<=CAST(strftime('%s','now') AS REAL))) OVER w AS inbox_unread_count,
+                       MAX((m.sent=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<={now}))::int) OVER w AS has_inbox,
+                       MAX((m.sent=0 AND m.archived=1)::int) OVER w AS has_archive,
+                       MAX((m.sent=1)::int) OVER w AS has_sent,
+                       SUM((m.sent=0)::int) OVER w AS received_count,
+                       SUM((m.sent=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<={now}))::int) OVER w AS inbox_count,
+                       SUM((m.sent=0 AND m.read=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<={now}))::int) OVER w AS inbox_unread_count,
                        MAX(m.pinned) OVER w AS pinned,COUNT(*) OVER w AS message_count,
-                       SUM(m.read=0 AND m.sent=0) OVER w AS unread_count,
+                       SUM((m.read=0 AND m.sent=0)::int) OVER w AS unread_count,
                        ROW_NUMBER() OVER (PARTITION BY m.account_id,COALESCE(m.thread_id,m.id) ORDER BY m.date DESC,m.id) AS rank
-                FROM messages m INDEXED BY messages_client_catalogue
+                FROM messages m
                 JOIN eligible e ON m.account_id=e.account_id AND COALESCE(m.thread_id,m.id)=e.thread
                 WHERE m.hidden=0 AND m.trashed=0
                 WINDOW w AS (PARTITION BY m.account_id,COALESCE(m.thread_id,m.id))
             ), counts AS (
                 SELECT m2.account_id,COALESCE(m2.thread_id,m2.id) AS thread,COUNT(*) AS analyzed_count
-                FROM messages m2 INDEXED BY messages_analyzed
+                FROM messages m2
                 JOIN eligible e ON m2.account_id=e.account_id AND COALESCE(m2.thread_id,m2.id)=e.thread
                 WHERE m2.analysis IS NOT NULL AND m2.hidden=0 AND m2.trashed=0
-                GROUP BY m2.account_id,thread
+                GROUP BY m2.account_id,COALESCE(m2.thread_id,m2.id)
             ) SELECT ranked.*,COALESCE(counts.analyzed_count,0) AS analyzed_count FROM ranked
             LEFT JOIN counts ON counts.account_id=ranked.account_id
                 AND counts.thread=COALESCE(ranked.thread_id,ranked.id)
             WHERE ranked.rank=1""" + cursor + " ORDER BY " + ordering + " LIMIT ?", (*params, limit))
         for row in rows:
             row.pop("rank")
+            for key in ("received_count", "inbox_count", "inbox_unread_count", "unread_count", "message_count"):
+                row[key] = int(row[key] or 0)
             row["read"] = int(not row["unread_count"])
             row["replied"] = bool(row["sent"])
         return rows
@@ -610,14 +659,14 @@ class Store:
             pending = {r["kind"] for r in self.rows("SELECT kind FROM outbox WHERE message_id=?", (message_id,))}
             for key, value in (("read", read), ("starred", starred)):
                 if key not in pending:
-                    self.execute(f"UPDATE messages SET {key}=? WHERE id=?", (value, message_id))
+                    self.execute(f"UPDATE messages SET {key}=? WHERE id=?", (int(value), message_id))
 
     def rules(self):
-        return [{"id": row["id"], **json.loads(row["data"])} for row in self.rows("SELECT * FROM rules")]
+        return [{"id": row["id"], **json.loads(row["data"])} for row in self.rows("SELECT * FROM rules ORDER BY seq")]
 
     def add_rule(self, data):
         rule_id = uuid.uuid4().hex
-        self.execute("INSERT INTO rules VALUES(?,?)", (rule_id, json.dumps(data)))
+        self.execute("INSERT INTO rules(id,data) VALUES(?,?)", (rule_id, json.dumps(data)))
         return rule_id
 
     def close(self):

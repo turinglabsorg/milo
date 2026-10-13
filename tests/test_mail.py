@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from email.message import EmailMessage
 
@@ -240,15 +241,6 @@ def test_preview_skips_newsletter_links():
     assert parsed["preview"] == "Offerta valida fino a domenica"
 
 
-def test_existing_link_previews_are_rewritten_once(store, account_data):
-    account_id = store.add_account(account_data)
-    store.execute("INSERT INTO messages(id,account_id,folder,uidvalidity,uid,body,preview) VALUES('m',?,'INBOX','1',1,?,?)",
-                  (account_id, "<https://t.example/x> Ciao", "<https://t.example/x> Ciao"))
-    store.execute("PRAGMA user_version=0")
-    store.rewrite_link_previews(batch=1)
-    assert store.rows("SELECT preview FROM messages WHERE id='m'")[0]["preview"] == "Ciao"
-
-
 def test_reads_do_not_wait_for_a_running_write(store, account_data):
     import threading
     account_id = store.add_account(account_data)
@@ -272,20 +264,16 @@ def test_reads_do_not_wait_for_a_running_write(store, account_data):
     assert store.rows("SELECT name FROM accounts")[0]["name"] == "Busy"
 
 
-def test_original_mime_moves_out_of_messages_without_losing_access(store, account_data):
+def test_original_mime_lives_compressed_outside_the_database(store, account_data):
     account_id = store.add_account(account_data)
-    legacy, current = raw_mail("Legacy", "<legacy@example.com>"), raw_mail("Current", "<current@example.com>")
-    store.execute("INSERT INTO messages(id,account_id,folder,uidvalidity,uid,subject,raw) VALUES('old',?,'INBOX','1',1,'Legacy',?)",
-                  (account_id, legacy))
+    current = raw_mail("Current", "<current@example.com>")
     new_id = store.upsert_message(parse_message(current, account_id, "INBOX", "1", 2))
-    store.execute("PRAGMA user_version=1")
-    assert store.message("old", raw=True)["raw"] == legacy
-    assert store.rows("SELECT raw FROM messages WHERE id=?", (new_id,))[0]["raw"] is None
+    path = store.blobs.path(new_id)
+    assert path.exists() and path.read_bytes() != current and path.stat().st_mode & 0o777 == 0o600
     assert store.message(new_id, raw=True)["raw"] == current
-    store.move_raw_out(batch=1)
-    assert store.rows("PRAGMA user_version")[0]["user_version"] == 2
-    assert not store.rows("SELECT id FROM messages WHERE raw IS NOT NULL")
-    assert store.message("old", raw=True)["raw"] == legacy
-    assert store.message_headers("old").startswith(b"From:")
-    store.execute("DELETE FROM messages WHERE id='old'")
-    assert not store.rows("SELECT id FROM message_raw WHERE id='old'")
+    assert store.message_headers(new_id).startswith(b"From:")
+    assert "raw" not in store.rows("SELECT * FROM messages WHERE id=?", (new_id,))[0]
+    store.execute("DELETE FROM messages WHERE id=?", (new_id,))
+    assert store.sweep_blobs() == 0 and path.exists()
+    os.utime(path, (time.time() - 7200, time.time() - 7200))
+    assert store.sweep_blobs() == 1 and not path.exists()

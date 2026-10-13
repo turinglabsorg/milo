@@ -13,15 +13,20 @@ end-to-end validation. See [the roadmap](docs/ROADMAP.md).
 
 ## Run on Linux
 
-Requires Python 3.11+, [uv](https://docs.astral.sh/uv/) and, for the dedicated
-app window, Chromium or Chrome.
+Requires Python 3.11+, [uv](https://docs.astral.sh/uv/), PostgreSQL 16+ and, for
+the dedicated app window, Chromium or Chrome. Point Milo at an empty database:
 
 ```sh
 git clone https://github.com/turinglabsorg/milo.git
 cd milo
 uv sync
+export MILO_DATABASE_URL=postgresql://milo@127.0.0.1:5432/milo
 uv run python scripts/launch.py
 ```
+
+The Docker deployment (`compose.yaml`) runs PostgreSQL in its own container.
+Tests need a server they can create databases on:
+`MILO_TEST_DATABASE_URL=postgresql://user@127.0.0.1:5432/postgres uv run pytest`.
 
 The launcher starts a local service at `http://127.0.0.1:8025` and opens Milo
 directly on password setup. Choose your Milo password (at least 12 characters),
@@ -124,11 +129,12 @@ device pairing are unfinished. [Architecture and deployment](docs/ARCHITECTURE.m
 
 ## Data and backup
 
-The Linux launcher stores data in `.data/live` under this checkout, with mode
-0700; credentials are encrypted with Fernet using a separate mode-0600 key.
-Back up **both** `mail.sqlite` and `vault.key` while the service is stopped. The
-database also contains message bodies and raw attachments, which are not
-encrypted at rest; use disk encryption for the host. A passphrase authenticates
+Mail metadata, bodies, settings and drafts live in PostgreSQL. The original
+messages (with attachments) are compressed files under `blobs/` in the archive
+directory, one per message; credentials are encrypted with Fernet using a
+separate mode-0600 `vault.key`. Back up the database (`pg_dump`; the Docker
+deployment keeps a nightly dump in `backups/postgres`), `blobs/` and `vault.key`.
+Mail is not encrypted at rest; use disk encryption for the host. A passphrase authenticates
 access to the service, it does not encrypt the mailbox. There is no automatic
 passphrase recovery yet. Do not commit or share `.data`, logs, backups or keys.
 

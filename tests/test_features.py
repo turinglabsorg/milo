@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from email.message import EmailMessage
 
@@ -246,7 +247,10 @@ def test_account_removal_purges_mail_and_drafts(logged_in, account_data):
     assert logged_in.delete(f"/api/accounts/{account_id}").status_code == 202
     assert not logged_in.get("/api/state").json()["accounts"]
     assert not store.rows("SELECT id FROM messages WHERE id=?", (message_id,))
-    assert not store.rows("SELECT id FROM message_raw")
+    path = store.blobs.path(message_id)
+    os.utime(path, (time.time() - 7200, time.time() - 7200))
+    store.sweep_blobs()
+    assert not path.exists()
     assert not store.rows("SELECT id FROM drafts")
     assert not store.rows("SELECT id FROM accounts")
 
