@@ -44,7 +44,7 @@ uv run milo --data .data/live
 - A responsive three-column inbox, search, categories and account filtering.
 - Conversations group received mail and sent replies. Pin a conversation to the
   top, see which messages have AI analysis, and open formatted HTML email with
-  authenticated inline images. External images load only when requested.
+  authenticated inline images. External images load by default.
 - Light, dark and system themes, shared account colors, loading skeletons and
   live download status. Lists load metadata; bodies load when opened.
 - Google OAuth with PKCE, encrypted refresh tokens and native Gmail API sync.

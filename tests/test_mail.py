@@ -19,7 +19,7 @@ def raw_mail(subject="Hello", msg_id="<mail-1@example.com>", body="Ciao,\nParlia
 
 
 class FakeIMAP:
-    capabilities = (b"IMAP4rev1", b"MOVE")
+    capabilities = ("IMAP4REV1", "MOVE")
 
     def __init__(self):
         self.boxes = {"INBOX": {41: [raw_mail(), set()]}, "Archive": {}, "Sent": {}}
@@ -65,6 +65,14 @@ class FakeIMAP:
         if command == "MOVE":
             target = args[1].strip('"')
             self.boxes[target][123] = box.pop(uid)
+            return "OK", []
+        if command == "COPY":
+            target = args[1].strip('"')
+            self.boxes[target][123] = [box[uid][0], set(box[uid][1])]
+            return "OK", []
+        if command == "EXPUNGE":
+            if "\\Deleted" in box[uid][1]:
+                box.pop(uid)
             return "OK", []
         raise AssertionError(command)
 
@@ -129,6 +137,19 @@ def test_archive_move_retains_analysis_and_changes_remote_uid(synced):
     engine.sync_account(account)
     assert remote.boxes["INBOX"]
     assert not store.messages("archive")
+
+
+def test_archive_without_move_copies_and_expunges_only_that_uid(synced):
+    store, _, account, remote, engine = synced
+    remote.capabilities = ("IMAP4REV1", "UIDPLUS")
+    remote.boxes["INBOX"][42] = [raw_mail("Keep me", "<keep@example.com>"), {"\\Deleted"}]
+    message = next(m for m in store.messages() if m["uid"] == 41)
+    store.patch_message(message["id"], {"archived": True})
+    engine.sync_account(account)
+    assert 41 not in remote.boxes["INBOX"] and 42 in remote.boxes["INBOX"]
+    assert remote.boxes["Archive"][123]
+    assert not store.rows("SELECT * FROM outbox")
+    assert ("INBOX", "EXPUNGE", ("41",)) in remote.operations
 
 
 def test_uidvalidity_reset_does_not_apply_old_operations(synced):
@@ -208,3 +229,21 @@ def test_smtp_requires_tls_and_preserves_reply_headers(account_data, monkeypatch
     assert envelopes[-1] == ['giulia@example.com', 'marco@example.com']
     with pytest.raises(ValueError):
         send_mail(account_data, {**draft, "to": "invalid"})
+
+
+def test_preview_skips_newsletter_links():
+    mail = EmailMessage()
+    mail["From"] = "Brand <news@brand.example>"
+    mail["Subject"] = "Ottobre"
+    mail.set_content("<https://track.example/e/r?q=abc>\n[image: Logo]\nOfferta valida fino a domenica (https://brand.example/x)")
+    parsed = parse_message(mail.as_bytes(), "account", "INBOX", "1", 1)
+    assert parsed["preview"] == "Offerta valida fino a domenica"
+
+
+def test_existing_link_previews_are_rewritten_once(store, account_data):
+    account_id = store.add_account(account_data)
+    store.execute("INSERT INTO messages(id,account_id,folder,uidvalidity,uid,body,preview) VALUES('m',?,'INBOX','1',1,?,?)",
+                  (account_id, "<https://t.example/x> Ciao", "<https://t.example/x> Ciao"))
+    store.execute("PRAGMA user_version=0")
+    store.migrate()
+    assert store.rows("SELECT preview FROM messages WHERE id='m'")[0]["preview"] == "Ciao"

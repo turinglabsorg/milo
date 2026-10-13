@@ -71,6 +71,10 @@ body{background:var(--surface-alt);color:var(--text)}
 .nav-button,.account-button,.breadcrumbs strong,.sender-line strong,.row-subject,.sender-detail strong,.mail-content h2,.empty h3,.login-form h2,.modal-header h2,.field input,.field select,.field textarea,.draft-row strong{color:var(--text)}
 .breadcrumbs,.subheading,.eyebrow,.nav-label,.day-heading,.day-heading .right,.row-preview,.sender-line time,.sender-detail .address,.sender-detail small,.sender-detail time,.field,.fineprint,.modal p,.login-form>p,.story-features,.empty p,.sidebar-footer span,.reading-toolbar .right{color:var(--muted)}
 .nav-button.active{background:var(--soft);color:var(--purple)}
+.settings-account strong,.rule-row strong{color:var(--text)}
+.logo small,.nav-button .count,.tab,.settings-account small,.settings-account .health,.check-field{color:var(--muted)}
+.tab.active{color:var(--purple)}
+.mail-content .category-select{margin-left:0;padding:5px 8px;border-radius:6px;font-size:12px}
 .nav-button:hover,.message-row:hover,.icon-button:hover{background:var(--soft)}
 .message-row,.reading-toolbar,.reply-actions,.thread-message,.settings-account{border-color:var(--line)}
 .message-row.selected{background:var(--soft)}

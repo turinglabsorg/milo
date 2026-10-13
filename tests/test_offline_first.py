@@ -19,7 +19,7 @@ def warm(page, url, sent):
     page.locator(f'[data-message="{sent}"]').click()
     expect(page.frame_locator('.email-html').get_by_text('HTML reply', exact=True)).to_be_visible()
     page.evaluate('()=>navigator.serviceWorker.ready.then(()=>new Promise(resolve=>navigator.serviceWorker.controller?resolve():navigator.serviceWorker.addEventListener("controllerchange",resolve,{once:true})))')
-    wait_for_async(page, 'async id=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.get("api:/messages/"+id));}', arg=sent)
+    wait_for_async(page, 'async id=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.get("api:/messages/"+id+"?load_images=true"));}', arg=sent)
 
 
 def test_cached_navigation_edits_and_reload_work_with_all_server_responses_held(tmp_path):
@@ -147,7 +147,7 @@ def test_recent_bodies_are_prefetched_in_background_without_opening(tmp_path):
         page = context.new_page()
         page.goto(url)
         expect(page.locator('.message-row')).to_have_count(2)
-        wait_for_async(page, 'async id=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.get("api:/messages/"+id));}',
+        wait_for_async(page, 'async id=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.get("api:/messages/"+id+"?load_images=true"));}',
                        arg=captured['other'])
         context.set_offline(True)
         page.reload()
@@ -322,7 +322,7 @@ def test_service_worker_retires_old_shell_and_refreshes_cached_client_assets(tmp
         page.goto(url + '/static/icon.svg')
         page.evaluate('()=>caches.open("milo-shell-v10").then(cache=>cache.put("/static/app.js",new Response("// obsolete-client")))')
         warm(page, url, sent)
-        wait_for_async(page, 'async()=>{const keys=await caches.keys();return keys.includes("milo-shell-v13")&&!keys.includes("milo-shell-v10");}')
+        wait_for_async(page, 'async()=>{const keys=await caches.keys();return keys.includes("milo-shell-v15")&&!keys.includes("milo-shell-v10");}')
         version['name'] = 'updated'
         old = page.evaluate('()=>fetch("/static/app.js").then(response=>response.text())')
         assert 'shell-version-original' in old

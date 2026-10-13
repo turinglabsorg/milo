@@ -54,7 +54,7 @@ def test_cache_survives_offline_reload_and_does_not_refetch_bodies(tmp_path, wid
         expect(page.locator('.message-row')).to_have_count(2)
         page.locator(f'[data-message="{sent}"]').click()
         expect(page.frame_locator('.email-html').get_by_text('HTML reply', exact=True)).to_be_visible()
-        wait_for_async(page, 'async()=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.get("api:/messages/"+document.querySelector(".message-row.selected").dataset.message));}')
+        wait_for_async(page, 'async()=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.get("api:/messages/"+document.querySelector(".message-row.selected").dataset.message+"?load_images=true"));}')
         page.evaluate('()=>navigator.serviceWorker.ready.then(()=>new Promise(resolve=>navigator.serviceWorker.controller?resolve():navigator.serviceWorker.addEventListener("controllerchange",resolve,{once:true})))')
         # A reopen uses downloaded content, not another body request.
         before = len(bodies)

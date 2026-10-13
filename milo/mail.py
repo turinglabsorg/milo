@@ -12,6 +12,8 @@ from email.message import EmailMessage
 from email.utils import getaddresses, make_msgid, parsedate_to_datetime
 from html.parser import HTMLParser
 
+from .store import preview_text
+
 
 class PlainHTML(HTMLParser):
     def __init__(self):
@@ -59,7 +61,7 @@ def parse_message(raw, account_id, folder, uidvalidity, uid, flags=b"", sent=Fal
             "message_id": str(mail.get("Message-ID", "")), "sender": name or address,
             "sender_email": address, "recipients": str(mail.get("To", "")),
             "subject": str(mail.get("Subject", "(Senza oggetto)")), "body": body[:200000],
-            "preview": re.sub(r"\s+", " ", body).strip()[:240], "date": date,
+            "preview": preview_text(body), "date": date,
             "read": int(b"\\Seen" in flags), "starred": int(b"\\Flagged" in flags),
             "sent": int(sent), "archived": int(archived), "category": category, "raw": raw,
             "thread_id": "rfc822:" + hashlib.sha256(root.encode()).hexdigest() if root else None}
@@ -75,6 +77,9 @@ def connect(account):
                               ssl_context=ssl.create_default_context(), timeout=20)
     try:
         check(client.login(account["username"], account["password"])[0], "Accesso IMAP rifiutato")
+        status, data = client.capability()
+        if status == "OK" and data and data[-1]:
+            client.capabilities = tuple(data[-1].decode().upper().split())
     except Exception:
         client.shutdown()
         raise
@@ -149,7 +154,7 @@ class SyncEngine:
                 return {"account_id": account_id, "ok": True, "paused": True, "added": 0}
             if self._rate_limited_until.get(account_id, 0) > time.time():
                 return {"account_id": account_id, "ok": True, "paused": True, "added": 0}
-            self.report(account_id, "connecting", 0)
+            self.report(account_id, "connecting")
             result = self._sync_google(current) if current["provider"] == "google" else self._sync_imap(current)
             self.report(account_id, "ready" if result["ok"] else "error")
         if result["ok"]:
@@ -200,7 +205,10 @@ class SyncEngine:
         account_id = account["id"]
         client = None
         try:
-            client = Gmail(self.store, account_id, lambda phase, count: self.report(account_id, phase, count))
+            # Report a cumulative count: per-pass counts would appear to go
+            # backwards between passes, which reads as lost progress.
+            base = self._progress.get(account_id, {}).get("downloaded", 0)
+            client = Gmail(self.store, account_id, lambda phase, count: self.report(account_id, phase, base + count))
             result = client.sync()
             self.store.execute("UPDATE accounts SET last_sync=?,error=NULL WHERE id=?", (time.time(), account_id))
             return result
@@ -302,10 +310,14 @@ class SyncEngine:
                     if target == operation["folder"]:
                         self.store.execute("DELETE FROM outbox WHERE id=?", (operation["id"],))
                         continue
-                    if b"MOVE" not in client.capabilities:
-                        raise RuntimeError("Il server non supporta IMAP MOVE: archivio in attesa")
+                    uid = str(operation["uid"])
                     target_quoted = '"' + target.replace('\\', '\\\\').replace('"', '\\"') + '"'
-                    check(client.uid("MOVE", str(operation["uid"]), target_quoted)[0])
+                    if "MOVE" in client.capabilities:
+                        check(client.uid("MOVE", uid, target_quoted)[0])
+                    else:
+                        check(client.uid("COPY", uid, target_quoted)[0])
+                        check(client.uid("STORE", uid, "+FLAGS.SILENT", "(\\Deleted)")[0])
+                        check((client.uid("EXPUNGE", uid) if "UIDPLUS" in client.capabilities else client.expunge())[0])
                     # Destination is reimported with the server-assigned UID on this sync.
                     # Keep local intelligence attached via Message-ID on the destination.
                     source = self.store.message(operation["message_id"])

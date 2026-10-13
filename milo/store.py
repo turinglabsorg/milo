@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -10,6 +11,13 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from cryptography.fernet import Fernet
+
+LINK_NOISE = re.compile(r"<\s*(?:https?|mailto):[^>]*>|\[(?:image|cid|https?)\b[^\]]*\]|\(\s*https?://[^)]*\)|(?:https?://|www\.)\S+", re.I)
+
+
+def preview_text(body):
+    """List previews show readable text, not the tracking links newsletters open with."""
+    return re.sub(r"\s+", " ", LINK_NOISE.sub(" ", body or "")).strip()[:240]
 
 
 class Store:
@@ -101,6 +109,12 @@ class Store:
                                 category,snoozed_until,pinned,content_version)
                     WHERE hidden=0 AND trashed=0;
             """)
+            if self.db.execute("PRAGMA user_version").fetchone()[0] < 1:
+                rows = self.db.execute("SELECT id,body FROM messages WHERE preview LIKE '%http%' "
+                                       "OR preview LIKE '%www.%' OR preview LIKE '%[image%'").fetchall()
+                self.db.executemany("UPDATE messages SET preview=? WHERE id=?",
+                                    [(preview_text(row["body"]), row["id"]) for row in rows])
+                self.db.execute("PRAGMA user_version=1")
 
     def encrypt_json(self, value):
         return self.vault.encrypt(json.dumps(value).encode()).decode()

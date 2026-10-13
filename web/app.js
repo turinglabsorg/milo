@@ -131,7 +131,7 @@ function renderList() {
   if (!$('#list-panel')) return;
   const inbox = S.view==='inbox';
   const count = S.messages.length;
-  $('#list-panel').innerHTML=`<div class="list-heading"><div class="title-row"><h1>${viewNames[S.view]}</h1>${inbox?`<button class="list-recap" data-action="recap" aria-label="Apri il recap dell’inbox" title="Recap dell’inbox">${icon('sparkle')}Recap</button>`:''}</div></div>${inbox?`<div class="tabs">${[['','Tutte'],['people','Persone'],['updates','Notifiche'],['newsletters','Newsletter']].map(([category,name])=>`<button class="tab ${S.category===category?'active':''}" data-category="${category}">${name}</button>`).join('')}</div>`:''}${!S.online?'<div class="offline-note">Sei offline. Mostro la posta salvata su questo dispositivo.</div>':''}${S.state.accounts.some(a=>a.error)?`<div class="error-banner">${esc(S.state.accounts.find(a=>a.error).error)} <button data-action="settings">Apri account</button></div>`:''}${S.state.pending?.some(p=>p.error)?'<div class="error-banner">Le modifiche sono salvate in Milo. La sincronizzazione con la casella verrà riprovata. <button data-action="settings">Dettagli</button></div>':''}<div id="message-list"></div>`;
+  $('#list-panel').innerHTML=`<div class="list-heading"><div class="title-row"><h1>${viewNames[S.view]}</h1>${inbox?`<button class="list-recap" data-action="recap" aria-label="Apri il recap dell’inbox" title="Recap dell’inbox">${icon('sparkle')}Recap</button>`:''}</div></div>${inbox?`<div class="tabs">${[['','Tutte'],['people','Persone'],['updates','Notifiche'],['newsletters','Newsletter']].map(([category,name])=>`<button class="tab ${S.category===category?'active':''}" data-category="${category}">${name}</button>`).join('')}</div>`:''}${!S.online?'<div class="offline-note">Sei offline. Mostro la posta salvata su questo dispositivo.</div>':''}${S.state.accounts.some(a=>a.error)?`<div class="error-banner">${esc(S.state.accounts.find(a=>a.error).error)} <button data-action="settings">Apri account</button></div>`:''}<div id="message-list"></div>`;
   const container=$('#message-list');
   if (S.loadingList) { container.innerHTML=skeleton(9,'list','Carico le conversazioni…');return; }
   if (S.view==='drafts') {
@@ -145,7 +145,7 @@ function renderList() {
   let lastDay='';
   container.innerHTML=S.messages.map(m=>{
     const day=m.pinned?'In evidenza':isToday(m.date)?'Oggi':new Date(m.date*1000).toLocaleDateString('it-IT',{day:'numeric',month:'long'});
-    const heading=day!==lastDay?`<div class="day-heading">${esc(day)}<span class="right">${S.search?'Risultati di ricerca':'Le tue conversazioni'}</span></div>`:'';
+    const heading=day!==lastDay?`<div class="day-heading">${esc(day)}${S.search?'<span class="right">Risultati di ricerca</span>':''}</div>`:'';
     lastDay=day;
     return heading+`<button class="message-row ${m.read?'':'unread'} ${S.selected?.id===m.id?'selected':''}" data-message="${esc(m.id)}" style="--account-color:${accountColor(m.account_id)}">${avatar(m)}<span class="message-content"><span class="sender-line"><strong>${esc(m.sender)}</strong>${m.message_count>1?`<span class="thread-count">${m.message_count}</span>`:''}${!m.read?'<span class="unread-dot"></span>':''}<span class="row-markers">${m.pinned?`<span class="row-pin" aria-label="Conversazione fissata" title="Fissata in alto">${icon('pin')}</span>`:''}${m.analyzed_count?`<span class="row-analysis" aria-label="${m.analyzed_count} messaggi analizzati" title="${m.analyzed_count} messaggi analizzati da Milo AI">${icon('sparkle')}</span>`:''}</span><time>${dateLabel(m.date)}</time></span><span class="row-subject">${esc(subjectCore(m.subject))}</span><span class="row-preview">${m.sent?'Tu: ':''}${esc(m.preview)}</span>${m.replied?`<span class="reply-badge">${icon('reply')}Hai risposto</span>`:''}</span>${m.starred?`<span class="row-star">${icon('star')}</span>`:''}</button>`;
   }).join('');
@@ -183,52 +183,46 @@ function quotedText(body) {
 }
 function htmlDocument(html) {
   const images=S.images?"'self' https:":"'self'";
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${images}; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style>html{color-scheme:light}body{margin:0;min-height:100%;font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased}.milo-email-document{display:flow-root;padding:16px;box-sizing:border-box;contain:layout style}.milo-email-document img{opacity:0;transition:opacity .2s}.milo-email-document img[data-loaded]{opacity:1}img,table{max-width:100%!important}img{height:auto}pre{white-space:pre-wrap}a{color:#2563eb}table{border-collapse:collapse}.milo-quoted-history{margin:16px 0;border-top:1px solid #dfe7f2;padding-top:10px}.milo-quoted-history>summary{cursor:pointer;color:#64748b;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.milo-quoted-history blockquote{margin-left:12px!important;padding-left:12px!important;border-left:2px solid #dfe7f2}.milo-quoted-history:not([open])>*:not(summary){display:none!important}</style></head><body><div class="milo-email-document">${quotedHTML(html)}</div><script>document.querySelectorAll('img').forEach(img=>{if(img.complete){img.dataset.loaded='1';}else{img.addEventListener('load',()=>{img.dataset.loaded='1';},{once:true});img.addEventListener('error',()=>{img.dataset.loaded='1';},{once:true});}});</script></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${images}; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style>html{color-scheme:light}body{margin:0;min-height:100%;font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased}.milo-email-document{display:flow-root;padding:16px;box-sizing:border-box;contain:layout style}img,table{max-width:100%!important}img{height:auto}pre{white-space:pre-wrap}a{color:#2563eb}table{border-collapse:collapse}.milo-quoted-history{margin:16px 0;border-top:1px solid #dfe7f2;padding-top:10px}.milo-quoted-history>summary{cursor:pointer;color:#64748b;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.milo-quoted-history blockquote{margin-left:12px!important;padding-left:12px!important;border-left:2px solid #dfe7f2}.milo-quoted-history:not([open])>*:not(summary){display:none!important}</style></head><body><div class="milo-email-document">${quotedHTML(html)}</div></body></html>`;
 }
+const frameHeights=new Map();
+function frameKey(item){return [item.id,item.content_version||'',S.images?1:0].join('|');}
 function fitFrames(root=document) {
   root.querySelectorAll('.email-html').forEach(frame=>{
-    if(frame.dataset.fitted)return;frame.dataset.fitted='true';
-    frame.addEventListener('load',()=>{
-      const doc=frame.contentDocument,content=doc?.querySelector('.milo-email-document');
-      if(!content)return;
-      let settled=false,imgCheck=0;
+    if(frame._fitted)return;frame._fitted=true;
+    const start=()=>{
+      if(!frame.isConnected)return;
+      const doc=frame.contentDocument,content=doc?.URL==='about:srcdoc'&&doc.querySelector('.milo-email-document');
+      if(!content){requestAnimationFrame(start);return;}
       const fit=()=>{
-        if(!frame.getClientRects().length)return;
+        if(!frame.isConnected||!frame.getClientRects().length)return;
         const height=Math.max(100,Math.ceil(content.scrollHeight));
-        frame.style.height=height+'px';
-      };
-      const waitImages=()=>{
-        const images=doc.querySelectorAll('img:not([data-checked])');
-        if(!images.length||imgCheck>20){
-          settled=true;fit();
-          setTimeout(()=>{if(frame.isConnected)fit();},100);
-          return;
-        }
-        imgCheck++;
-        images.forEach(img=>img.dataset.checked='1');
-        const pending=[...images].filter(img=>!img.complete);
-        if(!pending.length){
-          settled=true;fit();
-          setTimeout(()=>{if(frame.isConnected)fit();},100);
-          return;
-        }
-        let remaining=pending.length;
-        pending.forEach(img=>{
-          const done=()=>{if(--remaining===0)waitImages();};
-          img.addEventListener('load',done,{once:true});
-          img.addEventListener('error',done,{once:true});
-        });
-        setTimeout(waitImages,500);
+        if(Math.abs(frame.offsetHeight-height)>1)frame.style.height=height+'px';
+        frameHeights.set(frame.dataset.frameKey,height);
       };
       fit();
-      waitImages();
-      const observer=new ResizeObserver(()=>{if(!settled)fit();});
-      observer.observe(content);
-      doc.addEventListener('toggle',()=>{settled=false;setTimeout(()=>{fit();waitImages();},50);},true);
+      new ResizeObserver(fit).observe(content);
       doc.addEventListener('keydown',handleKeydown);
-      frame._observer=observer;
-    },{once:true});
+    };
+    start();
   });
+}
+function morph(from,to){
+  if(from.nodeType!==to.nodeType||from.nodeName!==to.nodeName||(from.nodeType===1&&from.dataset.threadMessage!==to.dataset.threadMessage)){from.replaceWith(to.cloneNode(true));return;}
+  if(from.nodeType!==1){if(from.nodeValue!==to.nodeValue)from.nodeValue=to.nodeValue;return;}
+  if(from.tagName==='IFRAME'){if(from.getAttribute('srcdoc')!==to.getAttribute('srcdoc'))from.replaceWith(to.cloneNode(true));return;}
+  for(const {name} of [...from.attributes])if(!to.hasAttribute(name))from.removeAttribute(name);
+  for(const {name,value} of to.attributes)if(from.getAttribute(name)!==value)from.setAttribute(name,value);
+  morphNodes(from,to);
+  if(from.tagName==='SELECT')from.value=to.value;
+}
+function morphNodes(target,source){
+  const current=[...target.childNodes],next=[...source.childNodes];
+  next.forEach((node,index)=>{if(current[index])morph(current[index],node);else target.appendChild(node.cloneNode(true));});
+  current.slice(next.length).forEach(node=>node.remove());
+}
+function morphChildren(target,markup){
+  const template=document.createElement('template');template.innerHTML=markup;morphNodes(target,template.content);
 }
 function renderReading() {
   const panel=$('#reading-panel');if(!panel)return;
@@ -236,15 +230,14 @@ function renderReading() {
   const caret=active?.tagName==='TEXTAREA'?[active.selectionStart,active.selectionEnd]:null;
   if(editor)captureCompose();
   if(editor)editor.remove();
-  panel.querySelectorAll('.email-html').forEach(frame=>frame._observer?.disconnect());
   const m=S.selected;
   if (!m) { panel.innerHTML=emptyMarkup('mail','Spazio per una conversazione.','Scegli un’email e prenditi il tempo per leggerla.');return; }
   const open=new Set([...panel.querySelectorAll('details[open]')].map(el=>el.dataset.threadMessage));
   const messages=S.thread.length?S.thread:[m];
   const analysis=S.thread.findLast(message=>message.analysis)?.analysis||m.analysis;
   const downloading=S.loadingMessage||S.threadSync.phase==='downloading';
-  panel.innerHTML=`<div class="reading-toolbar"><button class="icon-button back-button" data-action="back" aria-label="Torna alla lista">${icon('back')}</button><button class="icon-button ${m.pinned?'is-active':''}" data-action="pin" aria-label="${m.pinned?'Rimuovi pin':'Fissa in alto'}" title="${m.pinned?'Rimuovi pin':'Fissa in alto'}">${icon('pin')}</button><button class="icon-button" data-action="archive" aria-label="${m.archived?'Sposta in inbox':'Archivia'}" title="Archivia">${icon('archive')}</button><button class="icon-button" data-action="trash" aria-label="Elimina conversazione" title="Sposta nel cestino (Backspace / Canc)" aria-keyshortcuts="Backspace Delete">${icon('trash')}</button><button class="icon-button" data-action="snooze" aria-label="Posticipa" title="Posticipa">${icon('clock')}</button><button class="icon-button" data-action="read" aria-label="${m.read?'Segna da leggere':'Segna come letta'}">${icon('mail')}</button><button class="icon-button ${m.starred?'is-active':''}" data-action="star" aria-label="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'}" title="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'} (P)" aria-keyshortcuts="P">${icon('star')}</button><div class="right"><span class="dot" style="background:${accountColor(m.account_id)}"></span>${esc(S.state.accounts.find(a=>a.id===m.account_id)?.name||'Account')}</div></div><article class="mail-content"><span class="mail-label">${icon('people')}${categoryNames[m.category]||'Email'}</span><select class="category-select" id="message-category" aria-label="Categoria della email">${Object.entries(categoryNames).map(([key,name])=>`<option value="${key}" ${key===m.category?'selected':''}>${name}</option>`).join('')}</select><h2>${esc(subjectCore(m.subject))}</h2>${downloading?`<div class="download-status" role="status">${icon('refresh','spinner')}Scarico la conversazione e le tue risposte…</div>`:''}${S.threadSync.error?`<div class="error-banner">${esc(S.threadSync.error)}</div>`:''}${S.loadingMessage?skeleton(7,'reader','Carico il messaggio…'):`<section class="ai-summary"><div class="ai-summary-title">${icon('sparkle')}${analysis?'Il punto, secondo Milo':'Milo AI'}<button data-action="analyze">${analysis?'Rianalizza':'Analizza'}${icon('arrow')}</button></div><div id="analysis-content">${S.analyzing?skeleton(3,'block','Analisi in corso…'):`<p>${analysis?esc(analysis.summary):'Sintesi, cose da fare e priorità della conversazione.'}</p>${analysis?.action_items?.length?`<ul>${analysis.action_items.map(item=>`<li>${esc(item)}</li>`).join('')}</ul>`:''}`}</div></section><div class="thread-messages">${messages.map((item,index)=>`<details class="thread-message ${item.sent?'sent-message':''}" data-thread-message="${esc(item.id)}" ${index===messages.length-1||open.has(item.id)?'open':''}><summary><span class="sender-detail">${avatar(item)}<span><strong>${item.sent?'Tu':esc(item.sender)}</strong><span class="address">${esc(item.sender_email)}</span><small>${item.sent?'Risposta inviata':esc(item.preview.slice(0,90))}</small></span><time>${dateLabel(item.date,true)}</time></span></summary><div class="thread-message-body" data-body-for="${esc(item.id)}">${index===messages.length-1||open.has(item.id)?bodyMarkup(item):''}</div></details>`).join('')}</div><div class="reply-actions"><button data-action="reply">${icon('reply')}Rispondi</button><button data-action="reply-all">${icon('reply')}Rispondi a tutti</button><button data-action="forward">${icon('forward')}Inoltra</button><button data-action="ai-reply">${icon('sparkle')}Aiutami a rispondere</button></div><div id="inline-composer"></div>`}</article>`;
-  fitFrames();
+  morphChildren(panel,`<div class="reading-toolbar"><button class="icon-button back-button" data-action="back" aria-label="Torna alla lista">${icon('back')}</button><button class="icon-button ${m.pinned?'is-active':''}" data-action="pin" aria-label="${m.pinned?'Rimuovi pin':'Fissa in alto'}" title="${m.pinned?'Rimuovi pin':'Fissa in alto'}">${icon('pin')}</button><button class="icon-button" data-action="archive" aria-label="${m.archived?'Sposta in inbox':'Archivia'}" title="Archivia">${icon('archive')}</button><button class="icon-button" data-action="trash" aria-label="Elimina conversazione" title="Sposta nel cestino (Backspace / Canc)" aria-keyshortcuts="Backspace Delete">${icon('trash')}</button><button class="icon-button" data-action="snooze" aria-label="Posticipa" title="Posticipa">${icon('clock')}</button><button class="icon-button" data-action="read" aria-label="${m.read?'Segna da leggere':'Segna come letta'}">${icon('mail')}</button><button class="icon-button ${m.starred?'is-active':''}" data-action="star" aria-label="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'}" title="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'} (P)" aria-keyshortcuts="P">${icon('star')}</button><div class="right"><span class="dot" style="background:${accountColor(m.account_id)}"></span>${esc(S.state.accounts.find(a=>a.id===m.account_id)?.name||'Account')}</div></div><article class="mail-content"><select class="category-select" id="message-category" aria-label="Categoria della email">${Object.entries(categoryNames).map(([key,name])=>`<option value="${key}" ${key===m.category?'selected':''}>${name}</option>`).join('')}</select><h2>${esc(subjectCore(m.subject))}</h2>${downloading?`<div class="download-status" role="status">${icon('refresh','spinner')}Scarico la conversazione e le tue risposte…</div>`:''}${S.threadSync.error?`<div class="error-banner">${esc(S.threadSync.error)}</div>`:''}${S.loadingMessage?skeleton(7,'reader','Carico il messaggio…'):`<section class="ai-summary"><div class="ai-summary-title">${icon('sparkle')}${analysis?'Il punto, secondo Milo':'Milo AI'}<button data-action="analyze">${analysis?'Rianalizza':'Analizza'}${icon('arrow')}</button></div><div id="analysis-content">${S.analyzing?skeleton(3,'block','Analisi in corso…'):`<p>${analysis?esc(analysis.summary):'Sintesi, cose da fare e priorità della conversazione.'}</p>${analysis?.action_items?.length?`<ul>${analysis.action_items.map(item=>`<li>${esc(item)}</li>`).join('')}</ul>`:''}`}</div></section><div class="thread-messages">${messages.map((item,index)=>`<details class="thread-message ${item.sent?'sent-message':''}" data-thread-message="${esc(item.id)}" ${index===messages.length-1||open.has(item.id)?'open':''}><summary><span class="sender-detail">${avatar(item)}<span><strong>${item.sent?'Tu':esc(item.sender)}</strong><span class="address">${esc(item.sender_email)}</span><small>${item.sent?'Risposta inviata':esc(item.preview.slice(0,90))}</small></span><time>${dateLabel(item.date,true)}</time></span></summary><div class="thread-message-body" data-body-for="${esc(item.id)}">${index===messages.length-1||open.has(item.id)?bodyMarkup(item):''}</div></details>`).join('')}</div><div class="reply-actions"><button data-action="reply">${icon('reply')}Rispondi</button><button data-action="reply-all">${icon('reply')}Rispondi a tutti</button><button data-action="forward">${icon('forward')}Inoltra</button><button data-action="ai-reply">${icon('sparkle')}Aiutami a rispondere</button></div><div id="inline-composer"></div>`}</article>`);
+  fitFrames(panel);
   for(const item of messages)if((item.id===messages.at(-1)?.id||open.has(item.id))&&!item.body_loaded)ensureBody(item.id).catch(()=>{});
   if(S.compose?.inline&&S.selected&&S.compose.thread_key===threadKey(S.selected)){renderInlineComposer(editor);if(editor&&editor.contains(active)){active.focus({preventScroll:true});if(caret)active.setSelectionRange(...caret);}}
 }
@@ -288,6 +281,7 @@ function paintLocal(){
   if(S.selected){const latest=replica.find(threadKey(S.selected));const fields=['subject','sender','sender_email','preview','date','read','starred','archived','pinned','category','message_count','analyzed_count'];if(latest&&!latest.deleted&&fields.some(field=>latest[field]!==S.selected[field])){S.selected={...S.selected,...Object.fromEntries(fields.map(field=>[field,latest[field]]))};renderReading();}}
 }
 
+async function userFirst(){while(S.loadingMessage)await new Promise(resolve=>setTimeout(resolve,150));}
 let preloadVersion=0;
 function preloadListBodies(){
   const version=++preloadVersion;
@@ -295,12 +289,13 @@ function preloadListBodies(){
   if(!list.length||S.view==='drafts')return;
   const toPreload=list.slice(0,15).map(m=>m.id);
   setTimeout(async()=>{
-    const concurrency=4;
+    const concurrency=2;
     const queue=[...toPreload];
     const workers=Array.from({length:Math.min(concurrency,queue.length)},async()=>{
       while(queue.length&&version===preloadVersion&&navigator.onLine&&!document.hidden){
         const id=queue.shift();
         if(!id)break;
+        await userFirst();
         try{
           const cached=await deviceCache.get('api:'+bodyPath(id));
           if(cached)continue;
@@ -374,11 +369,12 @@ async function warmRecentBodies(){
       while(queue.length&&navigator.onLine&&!document.hidden&&S.status?.authenticated){
         const id=queue.shift();
         if(!id)break;
+        await userFirst();
         const threadPath='/messages/'+encodeURIComponent(id)+'/thread?lazy=true';
         if(!(await deviceCache.has('api:'+threadPath))){
           try{await api(threadPath);}catch{break;}
         }
-        const path='/messages/'+encodeURIComponent(id);
+        const path=bodyPath(id);
         if(await deviceCache.has('api:'+path))continue;
         try{
           let pending=bodyRequests.get(path);
@@ -395,13 +391,12 @@ const bodyRequests=new Map();
 function bodyPath(id){return '/messages/'+encodeURIComponent(id)+(S.images?'?load_images=true':'');}
 function bodyMarkup(item){
   if(!item.body_loaded)return item.body_error?`<div class="offline-note">${esc(item.body_error)}</div><button class="secondary" data-download-body="${esc(item.id)}">Riprova</button>`:skeleton(3,'message-body','Scarico il messaggio…');
-  return `${item.remote_images&&!S.images?'<button class="image-permission" data-action="load-images">Carica immagini esterne</button>':''}${item.html?`<iframe class="email-html" title="Contenuto di ${esc(item.subject)}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc="${esc(htmlDocument(item.html))}"></iframe>`:quotedText(item.body)}${item.attachments?.length?`<div class="attachments">${item.attachments.map(a=>`<a class="attachment" href="/api/messages/${encodeURIComponent(item.id)}/attachments/${a.index}">${icon('paperclip')}${esc(a.name)}</a>`).join('')}</div>`:''}`;
+  return `${item.remote_images&&!S.images?'<button class="image-permission" data-action="load-images">Carica immagini esterne</button>':''}${item.html?`<iframe class="email-html" data-frame-key="${esc(frameKey(item))}"${frameHeights.has(frameKey(item))?` style="height:${frameHeights.get(frameKey(item))}px"`:''} title="Contenuto di ${esc(item.subject)}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc="${esc(htmlDocument(item.html))}"></iframe>`:quotedText(item.body)}${item.attachments?.length?`<div class="attachments">${item.attachments.map(a=>`<a class="attachment" href="/api/messages/${encodeURIComponent(item.id)}/attachments/${a.index}">${icon('paperclip')}${esc(a.name)}</a>`).join('')}</div>`:''}`;
 }
 function displayBody(item){
   const slot=[...document.querySelectorAll('[data-body-for]')].find(el=>el.dataset.bodyFor===item.id);
   if(!slot||!slot.closest('details')?.open)return;
-  slot.querySelectorAll('.email-html').forEach(frame=>frame._observer?.disconnect());
-  slot.innerHTML=bodyMarkup(item);fitFrames(slot);
+  morphChildren(slot,bodyMarkup(item));fitFrames(slot);
 }
 async function ensureBody(id,background=false){
   const version=S.readerVersion,path=bodyPath(id),metadata=S.thread.find(m=>m.id===id);
@@ -482,7 +477,7 @@ async function selectMessage(id,markRead=true) {
   warmingVersion++;const version=++S.readerVersion;
   const cached=S.messages.find(m=>m.id===id);
   S.readerAnchor=id;S.selected=cached||{id,subject:'Conversazione',category:'people'};
-  S.thread=[];S.threadSync={};S.images=false;S.loadingMessage=true;S.menu=false;
+  S.thread=[];S.threadSync={};S.loadingMessage=true;S.menu=false;
   $('.shell')?.classList.add('has-selection');$('.shell')?.classList.remove('menu-open');
   renderList();renderReading();
   try {
