@@ -154,9 +154,12 @@ class SyncEngine:
         try:
             client = Gmail(self.store, account["id"])
             thread = client.request("GET", "threads/" + message["thread_id"], params={"format": "minimal"})
-            for remote in (thread or {}).get("messages", []):
-                if "DRAFT" not in remote.get("labelIds", []):
-                    client.fetch_message(remote["id"])
+            fetched = [(remote["id"], client.fetch_remote(remote["id"]))
+                       for remote in (thread or {}).get("messages", [])
+                       if "DRAFT" not in remote.get("labelIds", [])]
+            with self.store.transaction():
+                for remote_id, remote in fetched:
+                    client.apply_remote(remote_id, remote)
             result = {"phase": "ready", "updated": time.time()}
         except Exception as exc:
             result = {"phase": "error", "error": safe_error(exc), "updated": time.time()}
@@ -268,43 +271,46 @@ class SyncEngine:
             uids_str = ",".join(str(uid) for uid in uid_batch)
             status, parts = client.uid("FETCH", uids_str, "(UID FLAGS BODY.PEEK[])")
             check(status)
-            for part in parts or []:
-                if isinstance(part, tuple) and isinstance(part[1], bytes):
-                    header_info = part[0].decode("utf-8", "replace") if isinstance(part[0], bytes) else str(part[0])
-                    uid_match = re.search(r"UID (\d+)", header_info)
-                    if not uid_match:
-                        continue
-                    uid = int(uid_match.group(1))
-                    if len(part[1]) > 25 * 1024 * 1024:
-                        raise RuntimeError("Messaggio oltre il limite di 25 MB")
-                    parsed = parse_message(part[1], account["id"], name, validity, uid, part[0],
-                                           folder["sent"], folder["archived"])
-                    message_id = self.store.upsert_message(parsed)
-                    if parsed["message_id"]:
-                        key = self.moved_key(account["id"], parsed["message_id"])
-                        moved = self.store.setting(key)
-                        if moved:
-                            self.store.execute("UPDATE messages SET category=?,analysis=?,snoozed_until=? WHERE id=?",
-                                (moved["category"], json.dumps(moved["analysis"]) if moved["analysis"] else None,
-                                 moved["snoozed_until"], message_id))
-                            self.store.execute("DELETE FROM settings WHERE key=?", (key,))
-                        if folder["sent"]:
-                            self.store.execute("DELETE FROM messages WHERE account_id=? AND folder='Milo/Sent' "
-                                               "AND message_id=?", (account["id"], parsed["message_id"]))
-                    added.append(message_id)
-                    with self._guard:
-                        self._progress[account["id"]]["downloaded"] += 1
+            # Parts are already downloaded; store the batch in one commit.
+            with self.store.transaction():
+                for part in parts or []:
+                    if isinstance(part, tuple) and isinstance(part[1], bytes):
+                        header_info = part[0].decode("utf-8", "replace") if isinstance(part[0], bytes) else str(part[0])
+                        uid_match = re.search(r"UID (\d+)", header_info)
+                        if not uid_match:
+                            continue
+                        uid = int(uid_match.group(1))
+                        if len(part[1]) > 25 * 1024 * 1024:
+                            raise RuntimeError("Messaggio oltre il limite di 25 MB")
+                        parsed = parse_message(part[1], account["id"], name, validity, uid, part[0],
+                                               folder["sent"], folder["archived"])
+                        message_id = self.store.upsert_message(parsed)
+                        if parsed["message_id"]:
+                            key = self.moved_key(account["id"], parsed["message_id"])
+                            moved = self.store.setting(key)
+                            if moved:
+                                self.store.execute("UPDATE messages SET category=?,analysis=?,snoozed_until=? WHERE id=?",
+                                    (moved["category"], json.dumps(moved["analysis"]) if moved["analysis"] else None,
+                                     moved["snoozed_until"], message_id))
+                                self.store.execute("DELETE FROM settings WHERE key=?", (key,))
+                            if folder["sent"]:
+                                self.store.execute("DELETE FROM messages WHERE account_id=? AND folder='Milo/Sent' "
+                                                   "AND message_id=?", (account["id"], parsed["message_id"]))
+                        added.append(message_id)
+                        with self._guard:
+                            self._progress[account["id"]]["downloaded"] += 1
         known = sorted(remote_uids & by_uid.keys())
         for start in range(0, len(known), 100):
             uids = ",".join(str(uid) for uid in known[start:start + 100])
             status, parts = client.uid("FETCH", uids, "(UID FLAGS)")
             check(status)
-            for part in parts or []:
-                if not isinstance(part, bytes):
-                    continue
-                match = re.search(rb"UID (\d+)", part)
-                if match and int(match[1]) in by_uid:
-                    self.store.reconcile_flags(by_uid[int(match[1])], b"\\Seen" in part, b"\\Flagged" in part)
+            with self.store.transaction():
+                for part in parts or []:
+                    if not isinstance(part, bytes):
+                        continue
+                    match = re.search(rb"UID (\d+)", part)
+                    if match and int(match[1]) in by_uid:
+                        self.store.reconcile_flags(by_uid[int(match[1])], b"\\Seen" in part, b"\\Flagged" in part)
         return added
 
     def flush_changes(self, client, account, remote_folders):

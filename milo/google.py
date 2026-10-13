@@ -198,18 +198,25 @@ class Gmail:
         page = self.request("GET", "messages", params=params)
         if page is None:
             raise RuntimeError("Impossibile leggere la casella Gmail")
-        added = 0
+        fetched = []
         for item in page.get("messages", []):
-            added += self.fetch_message(item["id"])
-        next_page = page.get("nextPageToken")
-        # Commit the cursor only after the entire page has been stored. A failed
-        # request retries the page idempotently instead of skipping messages.
-        self.store.execute("UPDATE gmail_sync SET backfill_page=?,backfill_complete=? WHERE account_id=?",
-                           (next_page, int(not next_page), self.account_id))
-        if not next_page:
-            self.store.execute("DELETE FROM messages WHERE account_id=? AND provider_id IS NOT NULL AND "
-                               "provider_id NOT IN (SELECT provider_id FROM gmail_scan WHERE account_id=?)",
-                               (self.account_id, self.account_id))
+            self.progress("downloading", self.downloaded)
+            if fetched:
+                time.sleep(0.25)
+            fetched.append((item["id"], self.fetch_remote(item["id"])))
+        added = 0
+        with self.store.transaction():
+            for remote_id, remote in fetched:
+                added += self.apply_remote(remote_id, remote)
+            next_page = page.get("nextPageToken")
+            # Commit the cursor only after the entire page has been stored. A failed
+            # request retries the page idempotently instead of skipping messages.
+            self.store.execute("UPDATE gmail_sync SET backfill_page=?,backfill_complete=? WHERE account_id=?",
+                               (next_page, int(not next_page), self.account_id))
+            if not next_page:
+                self.store.execute("DELETE FROM messages WHERE account_id=? AND provider_id IS NOT NULL AND "
+                                   "provider_id NOT IN (SELECT provider_id FROM gmail_scan WHERE account_id=?)",
+                                   (self.account_id, self.account_id))
         return added
 
     def history(self):
@@ -229,23 +236,30 @@ class Gmail:
                 deleted.add(item["message"]["id"])
             for key in ("messagesAdded", "labelsAdded", "labelsRemoved"):
                 changed.update(item["message"]["id"] for item in record.get(key, []))
-        added = 0
+        fetched = []
         for remote_id in changed - deleted:
-            added += self.fetch_message(remote_id)
-        for remote_id in deleted:
-            self.remove_message(remote_id)
-        next_page = page.get("nextPageToken")
-        if next_page:
-            self.store.execute("UPDATE gmail_sync SET history_page=? WHERE account_id=?", (next_page, self.account_id))
-        else:
-            history_id = page.get("historyId", state["history_id"])
-            self.store.execute("UPDATE gmail_sync SET history_id=?,history_page=NULL WHERE account_id=?",
-                               (history_id, self.account_id))
+            if fetched:
+                time.sleep(0.25)
+            fetched.append((remote_id, self.fetch_remote(remote_id)))
+        added = 0
+        with self.store.transaction():
+            for remote_id, remote in fetched:
+                added += self.apply_remote(remote_id, remote)
+            for remote_id in deleted:
+                self.remove_message(remote_id)
+            next_page = page.get("nextPageToken")
+            if next_page:
+                self.store.execute("UPDATE gmail_sync SET history_page=? WHERE account_id=?", (next_page, self.account_id))
+            else:
+                history_id = page.get("historyId", state["history_id"])
+                self.store.execute("UPDATE gmail_sync SET history_id=?,history_page=NULL WHERE account_id=?",
+                                   (history_id, self.account_id))
         return added
 
-    def fetch_message(self, remote_id):
-        self.progress("downloading", self.downloaded)
-        remote = self.request("GET", "messages/" + quote(remote_id, safe=""), params={"format": "raw"})
+    def fetch_remote(self, remote_id):
+        return self.request("GET", "messages/" + quote(remote_id, safe=""), params={"format": "raw"})
+
+    def apply_remote(self, remote_id, remote):
         if remote is None:
             self.remove_message(remote_id)
             return 0
@@ -253,6 +267,10 @@ class Gmail:
         self.downloaded += 1
         self.progress("downloading", self.downloaded)
         return added
+
+    def fetch_message(self, remote_id):
+        self.progress("downloading", self.downloaded)
+        return self.apply_remote(remote_id, self.fetch_remote(remote_id))
 
     def store_message(self, remote):
         remote_id = remote["id"]

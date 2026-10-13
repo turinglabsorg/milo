@@ -170,13 +170,13 @@ def test_gmail_backfill_does_not_advance_cursor_on_partial_failure(store, monkey
     def fetch(message_id):
         if message_id == "def":
             raise RuntimeError("connection lost")
-        return client.store_message(remote(message_id))
+        return remote(message_id)
 
-    monkeypatch.setattr(client, "fetch_message", fetch)
+    monkeypatch.setattr(client, "fetch_remote", fetch)
     with pytest.raises(RuntimeError):
         client.backfill()
     assert store.rows("SELECT backfill_page FROM gmail_sync")[0]["backfill_page"] is None
-    monkeypatch.setattr(client, "fetch_message", lambda message_id: client.store_message(remote(message_id)))
+    monkeypatch.setattr(client, "fetch_remote", lambda message_id: remote(message_id))
     client.backfill()
     assert store.rows("SELECT backfill_page FROM gmail_sync")[0]["backfill_page"] == "next"
     assert len(store.rows("SELECT id FROM messages")) == 2

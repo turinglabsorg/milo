@@ -6,6 +6,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -17,6 +18,7 @@ class Store:
         directory.chmod(0o700)
         self.directory = directory
         self.lock = threading.RLock()
+        self._txn_depth = 0
         self.on_mail_change = lambda: None
         key_path = directory / "vault.key"
         if not key_path.exists():
@@ -166,8 +168,22 @@ class Store:
             return [dict(row) for row in self.db.execute(query, params).fetchall()]
 
     def execute(self, query, params=()):
-        with self.lock, self.db:
-            return self.db.execute(query, params)
+        with self.lock:
+            if self._txn_depth:
+                return self.db.execute(query, params)
+            with self.db:
+                return self.db.execute(query, params)
+
+    @contextmanager
+    def transaction(self):
+        """Batch writes into one commit. Callers must not do network I/O inside."""
+        with self.lock:
+            self._txn_depth += 1
+            try:
+                with self.db:
+                    yield
+            finally:
+                self._txn_depth -= 1
 
     def setting(self, key):
         rows = self.rows("SELECT value FROM settings WHERE key=?", (key,))

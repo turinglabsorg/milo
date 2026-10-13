@@ -360,7 +360,36 @@ async function refreshCatalogue(){
       catch(error){if(error.status===404){replica.remove(id);if(S.selected&&threadKey(S.selected)===id){S.readerVersion++;S.readerAnchor=null;S.selected=null;S.thread=[];renderReading();}}}
     }
     paintLocal();await replica.commit();
-  }catch{}finally{feeding=false;}
+  }catch{}finally{feeding=false;warmRecentBodies();}
+}
+let warmingRecent=false,lastWarm=0;
+async function warmRecentBodies(){
+  if(warmingRecent||!navigator.onLine||document.hidden||!S.status?.authenticated)return;
+  warmingRecent=true;
+  try{
+    const rows=replica.keys().map(id=>replica.find(id)).filter(row=>row&&!row.deleted)
+      .sort((a,b)=>(b.date||0)-(a.date||0)).slice(0,60);
+    const queue=rows.map(row=>row.id);
+    const workers=Array.from({length:Math.min(2,queue.length)},async()=>{
+      while(queue.length&&navigator.onLine&&!document.hidden&&S.status?.authenticated){
+        const id=queue.shift();
+        if(!id)break;
+        const threadPath='/messages/'+encodeURIComponent(id)+'/thread?lazy=true';
+        if(!(await deviceCache.has('api:'+threadPath))){
+          try{await api(threadPath);}catch{break;}
+        }
+        const path='/messages/'+encodeURIComponent(id);
+        if(await deviceCache.has('api:'+path))continue;
+        try{
+          let pending=bodyRequests.get(path);
+          if(!pending){pending=api(path);bodyRequests.set(path,pending);pending.finally(()=>{if(bodyRequests.get(path)===pending)bodyRequests.delete(path);}).catch(()=>{});}
+          replica.body(await pending);
+        }catch{break;}
+        await new Promise(resolve=>setTimeout(resolve,150));
+      }
+    });
+    await Promise.all(workers);
+  }finally{warmingRecent=false;lastWarm=Date.now();}
 }
 const bodyRequests=new Map();
 function bodyPath(id){return '/messages/'+encodeURIComponent(id)+(S.images?'?load_images=true':'');}
@@ -916,6 +945,7 @@ async function runClientQueue(){
 async function poll(){
   if(S.status?.authenticated&&!document.hidden){
     await refresh();flushClientQueue().catch(()=>{});queueCatalogue();
+    if(Date.now()-lastWarm>120000)warmRecentBodies();
     if(S.recapOpen&&S.recapSignature!==JSON.stringify(S.state.recap))api('/recap').then(result=>{if(S.recapOpen)showRecap(result);}).catch(()=>{});
     for(const draft of S.pendingDrafts.values())if(!S.draftWrites.has(draft.id)&&S.compose?.id!==draft.id)persistDraft(draft).catch(()=>{});
     if(S.readerAnchor&&S.threadSync.phase==='downloading'&&!S.loadingMessage)loadThread(S.readerAnchor).catch(()=>{});

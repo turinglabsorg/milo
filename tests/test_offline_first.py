@@ -134,6 +134,30 @@ def test_stale_metadata_and_delayed_ack_preserve_latest_favorite(tmp_path):
         browser.close()
 
 
+def test_recent_bodies_are_prefetched_in_background_without_opening(tmp_path):
+    captured = {}
+
+    def prepare(app, received, sent):
+        read_mail(app, received, sent)
+        captured['other'] = app.state.store.rows("SELECT id FROM messages WHERE thread_id='other'")[0]['id']
+
+    with service(tmp_path, prepare) as (url, sent), sync_playwright() as p:
+        browser = p.chromium.launch()
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto(url)
+        expect(page.locator('.message-row')).to_have_count(2)
+        wait_for_async(page, 'async id=>{const {deviceCache}=await import("/static/cache.js");return !!(await deviceCache.get("api:/messages/"+id));}',
+                       arg=captured['other'])
+        context.set_offline(True)
+        page.reload()
+        expect(page.locator('.message-row')).to_have_count(2)
+        page.locator(f'[data-message="{captured["other"]}"]').click()
+        expect(page.locator('.thread-message')).to_have_count(1)
+        expect(page.locator('.thread-message').get_by_text('Parliamone domani.', exact=False).first).to_be_visible()
+        browser.close()
+
+
 def test_downloaded_body_search_is_local_and_survives_offline_restart(tmp_path):
     def prepare(app, received, sent):
         read_mail(app, received, sent)
@@ -298,7 +322,7 @@ def test_service_worker_retires_old_shell_and_refreshes_cached_client_assets(tmp
         page.goto(url + '/static/icon.svg')
         page.evaluate('()=>caches.open("milo-shell-v10").then(cache=>cache.put("/static/app.js",new Response("// obsolete-client")))')
         warm(page, url, sent)
-        wait_for_async(page, 'async()=>{const keys=await caches.keys();return keys.includes("milo-shell-v11")&&!keys.includes("milo-shell-v10");}')
+        wait_for_async(page, 'async()=>{const keys=await caches.keys();return keys.includes("milo-shell-v12")&&!keys.includes("milo-shell-v10");}')
         version['name'] = 'updated'
         old = page.evaluate('()=>fetch("/static/app.js").then(response=>response.text())')
         assert 'shell-version-original' in old

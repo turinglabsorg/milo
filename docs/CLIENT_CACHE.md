@@ -13,6 +13,11 @@ the complete archive; a server-side archive alone does not satisfy this requirem
   attachments/inline images across app restarts. Read cached content offline.
 - Fetch thread metadata separately from bodies. Download the visible message first,
   render collapsed messages only on opening, and fill the thread cache in background.
+- While the client is open, online and visible, it prefetches in the background
+  the thread metadata and the latest body of the 60 most recent conversations,
+  so recent mail opens instantly and stays readable offline. Prefetching runs
+  at low concurrency, skips content already cached, and pauses when the page
+  is hidden or the device goes offline.
 - Reuse immutable content by message ID and `content_version`; mutable flags,
   classification, analysis and thread membership come from metadata refreshes.
 - A body change invalidates only that content version. A trash tombstone must stay
