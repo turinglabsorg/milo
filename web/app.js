@@ -17,6 +17,9 @@ const paths = {
   logout:'M10 3H4v18h6 M13 8l5 4-5 4 M8 12h13', help:'M9 8a3 3 0 1 1 5 2c-1 1-2 1-2 4 M12 17h.01 M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0'
 };
 paths.pin='m8 3 8 0-1 6 4 4H5l4-4z M12 13v8';
+Object.assign(paths,{ban:'M5.6 5.6l12.8 12.8 M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0',bell:'M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9 M10 21h4',
+  crown:'m3 7 4.5 4L12 4l4.5 7L21 7l-2 12H5z',todo:'M4 4h16v16H4z M8 12l3 3 5-6',screener:'M15 19v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M12 6a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0 M19 8v6 M16 11h6',
+  ask:'M21 12a8 8 0 0 1-12 7l-5 1 1-4a8 8 0 1 1 16-4z M10 9a2 2 0 1 1 3 2c-1 .5-1 1-1 2 M12 16h.01',download:'M12 3v12 M7 10l5 5 5-5 M4 21h16',keyboard:'M2 6h20v12H2z M6 10h.01 M10 10h.01 M14 10h.01 M18 10h.01 M7 14h10'});
 const icon = (name, extra = '') => `<svg class="icon ${extra}" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.mail}"/></svg>`;
 const googleIcon = () => '<svg class="google-mark" viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285f4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.2h6.6c3.9-3.6 6.1-8.9 6.1-15.1z"/><path fill="#34a853" d="M24 44c5.5 0 10.1-1.8 13.5-4.9l-6.6-5.2c-1.8 1.2-4.1 1.9-6.9 1.9-5.3 0-9.8-3.6-11.4-8.4H5.8v5.3A20.4 20.4 0 0 0 24 44z"/><path fill="#fbbc05" d="M12.6 27.4a12.3 12.3 0 0 1 0-6.8v-5.3H5.8a20.4 20.4 0 0 0 0 17.4z"/><path fill="#ea4335" d="M24 12.2c3 0 5.7 1 7.8 3.1l5.9-5.9A19.8 19.8 0 0 0 24 4 20.4 20.4 0 0 0 5.8 15.3l6.8 5.3c1.6-4.8 6.1-8.4 11.4-8.4z"/></svg>';
 const logo = () => '<div class="logo"><img src="/static/icon.svg" alt="">milo<small>MAIL</small></div>';
@@ -24,10 +27,12 @@ const S = {status:null, setupAuthorized:false, state:{accounts:[], counts:{}, ai
 const MAX_SERVER_ERRORS=3;
 function updateOnlineState(){const wasOnline=S.online;S.online=navigator.onLine&&S.serverErrors<MAX_SERVER_ERRORS;if(wasOnline&&!S.online)renderChrome();}
 const categoryNames = {people:'Persone', updates:'Notifiche', newsletters:'Newsletter'};
-const viewNames = {inbox:'Smart inbox', starred:'Preferiti', drafts:'Bozze', sent:'Posta inviata', snoozed:'Per dopo', archive:'Archivio'};
+const viewNames = {inbox:'Smart inbox', todo:'Da fare', screener:'Nuovi mittenti', starred:'Preferiti', drafts:'Bozze', sent:'Posta inviata', snoozed:'Per dopo', archive:'Archivio'};
 let toastTimer, searchTimer, autosaveTimer, localDraftTimer;
 S.pendingDrafts=new Map();S.draftWrites=new Map();S.discardedDrafts=new Set();
 S.pendingSettings=new Map();S.queueErrors=new Map();S.remoteTicket=0;
+S.multi=new Set();S.todos=null;S.screening=null;S.suggestions=new Map();
+const UNDO_SECONDS=10;
 try{for(const id of JSON.parse(localStorage.getItem('milo-discarded-drafts')||'[]'))S.discardedDrafts.add(id);}catch{}
 try{for(const draft of JSON.parse(localStorage.getItem('milo-pending-drafts')||'[]'))if(draft.id&&typeof draft.body==='string')S.pendingDrafts.set(draft.id,draft);}catch{}
 const systemTheme=matchMedia('(prefers-color-scheme: dark)');
@@ -76,13 +81,15 @@ async function api(path, method='GET', body) {
   }
   recordServerSuccess();
   const immutable=/^\/messages\/[^/?]+(?:\?.*)?$/.test(path)||/^\/messages\/[^/]+\/recipients$/.test(path);
-  if(method==='GET'&&(started===replica.revision||immutable&&S.status?.authenticated)&&(/^(?:\/status|\/state|\/recap|\/messages(?:[/?]|$)|\/drafts)/.test(path)))deviceCache.set('api:'+path,data).then(saved=>{if(!saved&&S.status?.authenticated&&!S.cacheWarning){S.cacheWarning=true;toast('Cache locale non disponibile. I messaggi restano sul server, ma non saranno disponibili offline su questo dispositivo.');}});
+  if(method==='GET'&&(started===replica.revision||immutable&&S.status?.authenticated)&&(/^(?:\/status|\/state|\/recap|\/messages(?:[/?]|$)|\/drafts|\/todos|\/screener)/.test(path)))deviceCache.set('api:'+path,data).then(saved=>{if(!saved&&S.status?.authenticated&&!S.cacheWarning){S.cacheWarning=true;toast('Cache locale non disponibile. I messaggi restano sul server, ma non saranno disponibili offline su questo dispositivo.');}});
   return data;
 }
 
-function toast(message) {
-  clearTimeout(toastTimer); $('#toast').textContent=message; $('#toast').classList.add('visible');
-  toastTimer=setTimeout(() => $('#toast').classList.remove('visible'), 5500);
+function toast(message,action=null) {
+  clearTimeout(toastTimer);const box=$('#toast');box.textContent=message;
+  if(action){const button=document.createElement('button');button.className='toast-action';button.type='button';button.textContent=action.label;button.addEventListener('click',()=>{clearTimeout(toastTimer);box.classList.remove('visible');action.run();});box.append(button);}
+  box.classList.add('visible');
+  toastTimer=setTimeout(() => box.classList.remove('visible'), action?.duration||5500);
 }
 function initials(name) { return name.split(/[\s@.]+/).filter(Boolean).slice(0,2).map(word => word[0]).join('').toUpperCase(); }
 function avatar(message) {
@@ -131,8 +138,8 @@ function renderChrome() {
 
 function renderShell() {
   const counts=S.state.counts;
-  const folders=[['inbox','inbox'],['starred','star'],['drafts','edit'],['sent','sent'],['snoozed','clock'],['archive','archive']];
-  $('#app').innerHTML=`<main class="shell ${S.selected?'has-selection':''} ${S.menu?'menu-open':''}"><aside class="sidebar">${logo()}<button class="primary compose-button" data-action="compose">${icon('plus')}Nuovo messaggio</button><div class="nav-label">La tua posta</div><nav class="nav">${folders.map(([view,name])=>`<button class="nav-button ${S.view===view?'active':''}" data-view="${view}">${icon(name)}${viewNames[view]}${counts[view]?`<span class="count">${counts[view]}</span>`:''}</button>`).join('')}</nav><div class="account-section">${accountMarkup()}</div><div class="sidebar-bottom"><div class="sidebar-footer"><div class="user-avatar">${esc(initials(S.state.identity?.name || S.state.accounts[0]?.name || 'Tu'))}</div><span>${esc(S.state.identity?.name||'Il tuo spazio')}</span><button data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div>${S.status.demo?'<div class="demo-label">DEMO · messaggi fittizi</div>':''}</div></aside><header class="topbar"><button class="icon-button mobile-menu" data-action="menu" aria-label="Apri menu">${icon('menu')}</button><div class="breadcrumbs">Il tuo spazio ${icon('arrow')}<strong>${viewNames[S.view]}</strong></div><div class="top-tools"><div id="sync-status">${syncMarkup()}</div><label class="search">${icon('search')}<input id="search-input" placeholder="Cerca nella tua posta" value="${esc(S.search)}" aria-label="Cerca nella tua posta"><kbd>/</kbd></label><button class="icon-button ${S.syncing?'spinner':''}" data-action="sync" aria-label="Sincronizza" title="Sincronizza">${icon('refresh')}</button><span class="sync-indicator ${!S.online||S.state.accounts.some(a=>a.error)?'offline':''}" title="${S.online?'Servizio connesso':'Servizio non raggiungibile'}"></span><button class="icon-button" data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div></header><section class="list-panel" id="list-panel"></section><section class="reading-panel" id="reading-panel"></section></main>`;
+  const folders=[['inbox','inbox'],['todo','todo'],...(S.state.screener?.enabled?[['screener','screener']]:[]),['starred','star'],['drafts','edit'],['sent','sent'],['snoozed','clock'],['archive','archive']];
+  $('#app').innerHTML=`<main class="shell ${S.selected?'has-selection':''} ${S.menu?'menu-open':''}"><aside class="sidebar">${logo()}<button class="primary compose-button" data-action="compose">${icon('plus')}Nuovo messaggio</button><div class="nav-label">La tua posta</div><nav class="nav">${folders.map(([view,name])=>`<button class="nav-button ${S.view===view?'active':''}" data-view="${view}">${icon(name)}${viewNames[view]}${counts[view]?`<span class="count">${counts[view]}</span>`:''}</button>`).join('')}</nav><div class="account-section">${accountMarkup()}</div><div class="sidebar-bottom"><div class="sidebar-footer"><div class="user-avatar">${esc(initials(S.state.identity?.name || S.state.accounts[0]?.name || 'Tu'))}</div><span>${esc(S.state.identity?.name||'Il tuo spazio')}</span><button data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div>${S.status.demo?'<div class="demo-label">DEMO · messaggi fittizi</div>':''}</div></aside><header class="topbar"><button class="icon-button mobile-menu" data-action="menu" aria-label="Apri menu">${icon('menu')}</button><div class="breadcrumbs">Il tuo spazio ${icon('arrow')}<strong>${viewNames[S.view]}</strong></div><div class="top-tools"><div id="sync-status">${syncMarkup()}</div><label class="search">${icon('search')}<input id="search-input" placeholder="Cerca nella tua posta" value="${esc(S.search)}" aria-label="Cerca nella tua posta"><kbd>/</kbd></label><button class="icon-button" data-action="ask" aria-label="Chiedi a Milo sulla tua posta" title="Chiedi a Milo">${icon('ask')}</button><button class="icon-button" data-action="palette" aria-label="Comandi" title="Comandi (Ctrl+K)" aria-keyshortcuts="Control+K">${icon('keyboard')}</button><button class="icon-button ${S.syncing?'spinner':''}" data-action="sync" aria-label="Sincronizza" title="Sincronizza">${icon('refresh')}</button><span class="sync-indicator ${!S.online||S.state.accounts.some(a=>a.error)?'offline':''}" title="${S.online?'Servizio connesso':'Servizio non raggiungibile'}"></span><button class="icon-button" data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div></header><section class="list-panel" id="list-panel"></section><section class="reading-panel" id="reading-panel"></section></main>`;
   renderList(); renderReading();
 }
 
@@ -140,11 +147,21 @@ function renderList() {
   if (!$('#list-panel')) return;
   const inbox = S.view==='inbox';
   const count = S.messages.length;
-  $('#list-panel').innerHTML=`<div class="list-heading"><div class="title-row"><h1>${viewNames[S.view]}</h1>${inbox?`<button class="list-recap" data-action="recap" aria-label="Apri il recap dell’inbox" title="Recap dell’inbox">${icon('sparkle')}Recap</button>`:''}</div></div>${inbox?`<div class="tabs">${[['','Tutte'],['people','Persone'],['updates','Notifiche'],['newsletters','Newsletter']].map(([category,name])=>`<button class="tab ${S.category===category?'active':''}" data-category="${category}">${name}</button>`).join('')}</div>`:''}${!S.online?'<div class="offline-note">Sei offline. Mostro la posta salvata su questo dispositivo.</div>':''}${S.state.accounts.some(a=>a.error)?`<div class="error-banner">${esc(S.state.accounts.find(a=>a.error).error)} <button data-action="settings">Apri account</button></div>`:''}<div id="message-list"></div>`;
+  $('#list-panel').innerHTML=`<div class="list-heading"><div class="title-row"><h1>${viewNames[S.view]}</h1>${inbox?`<button class="list-recap" data-action="recap" aria-label="Apri il recap dell’inbox" title="Recap dell’inbox">${icon('sparkle')}Recap</button>`:''}</div></div>${S.multi.size?`<div class="bulk-bar" role="toolbar" aria-label="Azioni sulle conversazioni selezionate"><strong>${S.multi.size} ${S.multi.size===1?'selezionata':'selezionate'}</strong><button data-bulk="archive" title="Archivia (E)">${icon('archive')}</button><button data-bulk="read" title="Segna come lette">${icon('mail')}</button><button data-bulk="star" title="Aggiungi ai preferiti">${icon('star')}</button><button data-bulk="trash" title="Elimina">${icon('trash')}</button><button data-bulk="clear" class="bulk-clear">Annulla</button></div>`:''}${inbox?`<div class="tabs">${[['','Tutte'],['people','Persone'],['updates','Notifiche'],['newsletters','Newsletter']].map(([category,name])=>`<button class="tab ${S.category===category?'active':''}" data-category="${category}">${name}</button>`).join('')}</div>`:''}${inbox&&S.category==='newsletters'?`<div class="list-tools"><button class="secondary" data-action="newsletter-senders">${icon('filter')}Gestisci i mittenti</button></div>`:''}${!S.online?'<div class="offline-note">Sei offline. Mostro la posta salvata su questo dispositivo.</div>':''}${S.state.accounts.some(a=>a.error)?`<div class="error-banner">${esc(S.state.accounts.find(a=>a.error).error)} <button data-action="settings">Apri account</button></div>`:''}<div id="message-list"></div>`;
   const container=$('#message-list');
   if (S.loadingList) { container.innerHTML=skeleton(9,'list','Carico le conversazioni…');return; }
+  if (S.view==='todo') {
+    const items=S.todos||[];
+    container.innerHTML=items.length?items.map(t=>`<div class="todo-row ${t.kind==='followup'?'followup':''}"><button class="todo-check" data-todo-done="${esc(t.id)}" aria-label="Segna come fatto" title="Fatto">${icon('check')}</button><button class="todo-body" data-message="${esc(t.message_id)}"><span class="todo-text">${esc(t.text)}</span><span class="todo-meta">${t.kind==='followup'?'<span class="todo-tag">Da seguire</span>':t.priority==='high'?'<span class="todo-tag">Priorità alta</span>':''}${esc(t.sender||t.sender_email||'')} · ${esc(subjectCore(t.subject))} · ${dateLabel(t.date,true)}</span></button></div>`).join(''):emptyMarkup('todo','Niente in sospeso.','Le cose da fare che Milo trova nelle email, e quelle a cui aspetti una risposta, arrivano qui.');
+    return;
+  }
+  if (S.view==='screener') {
+    const items=S.screening||[];
+    container.innerHTML=items.length?`<p class="screener-intro">Ti scrivono per la prima volta. Approva per vederli nella Smart inbox, blocca per archiviarli sempre.</p>`+items.map(s=>`<div class="screener-row"><button class="screener-open" data-message="${esc(s.sample_id)}">${avatar({sender:s.name||s.email})}<span><strong>${esc(s.name||s.email)}</strong><small>${esc(s.email)} · ${s.count} email</small></span></button><div class="screener-actions"><button class="secondary" data-sender-status="approved" data-sender="${esc(s.email)}">Approva</button><button class="secondary danger" data-sender-status="blocked" data-sender="${esc(s.email)}">Blocca</button></div></div>`).join(''):emptyMarkup('screener','Nessun nuovo mittente.','Chi ti scrive per la prima volta aspetta qui la tua approvazione.');
+    return;
+  }
   if (S.view==='drafts') {
-    container.innerHTML=(S.drafts?.length?S.drafts.map(d=>`<button class="draft-row" data-draft="${esc(d.id)}"><small>${d.pending?'Salvataggio in attesa · ':''}${esc(d.to||'Nessun destinatario')}</small><strong>${esc(d.subject||'Senza oggetto')}</strong><p>${esc(d.body.slice(0,100))}</p></button>`).join(''):emptyMarkup('edit','Un pensiero da scrivere.','Le bozze salvate appariranno qui, anche sugli altri dispositivi.'));
+    container.innerHTML=(S.drafts?.length?S.drafts.map(d=>`<button class="draft-row" data-draft="${esc(d.id)}"><small>${d.scheduled?.error?'<span class="draft-flag error">Invio non riuscito</span> ':d.scheduled?`<span class="draft-flag">Invio ${esc(dateLabel(d.scheduled.send_at,true))}</span> `:''}${d.pending?'Salvataggio in attesa · ':''}${esc(d.to||'Nessun destinatario')}</small><strong>${esc(d.subject||'Senza oggetto')}</strong><p>${esc(d.body.slice(0,100))}</p></button>`).join(''):emptyMarkup('edit','Un pensiero da scrivere.','Le bozze salvate appariranno qui, anche sugli altri dispositivi.'));
     return;
   }
   if (!count) {
@@ -156,7 +173,7 @@ function renderList() {
     const day=m.pinned?'In evidenza':isToday(m.date)?'Oggi':new Date(m.date*1000).toLocaleDateString('it-IT',{day:'numeric',month:'long'});
     const heading=day!==lastDay?`<div class="day-heading">${esc(day)}${S.search?'<span class="right">Risultati di ricerca</span>':''}</div>`:'';
     lastDay=day;
-    return heading+`<button class="message-row ${m.read?'':'unread'} ${S.selected?.id===m.id?'selected':''}" data-message="${esc(m.id)}" style="--account-color:${accountColor(m.account_id)}">${avatar(m)}<span class="message-content"><span class="sender-line"><strong>${esc(m.sender)}</strong>${m.message_count>1?`<span class="thread-count">${m.message_count}</span>`:''}${!m.read?'<span class="unread-dot"></span>':''}<span class="row-markers">${m.pinned?`<span class="row-pin" aria-label="Conversazione fissata" title="Fissata in alto">${icon('pin')}</span>`:''}${m.analyzed_count?`<span class="row-analysis" aria-label="${m.analyzed_count} messaggi analizzati" title="${m.analyzed_count} messaggi analizzati da Milo AI">${icon('sparkle')}</span>`:''}</span><time>${dateLabel(m.date)}</time></span><span class="row-subject">${esc(subjectCore(m.subject))}</span><span class="row-preview">${m.sent?'Tu: ':''}${esc(m.preview)}</span>${m.replied?`<span class="reply-badge">${icon('reply')}Hai risposto</span>`:''}</span>${m.starred?`<span class="row-star">${icon('star')}</span>`:''}</button>`;
+    return heading+`<button class="message-row ${m.read?'':'unread'} ${S.selected?.id===m.id?'selected':''} ${S.multi.has(threadKey(m))?'multi':''}" aria-pressed="${S.multi.has(threadKey(m))}" data-message="${esc(m.id)}" style="--account-color:${accountColor(m.account_id)}">${avatar(m)}<span class="message-content"><span class="sender-line"><strong>${esc(m.sender)}</strong>${m.message_count>1?`<span class="thread-count">${m.message_count}</span>`:''}${!m.read?'<span class="unread-dot"></span>':''}<span class="row-markers">${m.pinned?`<span class="row-pin" aria-label="Conversazione fissata" title="Fissata in alto">${icon('pin')}</span>`:''}${m.analyzed_count?`<span class="row-analysis" aria-label="${m.analyzed_count} messaggi analizzati" title="${m.analyzed_count} messaggi analizzati da Milo AI">${icon('sparkle')}</span>`:''}</span><time>${dateLabel(m.date)}</time></span><span class="row-subject">${esc(subjectCore(m.subject))}</span><span class="row-preview">${m.sent?'Tu: ':''}${esc(m.preview)}</span>${m.replied?`<span class="reply-badge">${icon('reply')}Hai risposto</span>`:''}</span>${m.starred?`<span class="row-star">${icon('star')}</span>`:''}</button>`;
   }).join('');
 }
 function emptyMarkup(symbol,title,description,add=false) {
@@ -245,7 +262,9 @@ function renderReading() {
   const messages=S.thread.length?S.thread:[m];
   const analysis=S.thread.findLast(message=>message.analysis)?.analysis||m.analysis;
   const downloading=S.loadingMessage||S.threadSync.phase==='downloading';
-  morphChildren(panel,`<div class="reading-toolbar"><button class="icon-button back-button" data-action="back" aria-label="Torna alla lista">${icon('back')}</button><button class="icon-button ${m.pinned?'is-active':''}" data-action="pin" aria-label="${m.pinned?'Rimuovi pin':'Fissa in alto'}" title="${m.pinned?'Rimuovi pin':'Fissa in alto'}">${icon('pin')}</button><button class="icon-button" data-action="archive" aria-label="${m.archived?'Sposta in inbox':'Archivia'}" title="Archivia">${icon('archive')}</button><button class="icon-button" data-action="trash" aria-label="Elimina conversazione" title="Sposta nel cestino (Backspace / Canc)" aria-keyshortcuts="Backspace Delete">${icon('trash')}</button><button class="icon-button" data-action="snooze" aria-label="Posticipa" title="Posticipa">${icon('clock')}</button><button class="icon-button" data-action="read" aria-label="${m.read?'Segna da leggere':'Segna come letta'}">${icon('mail')}</button><button class="icon-button ${m.starred?'is-active':''}" data-action="star" aria-label="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'}" title="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'} (P)" aria-keyshortcuts="P">${icon('star')}</button><div class="right"><span class="dot" style="background:${accountColor(m.account_id)}"></span>${esc(S.state.accounts.find(a=>a.id===m.account_id)?.name||'Account')}</div></div><article class="mail-content"><select class="category-select" id="message-category" aria-label="Categoria della email">${Object.entries(categoryNames).map(([key,name])=>`<option value="${key}" ${key===m.category?'selected':''}>${name}</option>`).join('')}</select><h2>${esc(subjectCore(m.subject))}</h2>${downloading?`<div class="download-status" role="status">${icon('refresh','spinner')}Scarico la conversazione e le tue risposte…</div>`:''}${S.threadSync.error?`<div class="error-banner">${esc(S.threadSync.error)}</div>`:''}${S.loadingMessage?skeleton(7,'reader','Carico il messaggio…'):`<section class="ai-summary"><div class="ai-summary-title">${icon('sparkle')}${analysis?'Il punto, secondo Milo':'Milo AI'}<button data-action="analyze">${analysis?'Rianalizza':'Analizza'}${icon('arrow')}</button></div><div id="analysis-content">${S.analyzing?skeleton(3,'block','Analisi in corso…'):`<p>${analysis?esc(analysis.summary):'Sintesi, cose da fare e priorità della conversazione.'}</p>${analysis?.action_items?.length?`<ul>${analysis.action_items.map(item=>`<li>${esc(item)}</li>`).join('')}</ul>`:''}`}</div></section><div class="thread-messages">${messages.map((item,index)=>`<details class="thread-message ${item.sent?'sent-message':''}" data-thread-message="${esc(item.id)}" ${index===messages.length-1||open.has(item.id)?'open':''}><summary><span class="sender-detail">${avatar(item)}<span><strong>${item.sent?'Tu':esc(item.sender)}</strong><span class="address">${esc(item.sender_email)}</span><small>${item.sent?'Risposta inviata':esc(item.preview.slice(0,90))}</small></span><time>${dateLabel(item.date,true)}</time></span></summary><div class="thread-message-body" data-body-for="${esc(item.id)}">${index===messages.length-1||open.has(item.id)?bodyMarkup(item):''}</div></details>`).join('')}</div><div class="reply-actions"><button data-action="reply">${icon('reply')}Rispondi</button><button data-action="reply-all">${icon('reply')}Rispondi a tutti</button><button data-action="forward">${icon('forward')}Inoltra</button><button data-action="ai-reply">${icon('sparkle')}Aiutami a rispondere</button></div><div id="inline-composer"></div>`}</article>`);
+  const peer=S.thread.findLast(message=>!message.sent)||m,peerEmail=(peer.sender_email||'').toLowerCase(),vip=(S.state.vips||[]).includes(peerEmail);
+  const suggestions=S.suggestions.get(peer.id);
+  morphChildren(panel,`<div class="reading-toolbar"><button class="icon-button back-button" data-action="back" aria-label="Torna alla lista">${icon('back')}</button><button class="icon-button ${m.pinned?'is-active':''}" data-action="pin" aria-label="${m.pinned?'Rimuovi pin':'Fissa in alto'}" title="${m.pinned?'Rimuovi pin':'Fissa in alto'}">${icon('pin')}</button><button class="icon-button" data-action="archive" aria-label="${m.archived?'Sposta in inbox':'Archivia'}" title="Archivia">${icon('archive')}</button><button class="icon-button" data-action="trash" aria-label="Elimina conversazione" title="Sposta nel cestino (Backspace / Canc)" aria-keyshortcuts="Backspace Delete">${icon('trash')}</button><button class="icon-button" data-action="snooze" aria-label="Posticipa" title="Posticipa">${icon('clock')}</button><button class="icon-button" data-action="read" aria-label="${m.read?'Segna da leggere':'Segna come letta'}">${icon('mail')}</button><button class="icon-button ${m.starred?'is-active':''}" data-action="star" aria-label="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'}" title="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'} (P)" aria-keyshortcuts="P">${icon('star')}</button>${peerEmail&&!peer.sent?`<span class="separator"></span><button class="icon-button ${vip?'is-active':''}" data-action="vip" data-sender="${esc(peerEmail)}" aria-label="${vip?'Rimuovi il mittente dai VIP':'Segna il mittente come VIP'}" title="${vip?'Rimuovi dai VIP':'Mittente VIP: notifiche sempre'}">${icon('crown')}</button><button class="icon-button" data-action="block-sender" data-sender="${esc(peerEmail)}" aria-label="Blocca il mittente" title="Blocca il mittente">${icon('ban')}</button>`:''}<div class="right"><span class="dot" style="background:${accountColor(m.account_id)}"></span>${esc(S.state.accounts.find(a=>a.id===m.account_id)?.name||'Account')}</div></div><article class="mail-content"><select class="category-select" id="message-category" aria-label="Categoria della email">${Object.entries(categoryNames).map(([key,name])=>`<option value="${key}" ${key===m.category?'selected':''}>${name}</option>`).join('')}</select>${peer.unsubscribe?`<button class="unsubscribe-button" data-action="unsubscribe" data-message-id="${esc(peer.id)}">${icon('ban')}Disiscriviti</button>`:''}<h2>${esc(subjectCore(m.subject))}</h2>${downloading?`<div class="download-status" role="status">${icon('refresh','spinner')}Scarico la conversazione e le tue risposte…</div>`:''}${S.threadSync.error?`<div class="error-banner">${esc(S.threadSync.error)}</div>`:''}${S.loadingMessage?skeleton(7,'reader','Carico il messaggio…'):`<section class="ai-summary"><div class="ai-summary-title">${icon('sparkle')}${analysis?'Il punto, secondo Milo':'Milo AI'}<button data-action="analyze">${analysis?'Rianalizza':'Analizza'}${icon('arrow')}</button></div><div id="analysis-content">${S.analyzing?skeleton(3,'block','Analisi in corso…'):`<p>${analysis?esc(analysis.summary):'Sintesi, cose da fare e priorità della conversazione.'}</p>${analysis?.action_items?.length?`<ul>${analysis.action_items.map(item=>`<li>${esc(item)}</li>`).join('')}</ul>`:''}`}</div></section><div class="thread-messages">${messages.map((item,index)=>`<details class="thread-message ${item.sent?'sent-message':''}" data-thread-message="${esc(item.id)}" ${index===messages.length-1||open.has(item.id)?'open':''}><summary><span class="sender-detail">${avatar(item)}<span><strong>${item.sent?'Tu':esc(item.sender)}</strong><span class="address">${esc(item.sender_email)}</span><small>${item.sent?'Risposta inviata':esc(item.preview.slice(0,90))}</small></span><time>${dateLabel(item.date,true)}</time></span></summary><div class="thread-message-body" data-body-for="${esc(item.id)}">${index===messages.length-1||open.has(item.id)?bodyMarkup(item):''}</div></details>`).join('')}</div><div class="reply-actions"><button data-action="reply">${icon('reply')}Rispondi</button><button data-action="reply-all">${icon('reply')}Rispondi a tutti</button><button data-action="forward">${icon('forward')}Inoltra</button><button data-action="ai-reply">${icon('sparkle')}Aiutami a rispondere</button></div>${peer.sent?'':`<div class="quick-replies">${S.suggesting===peer.id?skeleton(1,'block','Milo prepara le risposte…'):suggestions?suggestions.map((reply,index)=>`<button class="quick-reply" data-quick-reply="${index}">${esc(reply)}</button>`).join(''):`<button class="quick-reply ghost" data-action="suggest">${icon('sparkle')}Suggerisci risposte rapide</button>`}</div>`}<div id="inline-composer"></div>`}</article>`);
   fitFrames(panel);
   for(const item of messages)if((item.id===messages.at(-1)?.id||open.has(item.id))&&!item.body_loaded)ensureBody(item.id).catch(()=>{});
   if(S.compose?.inline&&S.selected&&S.compose.thread_key===threadKey(S.selected)){renderInlineComposer(editor);if(editor&&editor.contains(active)){active.focus({preventScroll:true});if(caret)active.setSelectionRange(...caret);}}
@@ -257,7 +276,7 @@ function listPath(query=currentQuery()){
   const params=new URLSearchParams({view:query.view,search:query.search});
   if(query.category&&query.view==='inbox')params.set('category',query.category);
   if(query.account)params.set('account',query.account);
-  return query.view==='drafts'?'/drafts':'/messages?'+params;
+  return query.view==='drafts'?'/drafts':query.view==='todo'?'/todos':query.view==='screener'?'/screener':'/messages?'+params;
 }
 function applyState(state){
   const counts=S.optimistic.size?S.state.counts:state.counts;S.state={...state,counts};
@@ -273,10 +292,11 @@ function paintLocal(){
     const drafts=new Map((S.cachedDrafts||[]).map(d=>[d.id,d]));
     for(const draft of S.pendingDrafts.values())drafts.set(draft.id,{...draft,pending:true});
     S.drafts=[...drafts.values()].filter(d=>!S.discardedDrafts.has(d.id));S.messages=[];
-  }else S.messages=replica.select(currentQuery(),listPath(),S.optimistic);
-  S.loadingList=S.view!=='drafts'&&!replica.available;
-  const listData=S.view==='drafts'?S.drafts:S.messages;
-  const newListSignature=JSON.stringify([S.view,S.account,S.category,S.search,listData.map(m=>[m.id,m.read,m.starred,m.pinned,m.preview,m.subject,m.analyzed_count,m.pending,m.to,m.body?.slice(0,50)])]);
+  }else if(S.view==='todo'||S.view==='screener')S.messages=[];
+  else S.messages=replica.select(currentQuery(),listPath(),S.optimistic,new Set(S.state.screener?.enabled?S.state.screener.pending:[]));
+  S.loadingList=S.view==='todo'?!S.todos:S.view==='screener'?!S.screening:S.view!=='drafts'&&!replica.available;
+  const listData=S.view==='drafts'?S.drafts:S.view==='todo'?S.todos||[]:S.view==='screener'?S.screening||[]:S.messages;
+  const newListSignature=JSON.stringify([S.view,S.account,S.category,S.search,listData.map(m=>[m.id,m.read,m.starred,m.pinned,m.preview,m.subject,m.analyzed_count,m.pending,m.to,m.body?.slice(0,50),m.scheduled?.send_at,m.scheduled?.error,m.text,m.count])]);
   if(newListSignature!==S._lastListSignature){
     S._lastListSignature=newListSignature;
     renderList();
@@ -287,6 +307,7 @@ function paintLocal(){
     S._lastChromeSignature=newChromeSignature;
     renderChrome();
   }
+  notifyNew();
   if(S.selected){const latest=replica.find(threadKey(S.selected));const fields=['subject','sender','sender_email','preview','date','read','starred','archived','pinned','category','message_count','analyzed_count'];if(latest&&!latest.deleted&&fields.some(field=>latest[field]!==S.selected[field])){S.selected={...S.selected,...Object.fromEntries(fields.map(field=>[field,latest[field]]))};renderReading();}}
 }
 
@@ -325,6 +346,8 @@ function revalidateView(query=currentQuery()){
       if(!S.status?.authenticated)return;
       if(started===replica.revision&&ticket>=(S.stateTicket||0)){S.stateTicket=ticket;applyState(state);}
       if(query.view==='drafts'){if(started===replica.revision)S.cachedDrafts=list.drafts;}
+      else if(query.view==='todo')S.todos=list.todos;
+      else if(query.view==='screener')S.screening=list.senders;
       else{replica.merge(list.messages,query.view,started,ticket);replica.rememberQuery(path,list.messages);}
       paintLocal();
     }catch(error){
@@ -400,7 +423,7 @@ const bodyRequests=new Map();
 function bodyPath(id){return '/messages/'+encodeURIComponent(id)+(S.images?'?load_images=true':'');}
 function bodyMarkup(item){
   if(!item.body_loaded)return item.body_error?`<div class="offline-note">${esc(item.body_error)}</div><button class="secondary" data-download-body="${esc(item.id)}">Riprova</button>`:skeleton(3,'message-body','Scarico il messaggio…');
-  return `${item.remote_images&&!S.images?'<button class="image-permission" data-action="load-images">Carica immagini esterne</button>':''}${item.html?`<iframe class="email-html" data-frame-key="${esc(frameKey(item))}"${frameHeights.has(frameKey(item))?` style="height:${frameHeights.get(frameKey(item))}px"`:''} title="Contenuto di ${esc(item.subject)}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc="${esc(htmlDocument(item.html))}"></iframe>`:quotedText(item.body)}${item.attachments?.length?`<div class="attachments">${item.attachments.map(a=>`<a class="attachment" href="/api/messages/${encodeURIComponent(item.id)}/attachments/${a.index}">${icon('paperclip')}${esc(a.name)}</a>`).join('')}</div>`:''}`;
+  return `${item.remote_images&&!S.images?'<button class="image-permission" data-action="load-images">Carica immagini esterne</button>':''}${item.html?`<iframe class="email-html" data-frame-key="${esc(frameKey(item))}"${frameHeights.has(frameKey(item))?` style="height:${frameHeights.get(frameKey(item))}px"`:''} title="Contenuto di ${esc(item.subject)}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc="${esc(htmlDocument(item.html))}"></iframe>`:quotedText(item.body)}${item.attachments?.length?`<div class="attachments">${item.attachments.map(a=>/^image\/(png|jpeg|gif|webp)$|^application\/pdf$/.test(a.type||'')?`<button class="attachment" data-preview-message="${esc(item.id)}" data-preview-index="${a.index}" data-preview-type="${esc(a.type)}" data-preview-name="${esc(a.name)}">${icon('paperclip')}${esc(a.name)}</button>`:`<a class="attachment" href="/api/messages/${encodeURIComponent(item.id)}/attachments/${a.index}">${icon('paperclip')}${esc(a.name)}</a>`).join('')}</div>`:''}`;
 }
 function displayBody(item){
   const slot=[...document.querySelectorAll('[data-body-for]')].find(el=>el.dataset.bodyFor===item.id);
@@ -546,22 +569,28 @@ async function savePreference(setting,body,account_id=null){
 
 function showSettings(tab=S.settingsTab) {
   S.settingsTab=tab;
-  const tabs=`<div class="modal-tabs">${[['accounts','Account'],['identity','Identità'],['ai','Milo AI'],['rules','Filtri'],['appearance','Aspetto'],['devices','Dispositivi']].map(([id,name])=>`<button data-settings-tab="${id}" class="${id===tab?'active':''}">${name}</button>`).join('')}</div>`;
+  const tabs=`<div class="modal-tabs">${[['accounts','Account'],['identity','Identità'],['compose','Firme'],['ai','Milo AI'],['rules','Filtri'],['notifications','Notifiche'],['appearance','Aspetto'],['devices','Dispositivi']].map(([id,name])=>`<button data-settings-tab="${id}" class="${id===tab?'active':''}">${name}</button>`).join('')}</div>`;
   let body='';
   if(tab==='accounts') {
     body=`<p>Collegali una volta. Gli account sono conservati sul tuo servizio Milo e disponibili agli altri dispositivi.</p>${S.state.accounts.map(a=>`<div class="settings-account"><span class="dot" style="background:${accountColor(a.id)}"></span><div><strong>${esc(a.name)}</strong><small>${esc(a.email)}</small></div><span class="health ${a.error?'error':''}">${!a.enabled?'In pausa':a.error?'Da controllare':a.last_sync?'Sincronizzato':'In attesa'}</span><button class="secondary" data-edit-account="${esc(a.id)}">Gestisci</button></div>${a.error?`<p class="form-error">${esc(a.error)}</p>`:''}`).join('')}<div class="form-actions"><button class="primary" data-action="add-account">${icon('plus')}Collega un account</button></div>${S.state.pending?.length?`<div class="notice" style="margin-top:20px">${S.state.pending.map(p=>`${p.count} modifiche ${esc(p.kind)}: ${esc(p.error||'in attesa della prossima sincronizzazione')}`).join('<br>')}</div>`:''}`;
   } else if(tab==='identity') {
     const identity=S.state.identity||{};
     body=`<form id="identity-form"><p>Aiuta Milo a riconoscere quando si parla di te e a scrivere dalla tua prospettiva.</p><label class="field"><span>Il tuo nome</span><input name="name" value="${esc(identity.name)}" maxlength="120" placeholder="Il nome con cui ti presenti"></label><label class="field"><span>Come ti chiamano</span><input name="aliases" value="${esc((identity.aliases||[]).join(', '))}" maxlength="1600" placeholder="Nomi e soprannomi, separati da virgole"></label><label class="field"><span>Contesto su di te</span><textarea name="context" maxlength="2000" placeholder="Ruolo, team e informazioni utili per capire chi è chi">${esc(identity.context)}</textarea></label><label class="field"><span>Lingua delle risposte</span><select name="reply_language">${[['auto','Segui la conversazione'],['en','Inglese'],['it','Italiano'],['fr','Francese'],['de','Tedesco'],['es','Spagnolo'],['pt','Portoghese']].map(([value,label])=>`<option value="${value}" ${(identity.reply_language||'auto')===value?'selected':''}>${label}</option>`).join('')}</select></label><p class="fineprint">Gli indirizzi delle caselle collegate sono già riconosciuti come tuoi. Questa identità è condivisa con tutti i tuoi dispositivi.</p><div class="form-error" role="alert"></div><button class="primary" type="submit">Salva identità</button></form>`;
+  } else if(tab==='compose') {
+    const signatures=S.state.signatures||{},templates=S.state.templates||[];
+    body=`<form id="signatures-form"><p>La firma viene aggiunta ai nuovi messaggi e alle risposte della casella da cui scrivi.</p>${S.state.accounts.map(a=>`<label class="field"><span>Firma per ${esc(a.name)} · ${esc(a.email)}</span><textarea name="${esc(a.id)}" maxlength="4000" rows="3" placeholder="Nome, ruolo, contatti">${esc(signatures[a.id]||'')}</textarea></label>`).join('')}<div class="form-error" role="alert"></div><div class="form-actions"><button class="primary" type="submit">Salva firme</button></div></form><h3 class="settings-section">Risposte salvate</h3><p>Testi che usi spesso, da inserire nel messaggio con un clic.</p>${templates.map((template,index)=>`<div class="rule-row"><div><strong>${esc(template.name)}</strong>${esc(template.body.slice(0,120))}</div><button class="icon-button" data-delete-template="${index}" aria-label="Elimina risposta salvata">${icon('trash')}</button></div>`).join('')}<form id="template-form" style="margin-top:16px"><label class="field"><span>Nome</span><input name="name" maxlength="80" required placeholder="Grazie, ti aggiorno"></label><label class="field"><span>Testo</span><textarea name="body" maxlength="8000" required rows="4"></textarea></label><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="submit">Aggiungi risposta</button></div></form>`;
+  } else if(tab==='notifications') {
+    const settings=notificationSettings(),supported='Notification' in window,permission=supported?Notification.permission:'denied';
+    body=`<form id="notifications-form"><p>Le notifiche arrivano su questo dispositivo mentre Milo è aperto, anche in secondo piano.</p>${!supported?'<div class="notice">Questo browser non supporta le notifiche.</div>':permission==='denied'?'<div class="notice">Le notifiche sono bloccate dal browser per Milo. Riattivale dalle impostazioni del sito.</div>':''}<label class="field"><span>Notificami</span><select name="mode">${[['off','Mai'],['important','Persone e mittenti VIP'],['all','Tutte le nuove email']].map(([value,label])=>`<option value="${value}" ${settings.mode===value?'selected':''}>${label}</option>`).join('')}</select></label><label class="check-field"><input type="checkbox" name="morning" ${settings.morning?'checked':''}><span>Il punto di oggi: un recap della tua inbox ogni mattina dalle 8.</span></label><div class="form-error" role="alert"></div><div class="form-actions"><button class="primary" type="submit">Salva notifiche</button></div></form>`;
   } else if(tab==='appearance') {
     body=`<form id="appearance-form"><p>Scegli come vedere Milo. La preferenza è condivisa con i tuoi dispositivi.</p><label class="field"><span>Tema</span><select name="theme">${[['system','Segui il sistema'],['light','Chiaro'],['dark','Scuro']].map(([value,label])=>`<option value="${value}" ${S.theme===value?'selected':''}>${label}</option>`).join('')}</select></label><div class="notice">Puoi scegliere il colore di ogni casella da Account → Gestisci.</div><div class="form-error" role="alert"></div><button class="primary" type="submit">Salva aspetto</button></form>`;
   } else if(tab==='ai') {
     const ai=S.state.ai;
     body=`<form id="ai-form"><p>Analisi, recap e risposte proposte passano da Ollama. Le risposte restano bozze da rivedere e inviare personalmente.</p><label class="field"><span>Modello Ollama</span><input name="model" value="${esc(ai.model)}" required></label><div class="notice"><strong>Mistral Large 4 usa Ollama Cloud.</strong><br>Con <code>mistral-large-4:cloud</code>, il contenuto delle email selezionate viene elaborato nel cloud di Ollama. Puoi scegliere un modello locale già installato.</div><label class="check-field"><input type="checkbox" name="cloud_consent" ${ai.cloud_consent?'checked':''}><span>Consento l’elaborazione delle email con modelli cloud.</span></label><label class="check-field"><input type="checkbox" name="automatic" ${ai.automatic?'checked':''}><span>Analizza automaticamente le nuove email e organizza l’inbox in Persone, Notifiche e Newsletter.</span></label>${S.state.ai_error?`<p class="form-error">${esc(S.state.ai_error)}</p>`:''}<div class="form-actions"><button class="primary" type="submit">Salva preferenze</button></div></form>`;
   } else if(tab==='rules') {
-    body=`<p>I tuoi filtri hanno precedenza sulla classificazione AI e vengono applicati anche alle email già salvate.</p>${S.state.rules.map(r=>`<div class="rule-row"><div><strong>${esc(r.name)}</strong>${esc(r.contains)} → ${categoryNames[r.category]}</div><button class="icon-button" data-delete-rule="${esc(r.id)}" aria-label="Elimina filtro">${icon('trash')}</button></div>`).join('')}<form id="rule-form" style="margin-top:22px"><div class="form-grid"><label class="field full"><span>Nome del filtro</span><input name="name" placeholder="Le notifiche di GitHub" required></label><label class="field"><span>Quando</span><select name="field"><option value="sender">Il mittente contiene</option><option value="subject">L’oggetto contiene</option><option value="body">Il testo contiene</option></select></label><label class="field"><span>Questo testo</span><input name="contains" placeholder="github.com" required></label><label class="field full"><span>Sposta nella categoria</span><select name="category">${Object.entries(categoryNames).map(([key,name])=>`<option value="${key}">${name}</option>`).join('')}</select></label></div><div class="form-actions"><button class="primary" type="submit">Crea filtro</button></div></form>`;
+    body=`<form id="screener-form" class="screener-setting"><label class="check-field"><input type="checkbox" name="enabled" ${S.state.screener?.enabled?'checked':''}><span><strong>Filtra i nuovi mittenti.</strong> Chi ti scrive per la prima volta aspetta in Nuovi mittenti finché non lo approvi. Le persone a cui hai già scritto passano sempre.</span></label><button class="secondary" type="submit">Salva</button></form><p>I tuoi filtri hanno precedenza sulla classificazione AI e vengono applicati anche alle email già salvate.</p>${S.state.rules.map(r=>`<div class="rule-row"><div><strong>${esc(r.name)}</strong>${esc(r.contains)} → ${categoryNames[r.category]}</div><button class="icon-button" data-delete-rule="${esc(r.id)}" aria-label="Elimina filtro">${icon('trash')}</button></div>`).join('')}<form id="rule-form" style="margin-top:22px"><div class="form-grid"><label class="field full"><span>Nome del filtro</span><input name="name" placeholder="Le notifiche di GitHub" required></label><label class="field"><span>Quando</span><select name="field"><option value="sender">Il mittente contiene</option><option value="subject">L’oggetto contiene</option><option value="body">Il testo contiene</option></select></label><label class="field"><span>Questo testo</span><input name="contains" placeholder="github.com" required></label><label class="field full"><span>Sposta nella categoria</span><select name="category">${Object.entries(categoryNames).map(([key,name])=>`<option value="${key}">${name}</option>`).join('')}</select></label></div><div class="form-actions"><button class="primary" type="submit">Crea filtro</button></div></form>`;
   } else {
-    body=`<p>Questa è la casa del tuo archivio. Un altro dispositivo che accede allo stesso indirizzo trova account, email, preferenze e bozze già configurati.</p><div class="notice"><strong>Indirizzo del servizio</strong><br>${esc(location.origin)}</div><p>Per accedere da iPhone servirà un indirizzo HTTPS raggiungibile dal telefono. La versione nativa iOS e le notifiche push sono i prossimi passi; questa prima versione parte da Linux.</p><div class="notice">I messaggi scaricati sono conservati nella cache privata di questo dispositivo e si possono leggere offline. L’archivio completo e gli account restano sul servizio.</div>${S.status.access==='tailscale'?'<div class="notice">Accesso privato tramite i tuoi dispositivi Tailscale autorizzati. Il dominio pubblico mostra solo la presentazione di Milo.</div>':!S.status.demo?'<div class="form-actions"><button class="secondary" data-action="logout">Esci da questo dispositivo</button></div>':''}`;
+    body=`<p>Questa è la casa del tuo archivio. Un altro dispositivo che accede allo stesso indirizzo trova account, email, preferenze e bozze già configurati.</p><div class="notice"><strong>Indirizzo del servizio</strong><br>${esc(location.origin)}</div><p>Per accedere da iPhone servirà un indirizzo HTTPS raggiungibile dal telefono. La versione nativa iOS e le notifiche push sono i prossimi passi; questa prima versione parte da Linux.</p><div class="notice">I messaggi scaricati sono conservati nella cache privata di questo dispositivo e si possono leggere offline. L’archivio completo e gli account restano sul servizio.</div><h3 class="settings-section">Backup della configurazione</h3><p>Identità, firme, risposte salvate, filtri, mittenti, bozze, cose da fare e il lavoro di Milo sulle email (categorie, analisi, pin). Le password non sono incluse: dopo un ripristino ricollega le caselle e la posta torna dai provider.</p><div class="form-actions backup-actions"><a class="secondary" href="/api/backup" download="milo-configurazione.json">${icon('download')}Scarica configurazione</a></div><form id="restore-form"><label class="field"><span>Ripristina da un file di configurazione</span><input type="file" name="file" accept=".json,application/json" required></label><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="submit">Ripristina</button></div></form>${S.status.access==='tailscale'?'<div class="notice">Accesso privato tramite i tuoi dispositivi Tailscale autorizzati. Il dominio pubblico mostra solo la presentazione di Milo.</div>':!S.status.demo?'<div class="form-actions"><button class="secondary" data-action="logout">Esci da questo dispositivo</button></div>':''}`;
   }
   showModal('Il tuo Milo',tabs+body);
 }
@@ -591,12 +620,12 @@ function showAccountSettings(accountId) {
   if(!a) return;
   const imap=a.provider==='imap';
   const connection=imap?`<div class="form-grid"><label class="field"><span>Nome utente</span><input name="username" value="${esc(a.username)}" required></label><label class="field"><span>Nuova password per app</span><input name="password" type="password" autocomplete="new-password" placeholder="Lascia vuoto per conservarla"></label><label class="field"><span>Server IMAP</span><input name="imap_host" value="${esc(a.imap_host)}" required></label><label class="field"><span>Porta IMAP (TLS)</span><input name="imap_port" type="number" value="${a.imap_port}" min="1" max="65535" required></label><label class="field"><span>Server SMTP</span><input name="smtp_host" value="${esc(a.smtp_host)}" required></label><label class="field"><span>Porta SMTP</span><input name="smtp_port" type="number" value="${a.smtp_port}" min="1" max="65535" required></label><label class="field full"><span>Sicurezza SMTP</span><select name="smtp_security"><option value="tls" ${a.smtp_security==='tls'?'selected':''}>TLS</option><option value="starttls" ${a.smtp_security==='starttls'?'selected':''}>STARTTLS</option></select></label></div>`:`<p>L’accesso Google è conservato sul servizio. Se Google lo revoca o scade, ricollega questa casella.</p><button class="secondary" type="button" data-action="google-connect" data-reconnect-account="${esc(a.id)}">Ricollega ${esc(a.email)}</button>`;
-  showModal('Gestisci account',`<form id="account-settings-form" data-account-id="${esc(a.id)}"><div class="notice">${esc(a.email)} · ${imap?'IMAP':'Google'}</div><label class="field"><span>Nome dell’account</span><input name="name" value="${esc(a.name)}" required maxlength="80"></label><label class="field color-field"><span>Colore della casella</span><input name="color" type="color" value="${accountColor(a.id)}"></label><label class="check-field"><input type="checkbox" name="enabled" ${a.enabled?'checked':''}><span>Sincronizza questa casella. In pausa, le email e le bozze salvate restano disponibili; le modifiche aspettano la ripresa.</span></label>${connection}<div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="close-modal">Annulla</button><button class="primary" type="submit">Salva account</button></div></form>`);
+  showModal('Gestisci account',`<form id="account-settings-form" data-account-id="${esc(a.id)}"><div class="notice">${esc(a.email)} · ${imap?'IMAP':'Google'}</div><label class="field"><span>Nome dell’account</span><input name="name" value="${esc(a.name)}" required maxlength="80"></label><label class="field color-field"><span>Colore della casella</span><input name="color" type="color" value="${accountColor(a.id)}"></label><label class="check-field"><input type="checkbox" name="enabled" ${a.enabled?'checked':''}><span>Sincronizza questa casella. In pausa, le email e le bozze salvate restano disponibili; le modifiche aspettano la ripresa.</span></label>${connection}<div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary danger remove-account" type="button" data-remove-account="${esc(a.id)}">Rimuovi account</button><button class="secondary" type="button" data-action="close-modal">Annulla</button><button class="primary" type="submit">Salva account</button></div></form>`);
 }
 
 function composeMarkup(draft,inline=false) {
   return `<form id="compose-form" class="${inline?'inline-compose-form':''}"><div class="compose-heading"><h3>${draft.mode==='forward'?'Inoltra':['reply','reply_all'].includes(draft.mode)?draft.mode==='reply_all'?'Rispondi a tutti':'Rispondi':'Nuovo messaggio'}</h3>${inline?`<button class="icon-button" type="button" data-action="close-compose" aria-label="Chiudi" title="Chiudi bozza">${icon('close')}</button>`:''}</div><label class="field"><span>Da</span><select name="account_id">${S.state.accounts.map(a=>`<option value="${esc(a.id)}" ${draft.account_id===a.id?'selected':''}>${esc(a.name)} · ${esc(a.email)}</option>`).join('')}</select></label><label class="field"><span>A</span><input name="to" value="${esc(draft.to)}" placeholder="nome@example.com" maxlength="2000"></label><label class="field"><span>Cc</span><input name="cc" value="${esc(draft.cc)}" placeholder="Copia conoscenza" maxlength="2000"></label><label class="field"><span>Oggetto</span><input name="subject" value="${esc(draft.subject)}" placeholder="Di cosa parliamo?" maxlength="998"></label><label class="field"><span>Messaggio</span><textarea class="composer-body" name="body" placeholder="Scrivi qui…" maxlength="1000000">
-${esc(draft.body)}</textarea></label><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="delete-draft">Elimina bozza</button><button class="secondary" type="button" data-action="save-draft">Salva bozza</button><button class="primary" type="submit">${icon('sent')}Invia messaggio</button></div><div class="draft-save-status" role="status">${S.pendingDrafts.has(draft.id)?'Salvataggio in attesa':'Le modifiche vengono salvate automaticamente.'}</div></form>`;
+${esc(draft.body)}</textarea></label><div class="compose-tools">${(S.state.templates||[]).length?`<select class="template-select" aria-label="Inserisci una risposta salvata"><option value="">Risposte salvate…</option>${S.state.templates.map((template,index)=>`<option value="${index}">${esc(template.name)}</option>`).join('')}</select>`:''}<label class="followup-field"><span>Ricordamelo se non risponde</span><select name="followup_days">${[['','mai'],['1','entro 1 giorno'],['3','entro 3 giorni'],['7','entro una settimana']].map(([value,label])=>`<option value="${value}" ${String(draft.followup_days||'')===value?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="delete-draft">Elimina bozza</button><button class="secondary" type="button" data-action="save-draft">Salva bozza</button><button class="secondary" type="button" data-action="schedule-send">${icon('clock')}Programma</button><button class="primary" type="submit">${icon('sent')}Invia messaggio</button></div><div class="draft-save-status" role="status">${S.pendingDrafts.has(draft.id)?'Salvataggio in attesa':'Le modifiche vengono salvate automaticamente.'}</div></form>`;
 }
 function renderInlineComposer(existing=null) {
   const slot=$('#inline-composer');if(!slot||!S.compose)return;
@@ -647,13 +676,17 @@ function showCompose(draft={},inline=Boolean(draft.reply_to_id||draft.context_me
     closeCompose().catch(error=>toast(error.message));
   }
   const mode=draft.reply_to_id&&(!draft.mode||draft.mode==='new')?'reply':draft.mode||'new';
-  const current={...draft,id:draft.id||crypto.randomUUID(),account_id:draft.account_id||S.state.accounts[0].id,to:draft.to||'',cc:draft.cc||'',subject:draft.subject||'',body:draft.body||'',mode,reply_to_id:draft.reply_to_id||null,context_message_id:draft.context_message_id||draft.reply_to_id||null,revision:draft.revision||Date.now(),inline:inline&&Boolean($('#inline-composer')),thread_key:S.selected?threadKey(S.selected):null};
+  const fresh=!draft.id,accountId=draft.account_id||S.state.accounts[0].id,signature=S.state.signatures?.[accountId];
+  if(fresh&&signature)draft={...draft,body:draft.mode==='forward'?`\n\n-- \n${signature}${draft.body||''}`:`${draft.body||''}\n\n-- \n${signature}`};
+  const current={...draft,id:draft.id||crypto.randomUUID(),account_id:accountId,to:draft.to||'',cc:draft.cc||'',subject:draft.subject||'',body:draft.body||'',mode,reply_to_id:draft.reply_to_id||null,context_message_id:draft.context_message_id||draft.reply_to_id||null,revision:draft.revision||Date.now(),inline:inline&&Boolean($('#inline-composer')),thread_key:S.selected?threadKey(S.selected):null};
+  current.initialBody=fresh?current.body:null;
   S.compose=current;
   if(current.inline){renderInlineComposer();$('#inline-composer').scrollIntoView({block:'nearest'});$('#inline-composer [name="body"]').focus({preventScroll:true});}
   else{showModal('Nuovo messaggio',composeMarkup(current),true);S.compose=current;}
 }
 async function openDraft(draft){
   if(S.compose)closeCompose().catch(error=>toast(error.message));
+  if(draft.scheduled&&!draft.scheduled.error){await api('/drafts/'+encodeURIComponent(draft.id)+'/schedule','DELETE');toast('Programmazione annullata: rimandalo quando sei pronto.');}
   const anchor=draft.context_message_id||draft.reply_to_id;
   if(anchor){S.view='inbox';renderShell();await selectMessage(anchor,false);showCompose(draft,true);}
   else showCompose(draft,false);
@@ -708,14 +741,122 @@ async function runAI(action,button) {
       await refresh();renderList();
     } else {
       const result=await api('/messages/'+id+'/reply','POST');
-      if(S.compose?.id===generatedDraft.id&&S.compose.revision===generatedDraft.revision&&!S.compose.body){
-        const field=$('#compose-form [name="body"]');field.value=result.body;field.dispatchEvent(new Event('input',{bubbles:true}));
+      if(S.compose?.id===generatedDraft.id&&S.compose.revision===generatedDraft.revision&&(S.compose.body||'')===(S.compose.initialBody||'')){
+        const field=$('#compose-form [name="body"]');field.value=result.body+(S.compose.initialBody||'');field.dispatchEvent(new Event('input',{bubbles:true}));
       }else if(S.compose?.id===generatedDraft.id)toast('Hai già modificato la bozza. Il tuo testo è stato conservato.');
     }
   } catch(error) { if(action==='recap') closeModal(); toast(error.message); }
   finally { if(S.compose?.id===generatedDraft?.id)$('#compose-form .reply-generation')?.remove();S.analyzing=false;if(action==='analyze')renderReading();if(button){button.disabled=false;button.classList.remove('is-loading');} }
 }
 
+function notificationSettings(){try{return {mode:'off',morning:false,...JSON.parse(localStorage.getItem('milo-notify')||'{}')};}catch{return {mode:'off',morning:false};}}
+function notifyNew(){
+  const settings=notificationSettings();
+  if(settings.mode==='off'||!('Notification' in window)||Notification.permission!=='granted'||!replica.available)return;
+  let since=Number(settings.since||Date.now()/1000);try{since=Math.max(since,Number(localStorage.getItem('milo-notified-until')||0));}catch{}
+  const vips=new Set(S.state.vips||[]),screened=new Set(S.state.screener?.enabled?S.state.screener.pending:[]);
+  const rows=replica.keys().map(id=>replica.find(id)).filter(row=>row&&row.date>since);
+  if(!rows.length)return;
+  try{localStorage.setItem('milo-notified-until',String(Math.max(...rows.map(row=>row.date))));}catch{}
+  const fresh=rows.filter(row=>{const sender=(row.sender_email||'').toLowerCase();return !row.deleted&&!row.sent&&row.has_inbox&&row.unread_count&&!screened.has(sender)&&(settings.mode==='all'||vips.has(sender)||row.category==='people');});
+  for(const row of fresh.slice(0,3)){const note=new Notification(row.sender||row.sender_email,{body:subjectCore(row.subject),tag:threadKey(row),icon:'/static/icon-192.png'});note.onclick=()=>{window.focus();selectMessage(row.id).catch(()=>{});note.close();};}
+  if(fresh.length>3)new Notification('Milo',{body:`Altre ${fresh.length-3} email nuove`,icon:'/static/icon-192.png'});
+}
+async function maybeMorningRecap(){
+  const settings=notificationSettings(),now=new Date(),today=now.toDateString();
+  if(!settings.morning||!('Notification' in window)||Notification.permission!=='granted'||now.getHours()<8)return;
+  try{if(localStorage.getItem('milo-morning')===today)return;localStorage.setItem('milo-morning',today);}catch{return;}
+  try{const recap=await api('/recap');if(recap.overview){const note=new Notification('Il punto di oggi',{body:recap.overview.slice(0,240),icon:'/static/icon-192.png'});note.onclick=()=>{window.focus();openRecap();note.close();};}}catch{}
+}
+async function bulkMutate(kind){
+  const keys=[...S.multi];S.multi.clear();
+  if(kind==='clear'||!keys.length){renderList();return;}
+  const patch={archive:{archived:true},read:{read:true},star:{starred:true}}[kind]||{},deleted=kind==='trash';
+  for(const key of keys){
+    const before=replica.find(key);if(!before)continue;
+    const operation={id:crypto.randomUUID(),key,message_id:before.id,patch,deleted};
+    await deviceCache.enqueue(operation);
+    S.optimistic.set(key,{patch:{...S.optimistic.get(key)?.patch,...patch},deleted,operationId:operation.id});
+    replica.apply(operation);adjustCounts(before,replica.find(key)||{...before,...patch},deleted);
+    if(S.selected&&threadKey(S.selected)===key&&(deleted||patch.archived)){S.selected=null;S.thread=[];S.readerAnchor=null;S.readerVersion++;$('.shell')?.classList.remove('has-selection');renderReading();}
+  }
+  S.listVersion++;paintLocal();renderList();await deviceCache.set('api:/state',S.state);
+  toast(`${keys.length} ${keys.length===1?'conversazione aggiornata':'conversazioni aggiornate'}. Milo sincronizza in background.`);flushClientQueue().catch(()=>{});
+}
+function toggleMulti(id,range=false){
+  const index=S.messages.findIndex(m=>m.id===id);if(index<0)return;
+  if(range&&S.lastMulti!=null){const [from,to]=[Math.min(S.lastMulti,index),Math.max(S.lastMulti,index)];for(const m of S.messages.slice(from,to+1))S.multi.add(threadKey(m));}
+  else{const key=threadKey(S.messages[index]);S.multi.has(key)?S.multi.delete(key):S.multi.add(key);}
+  S.lastMulti=index;renderList();
+}
+function scheduleOptions(){
+  const at=(days,hours)=>{const date=new Date();date.setDate(date.getDate()+days);date.setHours(hours,0,0,0);return date;};
+  const monday=at((8-new Date().getDay())%7||7,8),options=[[new Date(Date.now()+3600000),'Tra un’ora']];
+  if(new Date().getHours()<17)options.push([at(0,18),'Oggi alle 18']);
+  options.push([at(1,8),'Domani alle 8'],[monday,'Lunedì alle 8']);
+  return options;
+}
+async function scheduleDraft(id,sendAt,followup){
+  await api('/drafts/'+encodeURIComponent(id)+'/schedule','PUT',{send_at:sendAt,followup_days:Number(followup)||null});
+  await cachedDraftChange(id);
+}
+async function undoSend(id,draft){
+  try{await api('/drafts/'+encodeURIComponent(id)+'/schedule','DELETE');}
+  catch(error){toast(error.status===409?'Troppo tardi: il messaggio è già partito.':error.message);return;}
+  await openDraft({...draft,scheduled:null});toast('Invio annullato. Il messaggio è di nuovo aperto.');
+}
+function showPalette(){
+  const go=view=>()=>document.querySelector(`.nav-button[data-view="${view}"]`)?.click();
+  const commands=[['Nuovo messaggio','C',()=>showCompose()],['Smart inbox','',go('inbox')],['Da fare','',go('todo')],
+    ...(S.state.screener?.enabled?[['Nuovi mittenti','',go('screener')]]:[]),['Preferiti','',go('starred')],['Bozze','',go('drafts')],['Posta inviata','',go('sent')],['Per dopo','',go('snoozed')],['Archivio','',go('archive')],
+    ['Chiedi a Milo','',()=>showAsk()],['Recap dell’inbox','',()=>openRecap()],['Gestisci i mittenti di newsletter','',()=>showNewsletterSenders()],
+    ['Sincronizza ora','',()=>document.querySelector('[data-action="sync"]')?.click()],['Impostazioni','',()=>showSettings('accounts')],['Firme e risposte salvate','',()=>showSettings('compose')],
+    ['Notifiche','',()=>showSettings('notifications')],['Scorciatoie da tastiera','?',()=>showShortcuts()],
+    ['Tema chiaro','',()=>{applyTheme('light');savePreference('appearance',{theme:'light'}).catch(()=>{});}],['Tema scuro','',()=>{applyTheme('dark');savePreference('appearance',{theme:'dark'}).catch(()=>{});}],
+    ...S.state.accounts.map(a=>[`Mostra solo ${a.name}`,'',()=>document.querySelector(`[data-account="${CSS.escape(a.id)}"]`)?.click()]),['Mostra tutti gli account','',()=>document.querySelector('[data-account=""]')?.click()]];
+  S.palette={commands,items:commands,active:0};
+  showModal('Comandi',`<input id="palette-input" class="palette-input" placeholder="Cerca un comando o scrivi per cercare nella posta" autocomplete="off" aria-label="Comando"><div id="palette-results" class="palette-results" role="listbox"></div>`);
+  renderPalette();setTimeout(()=>$('#palette-input')?.focus(),0);
+}
+function renderPalette(){
+  const box=$('#palette-results');if(!box||!S.palette)return;
+  const term=($('#palette-input')?.value||'').trim().toLowerCase();
+  const items=S.palette.commands.filter(([label])=>!term||label.toLowerCase().includes(term));
+  if(term)items.push([`Cerca «${term}» nella posta`,'/',()=>{const input=$('#search-input');if(input){input.value=term;input.dispatchEvent(new Event('input',{bubbles:true}));}}]);
+  S.palette.items=items;S.palette.active=Math.min(S.palette.active,Math.max(0,items.length-1));
+  box.innerHTML=items.map(([label,key],index)=>`<button class="palette-item ${index===S.palette.active?'active':''}" data-palette="${index}" role="option" aria-selected="${index===S.palette.active}"><span>${esc(label)}</span>${key?`<kbd>${esc(key)}</kbd>`:''}</button>`).join('');
+  box.querySelector('.active')?.scrollIntoView({block:'nearest'});
+}
+function runPalette(index){const item=S.palette?.items[index];if(!item)return;S.palette=null;closeModal();item[2]();}
+function showShortcuts(){
+  const rows=[['C','Nuovo messaggio'],['/','Cerca'],['Ctrl+K','Comandi'],['J / ↓','Conversazione successiva'],['K / ↑','Conversazione precedente'],['R','Rispondi'],['A','Rispondi a tutti'],['F','Inoltra'],['E','Archivia'],['U','Segna come letta o da leggere'],['P / S','Preferito'],['# / Canc','Elimina'],['X','Seleziona per azioni multiple'],['Ctrl+clic, Maiusc+clic','Seleziona più conversazioni'],['Esc','Chiudi o annulla la selezione'],['?','Questo elenco']];
+  showModal('Scorciatoie da tastiera',`<div class="shortcut-list">${rows.map(([key,label])=>`<div><kbd>${esc(key)}</kbd><span>${esc(label)}</span></div>`).join('')}</div>`);
+}
+function showAsk(){
+  showModal('Chiedi a Milo',`<form id="ask-form"><p>Fai una domanda sulla tua posta. Milo cerca le email pertinenti e risponde citandole.</p><label class="field"><span>Domanda</span><textarea name="question" required minlength="3" maxlength="500" rows="2" placeholder="Quando mi ha mandato Marco il contratto?"></textarea></label><div class="form-error" role="alert"></div><div class="form-actions"><button class="primary" type="submit">${icon('ask')}Chiedi</button></div></form><div id="ask-result" aria-live="polite"></div>`,true);
+}
+async function showNewsletterSenders(){
+  showModal('Mittenti di newsletter',skeleton(6,'block','Carico i mittenti…'),true);
+  try{
+    const {senders}=await api('/senders/newsletters');if(!$('#overlay .modal'))return;
+    $('#overlay .modal').querySelector('.skeleton-group')?.remove();
+    $('#overlay .modal').insertAdjacentHTML('beforeend',senders.length?`<p>Disiscriviti da chi non leggi più e fai pulizia in un colpo solo.</p><div class="sender-list">${senders.map(s=>`<div class="sender-row" data-sender-row="${esc(s.email)}"><div><strong>${esc(s.name||s.email)}</strong><small>${esc(s.email)} · ${s.threads} conversazioni${s.unread?` · ${s.unread} da leggere`:''} · ultima ${esc(dateLabel(s.last,true))}</small></div><div class="sender-actions">${s.unsubscribed?'<span class="sender-done">Disiscritto</span>':`<button class="secondary" data-unsubscribe-message="${esc(s.sample_id)}">Disiscriviti</button>`}<button class="secondary" data-sender-bulk="archive" data-sender="${esc(s.email)}" ${s.inbox?'':'disabled'}>Archivia tutto</button><button class="secondary danger" data-sender-bulk="trash" data-sender="${esc(s.email)}">Elimina tutto</button></div></div>`).join('')}</div>`:emptyMarkup('filter','Nessuna newsletter.','Le email riconosciute come newsletter appariranno qui raggruppate per mittente.'));
+  }catch(error){closeModal();toast(error.message);}
+}
+async function unsubscribeFrom(messageId,button){
+  if(button){button.disabled=true;button.classList.add('is-loading');}
+  try{
+    const result=await api('/messages/'+encodeURIComponent(messageId)+'/unsubscribe','POST');
+    if(result.method==='link'){window.open(result.url,'_blank','noopener,noreferrer');toast('Ho aperto la pagina di disiscrizione del mittente.');}
+    else toast(result.method==='email'?'Richiesta di disiscrizione inviata via email.':'Disiscrizione completata.');
+    if(button)button.outerHTML='<span class="sender-done">Disiscritto</span>';
+  }finally{if(button?.isConnected){button.disabled=false;button.classList.remove('is-loading');}}
+}
+async function startReply(all=false,body=''){
+  const source=S.thread.findLast(message=>!message.sent)||S.selected;if(!source)return;
+  const version=S.readerVersion,m=await recipientContext(source);
+  if(version===S.readerVersion)showCompose({account_id:m.account_id,...replyRecipients(m,all),mode:all?'reply_all':'reply',subject:'Re: '+subjectCore(m.subject),reply_to_id:m.id,body});
+}
 function replyRecipients(message,all=false){
   const mine=new Set(S.state.accounts.map(a=>a.email.toLowerCase())),seen=new Set(mine);
   const unique=addresses=>addresses.filter(address=>{const email=address.email?.trim();if(!email||!email.includes('@')||seen.has(email.toLowerCase()))return false;seen.add(email.toLowerCase());return true;}).map(address=>address.email);
@@ -735,7 +876,57 @@ document.addEventListener('click', async event => {
     }
     if('category' in target.dataset) { if(S.compose)closeCompose().catch(error=>toast(error.message));S.category=target.dataset.category; S.selected=null; S.loadingList=true;renderShell();await refresh(true,true);renderList();return; }
     if('account' in target.dataset) { if(S.compose)closeCompose().catch(error=>toast(error.message));S.account=target.dataset.account;S.menu=false;S.readerVersion++;S.readerAnchor=null;S.selected=null;S.thread=[];S.loadingList=true;renderShell();await refresh(true,true);renderList();return; }
+    if(target.dataset.message&&target.classList.contains('message-row')&&(event.ctrlKey||event.metaKey||event.shiftKey)){toggleMulti(target.dataset.message,event.shiftKey);return;}
     if(target.dataset.message) { if(S.compose)closeCompose().catch(error=>toast(error.message));await selectMessage(target.dataset.message); return; }
+    if(target.dataset.bulk){await bulkMutate(target.dataset.bulk);return;}
+    if(target.dataset.palette){runPalette(Number(target.dataset.palette));return;}
+    if(target.dataset.todoDone){
+      const id=target.dataset.todoDone;S.todos=(S.todos||[]).filter(t=>t.id!==id);S.state.counts.todo=Math.max(0,(S.state.counts.todo||1)-1);renderList();renderChrome();
+      try{await api('/todos/'+encodeURIComponent(id),'PATCH',{done:true});}catch(error){revalidateView();throw error;}
+      toast('Fatto.',{label:'Annulla',run:()=>api('/todos/'+encodeURIComponent(id),'PATCH',{done:false}).then(()=>revalidateView()).catch(error=>toast(error.message))});return;
+    }
+    if(target.dataset.senderStatus){
+      const email=target.dataset.sender,status=target.dataset.senderStatus;await api('/senders/'+encodeURIComponent(email),'PATCH',{status});
+      S.screening=(S.screening||[]).filter(item=>item.email!==email);if(S.state.screener)S.state.screener.pending=(S.state.screener.pending||[]).filter(item=>item!==email);
+      S.state.counts.screener=Math.max(0,(S.state.counts.screener||1)-1);renderList();renderChrome();
+      toast(status==='approved'?'Mittente approvato: lo trovi nella Smart inbox.':'Mittente bloccato: le sue email vanno in archivio.');revalidateView();return;
+    }
+    if(target.dataset.senderBulk){
+      const action=target.dataset.senderBulk;target.disabled=true;
+      const result=await api('/senders/'+encodeURIComponent(target.dataset.sender)+'/action','POST',{action});
+      if(action==='trash')target.closest('.sender-row')?.remove();
+      toast(`${result.conversations} ${result.conversations===1?'conversazione':'conversazioni'} ${action==='trash'?'nel cestino':'archiviate'}. Milo sincronizza in background.`);revalidateView();return;
+    }
+    if(target.dataset.unsubscribeMessage){await unsubscribeFrom(target.dataset.unsubscribeMessage,target);return;}
+    if(target.dataset.quickReply){const peer=S.thread.findLast(message=>!message.sent)||S.selected;await startReply(false,S.suggestions.get(peer?.id)?.[Number(target.dataset.quickReply)]||'');return;}
+    if(target.dataset.previewMessage){
+      const url=`/api/messages/${encodeURIComponent(target.dataset.previewMessage)}/attachments/${encodeURIComponent(target.dataset.previewIndex)}`,name=target.dataset.previewName,pdf=target.dataset.previewType==='application/pdf';
+      showModal(name,`<div class="attachment-preview">${pdf?`<iframe src="${url}?preview=true" title="${esc(name)}"></iframe>`:`<img src="${url}" alt="${esc(name)}">`}</div><div class="form-actions"><a class="secondary" href="${url}" download="${esc(name)}">${icon('download')}Scarica</a></div>`,true);return;
+    }
+    if(target.dataset.deleteTemplate){
+      const templates=(S.state.templates||[]).filter((_,index)=>index!==Number(target.dataset.deleteTemplate));
+      S.state.templates=(await api('/settings/templates','PUT',{templates})).templates;showSettings('compose');return;
+    }
+    if(target.dataset.removeAccount){
+      const a=S.state.accounts.find(account=>account.id===target.dataset.removeAccount);if(!a)return;
+      showModal('Rimuovere l’account?',`<p>Milo smette di sincronizzare <strong>${esc(a.email)}</strong> e cancella dal tuo archivio le sue email, le bozze e le cose da fare collegate. La posta resta intatta sul provider: puoi ricollegare la casella quando vuoi.</p><div class="form-actions"><button class="secondary" data-action="close-modal">Annulla</button><button class="primary danger-solid" data-confirm-remove="${esc(a.id)}">Rimuovi account</button></div>`);return;
+    }
+    if(target.dataset.confirmRemove){
+      const id=target.dataset.confirmRemove;target.disabled=true;await api('/accounts/'+encodeURIComponent(id),'DELETE');
+      for(const key of replica.keys())if(replica.find(key)?.account_id===id)replica.remove(key);
+      S.state.accounts=S.state.accounts.filter(a=>a.id!==id);if(S.account===id)S.account='';
+      if(S.selected?.account_id===id){S.selected=null;S.thread=[];S.readerAnchor=null;S.readerVersion++;}
+      closeModal();renderShell();await refresh();toast('Account rimosso. Milo libera lo spazio in background.');return;
+    }
+    if(target.dataset.confirmBlock){
+      await api('/senders/'+encodeURIComponent(target.dataset.confirmBlock),'PATCH',{status:'blocked'});closeModal();
+      S.selected=null;S.thread=[];S.readerAnchor=null;S.readerVersion++;$('.shell')?.classList.remove('has-selection');renderReading();
+      toast('Mittente bloccato: le sue email vanno in archivio, anche quelle future.');await revalidateView();return;
+    }
+    if(target.dataset.scheduleAt){
+      const at=Number(target.dataset.scheduleAt);await scheduleDraft(S.scheduling.id,at,S.scheduling.followup);S.scheduling=null;closeModal();
+      toast('Invio programmato per '+dateLabel(at,true)+'.');await refresh();renderList();return;
+    }
     if(target.dataset.downloadBody){await ensureBody(target.dataset.downloadBody);return;}
     if(target.dataset.draft) { await openDraft(S.drafts.find(d=>d.id===target.dataset.draft)); return; }
     if(target.dataset.editAccount) { showAccountSettings(target.dataset.editAccount);return; }
@@ -744,6 +935,34 @@ document.addEventListener('click', async event => {
     if(target.dataset.recapMessage) { closeModal();await selectMessage(target.dataset.recapMessage);return; }
     const action=target.dataset.action;
     if(['recap','analyze','ai-reply'].includes(action)) { await runAI(action,target);return; }
+    if(action==='palette'){showPalette();return;}
+    if(action==='ask'){showAsk();return;}
+    if(action==='newsletter-senders'){await showNewsletterSenders();return;}
+    if(action==='unsubscribe'){
+      await unsubscribeFrom(target.dataset.messageId,null);
+      S.thread=S.thread.map(message=>message.id===target.dataset.messageId?{...message,unsubscribe:null}:message);renderReading();return;
+    }
+    if(action==='vip'){
+      const email=target.dataset.sender,vip=!(S.state.vips||[]).includes(email);await api('/senders/'+encodeURIComponent(email),'PATCH',{vip});
+      S.state.vips=vip?[...(S.state.vips||[]),email]:(S.state.vips||[]).filter(item=>item!==email);renderReading();
+      toast(vip?'Mittente VIP: ti avviso sempre quando scrive.':'Mittente rimosso dai VIP.');return;
+    }
+    if(action==='block-sender'){
+      showModal('Bloccare il mittente?',`<p>Le email di <strong>${esc(target.dataset.sender)}</strong> vengono archiviate, anche quelle che arriveranno. Puoi sempre ritrovarle in Archivio.</p><div class="form-actions"><button class="secondary" data-action="close-modal">Annulla</button><button class="primary danger-solid" data-confirm-block="${esc(target.dataset.sender)}">Blocca</button></div>`);return;
+    }
+    if(action==='suggest'){
+      if(S.status.demo){toast('Le funzioni AI si attivano sulla tua posta reale.');return;}
+      const peer=S.thread.findLast(message=>!message.sent)||S.selected;S.suggesting=peer.id;renderReading();
+      try{S.suggestions.set(peer.id,(await api('/messages/'+encodeURIComponent(peer.id)+'/suggestions','POST')).replies);}
+      finally{S.suggesting=null;renderReading();}
+      return;
+    }
+    if(action==='schedule-send'){
+      const draft=captureCompose();if(!draft)return;
+      if(!String(draft.to||'').trim()&&!String(draft.cc||'').trim())throw new Error('Inserisci almeno un destinatario.');
+      const id=await saveCompose();await persistDraft(draft);removeComposer();S.scheduling={id,followup:draft.followup_days};
+      showModal('Quando lo invio?',`<p>Il messaggio resta nelle bozze fino all’invio. Aprendolo annulli la programmazione.</p><div class="schedule-options">${scheduleOptions().map(([date,label])=>`<button class="secondary" data-schedule-at="${date.getTime()/1000}"><span>${esc(label)}</span><small>${esc(date.toLocaleString('it-IT',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}))}</small></button>`).join('')}</div><form id="schedule-form"><label class="field"><span>Oppure scegli data e ora</span><input type="datetime-local" name="at" required></label><div class="form-error" role="alert"></div><div class="form-actions"><button class="primary" type="submit">${icon('clock')}Programma</button></div></form>`);return;
+    }
     if(action==='settings') showSettings('accounts');
     if(action==='settings-ai') showSettings('ai');
     if(action==='add-account') showAccountForm();
@@ -760,7 +979,7 @@ document.addEventListener('click', async event => {
     if(action==='archive') { await mutate({archived:!S.selected.archived});toast('Modifica salvata. Milo la sincronizza con il provider.'); }
     if(action==='snooze') showModal('Un momento migliore.',`<p>La conversazione torna nella tua inbox quando arriva il momento.</p><div class="form-actions"><button class="secondary" data-snooze="${Date.now()/1000+3600}">Tra un’ora</button><button class="primary" data-snooze="${Date.now()/1000+86400}">Domani</button></div>`);
     if(target.dataset.snooze) { await mutate({snoozed_until:Number(target.dataset.snooze)});closeModal();toast('Email messa da parte.'); }
-    if(action==='reply'||action==='reply-all') {target.disabled=true;target.classList.add('is-loading');const version=S.readerVersion;try{const source=S.thread.findLast(message=>!message.sent)||S.selected,m=await recipientContext(source);if(version===S.readerVersion)showCompose({account_id:m.account_id,...replyRecipients(m,action==='reply-all'),mode:action==='reply-all'?'reply_all':'reply',subject:'Re: '+subjectCore(m.subject),reply_to_id:m.id});}finally{target.disabled=false;target.classList.remove('is-loading');}}
+    if(action==='reply'||action==='reply-all') {target.disabled=true;target.classList.add('is-loading');try{await startReply(action==='reply-all');}finally{target.disabled=false;target.classList.remove('is-loading');}}
     if(action==='forward') { const m=await ensureBody(S.selected.id);if(!m)return;showCompose({account_id:m.account_id,mode:'forward',context_message_id:m.id,subject:'Fwd: '+subjectCore(m.subject),body:`\n\n---------- Messaggio inoltrato ----------\nDa: ${m.sender} <${m.sender_email}>\nOggetto: ${m.subject}\n\n${m.body}`}); }
     if(action==='save-draft') { if(await saveCompose()) { await refresh();renderList();toast('Bozza salvata nel tuo archivio.'); } }
     if(action==='delete-draft')await discardCompose();
@@ -818,9 +1037,41 @@ document.addEventListener('submit', async event => {
     if(form.id==='rule-form') { await api('/rules','POST',data);await revalidateView();showSettings('rules');renderList();toast('Filtro creato e applicato.'); }
     if(form.id==='compose-form') {
       const snapshot=captureCompose(),id=await saveCompose();if(!id)throw new Error('Scrivi prima il tuo messaggio.');
-      await persistDraft(snapshot);await api('/drafts/'+encodeURIComponent(id)+'/send','POST');
-      if(S.compose?.id===id&&(S.compose.revision||0)<=snapshot.revision){removeComposer();await cachedDraftChange(id);}
-      await refresh();if(S.readerAnchor)await loadThread(S.readerAnchor);renderList();toast('Messaggio inviato.');
+      if(!String(snapshot.to||'').trim()&&!String(snapshot.cc||'').trim())throw new Error('Inserisci almeno un destinatario.');
+      await persistDraft(snapshot);await scheduleDraft(id,Date.now()/1000+UNDO_SECONDS,snapshot.followup_days);
+      if(S.compose?.id===id)removeComposer();
+      toast('Messaggio in partenza…',{label:'Annulla',duration:UNDO_SECONDS*1000,run:()=>undoSend(id,snapshot).catch(error=>toast(error.message))});
+      setTimeout(async()=>{try{const {drafts}=await api('/drafts'),failed=drafts.find(d=>d.id===id&&d.scheduled?.error);
+        if(failed)toast('Invio non riuscito: '+failed.scheduled.error);else if(!drafts.some(d=>d.id===id))toast('Messaggio inviato.');
+        await refresh();if(S.readerAnchor)await loadThread(S.readerAnchor);renderList();}catch{}},(UNDO_SECONDS+7)*1000);
+    }
+    if(form.id==='schedule-form'){
+      const at=new Date(data.at).getTime()/1000;if(!(at>Date.now()/1000))throw new Error('Scegli un momento futuro.');
+      await scheduleDraft(S.scheduling.id,at,S.scheduling.followup);S.scheduling=null;closeModal();toast('Invio programmato per '+dateLabel(at,true)+'.');await refresh();renderList();
+    }
+    if(form.id==='ask-form'){
+      const box=$('#ask-result');box.innerHTML=skeleton(3,'block','Milo cerca nella tua posta…');
+      try{const result=await api('/ask','POST',{question:data.question});
+        box.innerHTML=`<div class="ask-answer"><p>${esc(result.answer)}</p>${result.sources.length?`<h3 class="recap-section-title">Dalle tue email</h3><div class="recap-priorities">${result.sources.map(source=>`<button class="priority-item" data-recap-message="${esc(source.id)}"><span>${esc(source.sender)} · ${esc(subjectCore(source.subject))}<small>${esc(dateLabel(source.date,true))}</small></span>${icon('arrow')}</button>`).join('')}</div>`:''}</div>`;
+      }catch(error){box.innerHTML='';throw error;}
+    }
+    if(form.id==='signatures-form'){S.state.signatures=(await api('/settings/signatures','PUT',{signatures:data})).signatures;closeModal();toast('Firme salvate.');}
+    if(form.id==='template-form'){S.state.templates=(await api('/settings/templates','PUT',{templates:[...(S.state.templates||[]),{name:data.name,body:data.body}]})).templates;showSettings('compose');toast('Risposta salvata.');}
+    if(form.id==='notifications-form'){
+      const previous=notificationSettings(),settings={mode:data.mode,morning:form.elements.morning.checked,since:previous.mode==='off'&&data.mode!=='off'?Date.now()/1000:previous.since||Date.now()/1000};
+      if((settings.mode!=='off'||settings.morning)&&'Notification' in window&&Notification.permission==='default')await Notification.requestPermission();
+      try{localStorage.setItem('milo-notify',JSON.stringify(settings));}catch{throw new Error('Questo dispositivo non può salvare la preferenza.');}
+      closeModal();toast(settings.mode==='off'&&!settings.morning?'Notifiche disattivate.':'Notifiche attive su questo dispositivo.');
+    }
+    if(form.id==='screener-form'){
+      const result=await api('/settings/screener','PUT',{enabled:form.elements.enabled.checked});S.state.screener={...result,pending:[]};
+      closeModal();renderShell();await refresh();toast(result.enabled?'Da ora i nuovi mittenti aspettano in Nuovi mittenti.':'Filtro dei nuovi mittenti disattivato.');
+    }
+    if(form.id==='restore-form'){
+      const file=form.elements.file.files[0];if(!file)throw new Error('Scegli un file di configurazione.');
+      let backup;try{backup=JSON.parse(await file.text());}catch{throw new Error('Il file non contiene un JSON valido.');}
+      const counts=await api('/backup/restore','POST',backup);closeModal();await revalidateView();renderShell();
+      toast(`Ripristinati ${counts.messages} messaggi, ${counts.drafts} bozze, ${counts.todos} cose da fare e ${counts.settings} preferenze.`);
     }
   } catch(error) { if(errorBox) errorBox.textContent=error.message;else toast(error.message); }
   finally { S.analyzing=false;if(button){button.disabled=false;button.classList.remove('is-loading');} }
@@ -828,6 +1079,7 @@ document.addEventListener('submit', async event => {
 
 document.addEventListener('input', event => {
   if(event.target.closest('#compose-form')){const draft=captureCompose();rememberDraft(draft,false);clearTimeout(autosaveTimer);autosaveTimer=setTimeout(()=>persistDraft(draft).catch(()=>{if($('.draft-save-status'))$('.draft-save-status').textContent='Salvataggio in attesa. La copia resta nelle bozze.';}),700);}
+  if(event.target.id==='palette-input'&&S.palette){S.palette.active=0;renderPalette();}
   if(event.target.id==='search-input') {
     S.search=event.target.value;clearTimeout(searchTimer);
     searchTimer=setTimeout(async()=>{try{await refresh(false,true);renderList();}catch(error){toast(error.message);}},200);
@@ -836,6 +1088,16 @@ document.addEventListener('input', event => {
 });
 document.addEventListener('change', async event => {
   if(event.target.name==='theme'&&$('#appearance-form'))applyTheme(event.target.value);
+  if(event.target.classList?.contains('template-select')&&event.target.value!==''){
+    const template=S.state.templates?.[Number(event.target.value)],field=$('#compose-form [name="body"]');event.target.value='';
+    if(template&&field){const start=field.selectionStart??field.value.length;field.value=field.value.slice(0,start)+template.body+field.value.slice(field.selectionEnd??start);field.focus();field.setSelectionRange(start+template.body.length,start+template.body.length);field.dispatchEvent(new Event('input',{bubbles:true}));}
+  }
+  if(event.target.name==='account_id'&&event.target.closest('#compose-form')&&S.compose){
+    const field=$('#compose-form [name="body"]'),before=S.state.signatures?.[S.compose.account_id],after=S.state.signatures?.[event.target.value];
+    if(field&&before&&field.value.includes('-- \n'+before))field.value=field.value.replace('-- \n'+before,after?'-- \n'+after:'');
+    else if(field&&after&&!field.value.includes('-- \n'+after))field.value=`${field.value}\n\n-- \n${after}`;
+    S.compose.account_id=event.target.value;field?.dispatchEvent(new Event('input',{bubbles:true}));
+  }
   if(event.target.id==='message-category') { try{await mutate({category:event.target.value});}catch(error){toast(error.message);} }
   if(event.target.id==='provider') {
     const form=$('#account-form'), provider=event.target.value;
@@ -849,32 +1111,44 @@ document.addEventListener('change', async event => {
 });
 async function handleKeydown(event) {
   if(event.defaultPrevented||event.isComposing)return;
+  if(event.target?.id==='palette-input'&&S.palette){
+    if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();const count=Math.max(1,S.palette.items.length);S.palette.active=(S.palette.active+(event.key==='ArrowDown'?1:-1)+count)%count;renderPalette();return;}
+    if(event.key==='Enter'){event.preventDefault();runPalette(S.palette.active);return;}
+  }
+  if((event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='k'&&S.status?.authenticated){event.preventDefault();showPalette();return;}
   const editing=['INPUT','TEXTAREA','SELECT'].includes(event.target?.tagName)||event.target?.isContentEditable;
   if(event.key==='Escape') {
-    try { if($('#compose-form')){closeCompose().catch(error=>toast(error.message));}else closeModal();S.menu=false;$('.shell')?.classList.remove('menu-open'); }
+    try { if(S.multi.size&&!$('#overlay').children.length&&!$('#compose-form')){S.multi.clear();renderList();}else if($('#compose-form')){closeCompose().catch(error=>toast(error.message));}else closeModal();S.palette=null;S.menu=false;$('.shell')?.classList.remove('menu-open'); }
     catch(error) { toast(error.message); }
   }
   if(S.status?.authenticated && !editing && !$('#overlay').children.length && !$('#compose-form') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat) {
     const key=event.key.toLowerCase();
     if(key==='/') { event.preventDefault();$('#search-input')?.focus(); }
     if(key==='c') { event.preventDefault();showCompose(); }
-    if(key==='arrowdown'||key==='arrowup') {
+    if(key==='?'){event.preventDefault();showShortcuts();return;}
+    if(key==='x'&&S.selected){event.preventDefault();const row=S.messages.find(m=>threadKey(m)===threadKey(S.selected));if(row)toggleMulti(row.id);return;}
+    if(S.multi.size&&(key==='e'||key==='#'||key==='delete'||key==='backspace')){event.preventDefault();await bulkMutate(key==='e'?'archive':'trash');return;}
+    if(key==='j'||key==='k'||key==='arrowdown'||key==='arrowup') {
       event.preventDefault();
       const list=S.view==='drafts'?S.drafts:S.messages;
       if(!list.length)return;
       const currentIndex=S.selected?list.findIndex(m=>threadKey(m)===(S.selected?threadKey(S.selected):'')):-1;
       let nextIndex;
-      if(key==='arrowdown') nextIndex=currentIndex+1>=list.length?0:currentIndex+1;
+      const down=key==='arrowdown'||key==='j';
+      if(down) nextIndex=currentIndex+1>=list.length?0:currentIndex+1;
       else nextIndex=currentIndex<=0?list.length-1:currentIndex-1;
-      if(currentIndex===-1) nextIndex=key==='arrowdown'?0:list.length-1;
+      if(currentIndex===-1) nextIndex=down?0:list.length-1;
       const target=list[nextIndex];
       if(target){selectMessage(target.id,false).catch(()=>{});document.querySelector(`[data-message="${target.id}"]`)?.scrollIntoView({block:'nearest',behavior:'smooth'});}
     }
     if(S.selected) {
       try {
         if(key==='e') { event.preventDefault();await mutate({archived:true}); }
-        if(key==='backspace'||key==='delete') { event.preventDefault();await mutate({},true); }
-        if(key==='p') { event.preventDefault();await mutate({starred:!S.selected.starred}); }
+        if(key==='backspace'||key==='delete'||key==='#') { event.preventDefault();await mutate({},true); }
+        if(key==='p'||key==='s') { event.preventDefault();await mutate({starred:!S.selected.starred}); }
+        if(key==='u') { event.preventDefault();await mutate({read:!S.selected.read}); }
+        if(key==='r'||key==='a') { event.preventDefault();await startReply(key==='a'); }
+        if(key==='f') { event.preventDefault();$('[data-action="forward"]')?.click(); }
       } catch(error) { toast(error.message); }
     }
   }
@@ -950,6 +1224,7 @@ async function poll(){
   if(S.status?.authenticated&&!document.hidden){
     await refresh();flushClientQueue().catch(()=>{});queueCatalogue();
     if(Date.now()-lastWarm>120000)warmRecentBodies();
+    maybeMorningRecap();
     if(S.recapOpen&&S.recapSignature!==JSON.stringify(S.state.recap))api('/recap').then(result=>{if(S.recapOpen)showRecap(result);}).catch(()=>{});
     for(const draft of S.pendingDrafts.values())if(!S.draftWrites.has(draft.id)&&S.compose?.id!==draft.id)persistDraft(draft).catch(()=>{});
     if(S.readerAnchor&&S.threadSync.phase==='downloading'&&!S.loadingMessage)loadThread(S.readerAnchor).catch(()=>{});

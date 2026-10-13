@@ -87,3 +87,28 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
   refreshes stay in background. Keep pending changes visible in the existing
   compact synchronization status. Rejected changes show a retry instruction;
   unrelated edits continue. Closing or saving a draft confirms device persistence.
+
+## Daily-use features
+
+- `--danger` (`#c0262d` light, `#f87171` dark) is reserved for destructive or
+  blocking actions: `.secondary.danger` outlines, `.primary.danger-solid` for
+  the confirming button of a destructive dialog. Never use it decoratively.
+- Toasts may carry one action (`toast(text,{label,run,duration})`), e.g.
+  **Annulla** for undo send (10 s) and completed to-dos.
+- Navigation adds **Da fare** after the inbox and, when the screener is on,
+  **Nuovi mittenti**; both use the standard count badge.
+- To-do rows: 22 px square check (8 px radius family), 14 px task text, 12 px
+  muted meta line; follow-ups carry a danger-tinted "Da seguire" tag.
+- Bulk selection uses the selected-row language: `--soft` background, 3 px
+  accent edge, accent avatar outline, and a sticky bar of icon actions.
+- The list header stays title + Recap; Ask (question bubble) and the command
+  palette (keyboard) live in the topbar as icon buttons.
+- Compose tools sit between body and actions: saved replies select and the
+  "Ricordamelo se non risponde" follow-up select, both 13 px on `--surface-alt`.
+  Scheduling opens a dialog of preset cards (label + muted date) plus a
+  datetime field.
+- Reader: VIP (crown) and Block (ban) follow a separator in the toolbar;
+  Unsubscribe is a small bordered button before the subject that turns
+  danger-coloured on hover. Quick replies are 16 px-radius pills under the
+  reply actions, loaded on request.
+- Shortcuts are listed with `kbd` chips (11 px, bordered, `--surface-alt`).

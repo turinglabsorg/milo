@@ -53,13 +53,14 @@ function apply(operation){
 }
 function confirm(operation){revision++;changes.set(operation.key,revision);if(pending.get(operation.key)===operation.id)pending.delete(operation.key);}
 function rememberQuery(path,messages){if(new URLSearchParams(path.split('?')[1]).get('search'))searches.set(path,messages.map(key));persist();}
-function select(query,path,optimistic){
+function select(query,path,optimistic,screened=new Set()){
   const term=query.search.trim().toLowerCase(),known=new Set(searches.get(path)||[]),now=Date.now()/1000;
   const words=term.match(/[\p{L}\p{N}@._-]+/gu)||[];
   return [...rows.values()].map(row=>{const op=optimistic.get(key(row));return op?patchRow(row,op.patch||{},op.deleted):row;}).filter(row=>{
     if(row.deleted||query.account&&row.account_id!==query.account)return false;
     if(query.category&&query.view==='inbox'&&row.category!==query.category)return false;
     if(query.view==='inbox'&&(!(row.has_inbox||row.snoozed_until&&row.snoozed_until<=now&&!row.archived&&row.received_count)||row.snoozed_until>now))return false;
+    if(query.view==='inbox'&&screened.size&&screened.has((row.sender_email||'').toLowerCase()))return false;
     if(query.view==='archive'&&!row.has_archive)return false;
     if(query.view==='sent'&&!row.has_sent)return false;
     if(query.view==='starred'&&!row.starred)return false;
