@@ -95,32 +95,37 @@ def test_unrelated_running_service_is_not_published(tmp_path, monkeypatch):
     assert json.loads(path.read_bytes()) == {"other.example": {"port": 4100}}
 
 
-@pytest.mark.parametrize("state_status", [401, 200])
-def test_ready_requires_https_and_unauthenticated_private_api(state_status, monkeypatch):
+@pytest.mark.parametrize("state_status", [404, 401, 200])
+def test_ready_requires_public_landing_and_unreachable_private_api(state_status, monkeypatch):
     calls = []
+
+    class Landing(BytesIO):
+        headers = {'X-Milo-Surface': 'public'}
 
     def open_url(url, **kwargs):
         calls.append(url)
-        if url.endswith("/api/status"):
-            return BytesIO(b'{"service":"milo","demo":false,"initialized":false}')
-        if state_status == 401:
-            raise HTTPError(url, 401, "Private archive", {}, None)
+        if url == mac_server.ORIGIN + '/':
+            return Landing(b'Public landing')
+        if state_status != 200:
+            raise HTTPError(url, state_status, "Private archive unavailable", {}, None)
         return BytesIO(b'{}')
 
     monkeypatch.setattr(mac_server, "urlopen", open_url)
-    if state_status == 401:
-        assert mac_server.verify_service()["service"] == "milo"
+    if state_status == 404:
+        assert mac_server.verify_service() is None
     else:
-        with pytest.raises(RuntimeError, match="accesso privato"):
+        with pytest.raises(RuntimeError, match="espone"):
             mac_server.verify_service()
-    assert calls == [mac_server.ORIGIN + "/api/status", mac_server.ORIGIN + "/api/state"]
+    assert calls[0] == mac_server.ORIGIN + '/'
+    assert calls[1] == mac_server.ORIGIN + '/api/login'
 
 
-def test_service_bootstrap_code_is_kept_out_of_logs(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("quiet", [True, False])
+def test_service_bootstrap_code_is_kept_out_of_logs(tmp_path, monkeypatch, capsys, quiet):
     code = "private-first-start-code"
     monkeypatch.setattr(cli, "create_app", lambda *args: SimpleNamespace(
         state=SimpleNamespace(store=SimpleNamespace(bootstrap=code))))
     monkeypatch.setattr(cli.uvicorn, "run", lambda *args, **kwargs: None)
-    monkeypatch.setattr(sys, "argv", ["milo", "--data", str(tmp_path), "--quiet-bootstrap"])
+    monkeypatch.setattr(sys, "argv", ["milo", "--data", str(tmp_path), *(["--quiet-bootstrap"] if quiet else [])])
     cli.main()
     assert code not in capsys.readouterr().out

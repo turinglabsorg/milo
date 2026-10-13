@@ -2,6 +2,7 @@
 """Launch the local service and open Milo in a dedicated Chromium window."""
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -59,10 +60,27 @@ def open_window(url):
         subprocess.Popen(["xdg-open", url], start_new_session=True)
 
 
+def owner_setup_url(server):
+    """Attach this installed client's private first-start authorization, never display it."""
+    if urlsplit(server).hostname.endswith('.ts.net'):
+        return server  # Device identity replaces first-start and password grants.
+    pairing = ROOT / ".data/setup.url"
+    if not pairing.exists():
+        return server
+    if pairing.is_symlink() or pairing.stat().st_uid != os.getuid() or pairing.stat().st_mode & 0o077:
+        raise RuntimeError("La configurazione privata di Milo deve appartenere a questo utente ed essere protetta.")
+    url = pairing.read_text().strip()
+    parsed, expected = urlsplit(url), urlsplit(server)
+    if (parsed.scheme != expected.scheme or parsed.netloc != expected.netloc or parsed.query
+            or parsed.path not in {"", "/"} or not re.fullmatch(r"setup=[A-Za-z0-9_-]{32}", parsed.fragment)):
+        raise RuntimeError("Il collegamento privato di Milo non corrisponde al server configurato.")
+    return url
+
+
 def main():
     server = shared_server()
     if server:
-        open_window(server)
+        open_window(owner_setup_url(server))
         print(f"Milo is connected to {server}")
         return
     python = ROOT / ".venv/bin/python"

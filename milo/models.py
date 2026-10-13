@@ -5,7 +5,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class Login(BaseModel):
     password: str = Field(min_length=12, max_length=256)
-    bootstrap: str = ""
+    bootstrap: str = Field(default="", max_length=512)
+
+
+class SetupGrant(BaseModel):
+    token: str = Field(min_length=1, max_length=512)
 
 
 class AccountInput(BaseModel):
@@ -40,6 +44,7 @@ class AccountUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=80)
     enabled: bool | None = None
+    color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     username: str | None = Field(default=None, min_length=1, max_length=254)
     password: str | None = Field(default=None, min_length=1, max_length=1024, repr=False)
     imap_host: str | None = Field(default=None, min_length=1, max_length=253)
@@ -62,23 +67,53 @@ class MessagePatch(BaseModel):
     read: bool | None = None
     starred: bool | None = None
     archived: bool | None = None
+    pinned: bool | None = None
     category: Literal["people", "updates", "newsletters"] | None = None
     snoozed_until: float | None = None
+
+
+class Appearance(BaseModel):
+    theme: Literal["system", "light", "dark"] = "system"
 
 
 class DraftInput(BaseModel):
     id: str | None = None
     account_id: str
     to: str = Field(max_length=2000)
+    cc: str = Field(default="", max_length=2000)
     subject: str = Field(max_length=998)
-    body: str = Field(max_length=100000)
+    body: str = Field(max_length=1_000_000)
     reply_to_id: str | None = None
+    context_message_id: str | None = None
+    mode: Literal["new", "reply", "reply_all", "forward"] = "new"
+    revision: int = Field(default=0, ge=0)
 
 
 class AISettings(BaseModel):
     model: str = Field(default="mistral-large-4:cloud", min_length=1, max_length=150)
     automatic: bool = False
     cloud_consent: bool = False
+
+
+class Identity(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(default="", max_length=120)
+    aliases: list[str] = Field(default_factory=list, max_length=20)
+    context: str = Field(default="", max_length=2000)
+    reply_language: Literal["auto", "en", "it", "fr", "de", "es", "pt"] = "auto"
+
+    @field_validator("aliases")
+    @classmethod
+    def aliases_valid(cls, values):
+        result = []
+        for value in values:
+            value = value.strip()
+            if not value or len(value) > 80 or any(c in value for c in "\r\n\x00"):
+                raise ValueError("Inserisci nomi brevi, separati da virgole")
+            if value.casefold() not in {name.casefold() for name in result}:
+                result.append(value)
+        return result
 
 
 class RuleInput(BaseModel):

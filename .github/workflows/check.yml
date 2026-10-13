@@ -8,8 +8,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --extra dev --frozen
       - run: uv run ruff check milo tests scripts install.py
-      - run: uv run pytest -q
       - run: uv run playwright install --with-deps chromium
+      - run: uv run pytest -q
       - name: Browser flows
         run: |
           uv run milo --demo --data /tmp/milo-ci-demo --port 8026 > /tmp/milo-ci.log 2>&1 &

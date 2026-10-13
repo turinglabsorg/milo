@@ -1,0 +1,12 @@
+*
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!milo/
+!milo/**
+!web/
+!web/**
+!scripts/
+!scripts/serve.py
+**/__pycache__/
+**/*.pyc

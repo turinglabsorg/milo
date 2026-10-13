@@ -1,6 +1,6 @@
 # Roadmap — the full product
 
-The goal remains a public, intelligent email client for Linux and iOS, with one
+The product is an open-source email client with a private owner archive for Linux and iOS, with one
 configuration and synchronized stored mail. This first foundation does not
 complete that goal.
 
@@ -18,6 +18,10 @@ complete that goal.
 | Actual provider interoperability | Generic IMAP/SMTP and controlled protocol doubles | Connect a user-approved test mailbox; verify live receipt, reply, sent folder and remote edits |
 | Gmail / Outlook | Google OAuth/PKCE and Gmail labels/history adapter; protocol tests | Live Google account authorization and round trip; Microsoft Graph/Exchange adapter |
 | iOS availability | Responsive portable client and PWA shell | Physical Safari/PWA check; native iOS client, Keychain, local cache, APNs, build/signing on macOS |
+
+## Mandatory client-local cache
+
+Every client, including the future native iOS app, must persist downloaded email locally and support offline reading. Server-only caching does not satisfy this requirement. Follow [the client cache contract](CLIENT_CACHE.md).
 
 ## Next milestones
 

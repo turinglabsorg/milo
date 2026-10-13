@@ -1,88 +1,108 @@
-# Permanent service on the Mac Pro with Grog
+# Docker Mac server and Omarchy client
 
-Milo is a server on the owner's Mac Pro. It stores email, accounts, preferences
-and drafts there; Linux and iPhone connect to the same HTTPS service. Tailscale
-can be used to reach the Mac for administration.
+The Mac Pro runs the server and authoritative archive. The Omarchy client runs
+on the laptop and keeps its own persistent cache. The public domain serves only
+the landing and fixed Google OAuth relay. Private mail uses Tailscale Serve
+HTTPS; other identities, anonymous requests and password/setup routes get 404.
 
-The owner's deployment was activated on 2026-10-11 at
-`https://milo.grooooog.space`. HTTPS returned the real, non-demo Milo status,
-and unauthenticated `/api/state` returned 401. The Mac's Grog launch agent is
-loaded with `KeepAlive`; the archive exists at
-`~/Library/Application Support/Milo`. The served JavaScript, CSS and Geist font
-match this checkout. Initial passphrase setup and real Google authorization
-remain pending; see [validation](VALIDATION.md) for the limits of these checks.
+## Persistent archive and access
 
-## Prepare the host
+Keep `~/Library/Application Support/Milo` outside the source checkout and image.
+Its existing mode-0600 `private-server.json` contains the fixed Tailscale HTTPS
+origin and exact owner identities. Provider credentials remain encrypted in this
+archive. Never bake the archive, client cache, credential files or `.data` into
+an image; the Docker context uses an explicit allowlist.
 
-Use a dedicated checkout, for example `~/Sites/milo`, and Python 3.11+ with uv:
+For a deliberately new deployment, `scripts/prepare_private.py` prepares owner
+configuration from Tailscale metadata. It does not enable Serve/Funnel or replace
+an existing handler. The configured private handler stays:
 
 ```sh
-git clone https://github.com/turinglabsorg/milo.git ~/Sites/milo
-cd ~/Sites/milo
+tailscale serve --bg --https=8443 http://127.0.0.1:8029
+```
+
+The owner must be authorized on the tailnet. Tailscale strips supplied identity
+headers and adds its attested caller identity; see [the identity-header docs](https://tailscale.com/kb/1312/serve#identity-headers).
+
+## Build and verify
+
+Use the existing Docker Desktop runtime on the Mac, the owner's Grog installation,
+Python and uv for host supervision. SSH over Tailscale is the deployment transport.
+Use the `desktop-linux` context explicitly, preserving other runtimes/projects.
+
+```sh
 uv sync --frozen
-uv run --frozen python scripts/mac_server.py
+MILO_ARCHIVE="$HOME/Library/Application Support/Milo" docker compose build
+docker tag milo-server:current milo-server:staging
+uv run python scripts/smoke_docker.py
 ```
 
-Run these commands on the Mac. The activation script adds only Milo to Grog's
-sites file, preserves other sites, and reuses `space.grooooog.serve`. If that
-launch agent is absent, it creates one using the owner's installed Grog. It
-refuses conflicting domain/port settings and a custom Grog sites-file override.
-After HTTPS responds and the unauthenticated private API returns 401, it opens
-Milo in the Mac browser with the one-time setup code. Choose the passphrase in
-that browser, then configure Google and authorize each mailbox.
+The smoke check starts an isolated container on temporary loopback ports with a
+provider-disabled fixture archive. It verifies public/private separation, owner
+rejection, configuration and message persistence through a container restart,
+then removes only its own container/network.
 
-The server's default Mac archive is `~/Library/Application Support/Milo`, outside
-the checkout. A previously existing `.data/live` archive is retained. Keep one
-authoritative archive on this host. Configure Ollama on this host, or set
-`MILO_OLLAMA_URL` to an explicitly selected reachable Ollama service; cloud
-processing and automatic analysis are enabled by the owner in Milo settings.
+Production publishes **only** `127.0.0.1:8025` and `127.0.0.1:8029`. Do not change
+these to `0.0.0.0`. The dedicated bridge uses `10.241.84.0/24`, gateway
+`10.241.84.1`; check existing network ranges before creation. That exact gateway
+is supplied as a trusted proxy peer; arbitrary network callers remain rejected.
+The application disables forwarded-client-IP processing. The container runs as
+the archive owner, with a read-only image, limited temporary storage, dropped
+capabilities and a health check for both surfaces.
 
-## Add the static Grog site
+## Production activation and boot
 
-Merge this entry into `~/.grog/sites.json`, preserving every existing site:
+After verifying the image, `scripts/mac_docker_register.py` moves **only Milo**
+from the shared Grog site map to an archive-local `grog-sites.json` containing the
+landing port. It preserves all other sites and a protected backup. Wait for the
+old Python listeners to stop before starting Docker against the same archive.
 
-```json
-{
-  "milo.grooooog.space": {
-    "run": ".venv/bin/python scripts/serve.py",
-    "cwd": "~/Sites/milo",
-    "port": 8025
-  }
-}
+```sh
+MILO_ARCHIVE="$HOME/Library/Application Support/Milo" docker compose up -d --no-build --wait
+sudo .venv/bin/python scripts/mac_docker_install.py --user "$(id -un)" --node "$(command -v node)"
 ```
 
-`scripts/serve.py` launches the production Uvicorn service on loopback with
-secure cookies, the fixed HTTPS origin and a host-local persistent archive.
-Grog's existing `serve` launch agent supervises and restarts the site command.
-The activation script uses absolute paths for the command and working directory.
-Use the owner's Grog CLI, not the unrelated GNU groff `grog` binary installed on
-some Linux systems. Inspect the existing Grog installation and launch agent
-before starting a second `grog serve` process. Grog hot-reloads its sites map.
-The service keeps bootstrap codes out of shared Grog logs; initialization codes
-remain in the owner's private archive.
+The explicit Node path and project Python path are retained in the boot environment;
+it does not depend on interactive shell or NVM activation.
 
-Default origin is `https://milo.grooooog.space`; change `MILO_PUBLIC_URL` if a
-registered static domain is selected instead. The OAuth callback must match
-that origin exactly. Uvicorn removes query strings from its access logs. Inspect
-the deployed Grog version's logging too; OAuth authorization codes must not be
-retained there. The currently published Grog counting proxy retains the path
-without the query string and preserves the incoming Host header.
+The system LaunchDaemon `space.grooooog.milo.server` runs as the non-root archive
+owner, independently of the Omarchy window and GUI login. Its supervisor checks
+Docker, starts the installed backend if absent, activates the Compose service,
+and keeps a dedicated **Grog serve** relay for Milo. Docker's
+[`unless-stopped` restart policy](https://docs.docker.com/reference/compose-file/services/#restart)
+retains the service after runtime restarts. The supervisor restarts an unhealthy
+Milo container without stopping other applications or the Docker engine.
 
-## Initialize and verify
+Docker Desktop's normal [startup setting](https://docs.docker.com/desktop/settings-and-maintenance/settings/)
+starts at sign-in. The system boot supervisor supplies the additional headless
+startup path; a full machine power-cycle is a separate verification gate from a
+container restart. FileVault may require a human disk unlock before any server can
+start; do not disable disk protection to hide that constraint.
 
-Read the first-start bootstrap code locally from the service host's private
-archive. Open the HTTPS origin, enter that one-time code and choose the owner's
-passphrase; never publish a bootstrap-bearing URL or a demo archive. Configure
-the Google web client using [Google setup](GOOGLE.md).
+Verify the boot job is loaded in the **system** domain, container health/restart
+policy, loopback port bindings, unchanged archive mount, private owner access and
+public 404 responses. Verify message/account/configuration persistence after a
+controlled **Milo-only** restart. Do not reboot the Mac or restart shared services
+merely to test a single application.
 
-Before treating deployment as ready:
+## Client and OAuth
 
-- Check HTTPS and confirm unauthenticated `/api/state` returns 401.
-- Confirm setup is one-time and cookies are Secure/HttpOnly.
-- Authorize a real mailbox; verify sync and persistence across a service restart.
-- Open the same origin on Linux and iPhone and confirm they share settings,
-  account identities and message changes.
-- Check the Grog launch agent survives logout/reboot as configured on this Mac.
+The laptop launcher's `.data/server.json` points to the verified private HTTPS
+origin. Device identity replaces a password/code. Downloaded client data persists
+on that device and can be read offline, as required by [CLIENT_CACHE.md](CLIENT_CACHE.md).
 
-The Linux launcher can point to the shared service by setting `MILO_SERVER_URL`
-or by writing its origin to `.data/server.json` as `{"url":"https://milo.grooooog.space"}`.
+Keep Google's registered redirect URI on the static public domain:
+`https://milo.grooooog.space/api/oauth/google/callback`. The public handler relays
+only bounded state/code/error values to the fixed private callback. PKCE,
+one-time state and browser nonce are checked by the private backend. Both
+surfaces exclude OAuth query parameters from access logs.
+
+## Updating a running Docker deployment
+
+Build the tested image before replacing the container. During replacement, stop
+only `space.grooooog.milo.server` in the system launchd domain, leave the shared
+Grog service and Docker engine alone, run Compose, then bootstrap that same boot
+job from its saved plist. This prevents the availability supervisor from trying
+to restart a container while Compose is replacing it. Restore the job even if an
+update fails. The client retains downloaded content during temporary gateway
+failures; authorization denials remain distinct from server unavailability.

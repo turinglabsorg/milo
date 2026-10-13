@@ -53,13 +53,16 @@ def parse_message(raw, account_id, folder, uidvalidity, uid, flags=b"", sent=Fal
     except (TypeError, ValueError, OverflowError):
         date = time.time()
     category = "newsletters" if mail.get("List-Unsubscribe") or mail.get("List-Id") else "people"
+    references = re.findall(r"<[^>]+>", str(mail.get("References", "")) or str(mail.get("In-Reply-To", "")))
+    root = references[0] if references else str(mail.get("Message-ID", ""))
     return {"account_id": account_id, "folder": folder, "uidvalidity": str(uidvalidity), "uid": int(uid),
             "message_id": str(mail.get("Message-ID", "")), "sender": name or address,
             "sender_email": address, "recipients": str(mail.get("To", "")),
             "subject": str(mail.get("Subject", "(Senza oggetto)")), "body": body[:200000],
             "preview": re.sub(r"\s+", " ", body).strip()[:240], "date": date,
             "read": int(b"\\Seen" in flags), "starred": int(b"\\Flagged" in flags),
-            "sent": int(sent), "archived": int(archived), "category": category, "raw": raw}
+            "sent": int(sent), "archived": int(archived), "category": category, "raw": raw,
+            "thread_id": "rfc822:" + hashlib.sha256(root.encode()).hexdigest() if root else None}
 
 
 def check(status, message="Operazione IMAP rifiutata"):
@@ -79,7 +82,7 @@ def connect(account):
 
 
 def folders(client):
-    result = [{"name": "INBOX", "sent": False, "archived": False}]
+    result = [{"name": "INBOX", "sent": False, "archived": False, "trash": False}]
     status, listing = client.list()
     check(status)
     for line in listing or []:
@@ -94,8 +97,9 @@ def folders(client):
         name = name.decode("ascii", errors="replace")
         sent = b"\\sent" in flags.lower() or name.lower() in {"sent", "sent messages", "sent items"}
         archived = b"\\archive" in flags.lower() or name.lower() in {"archive", "archives"}
-        if (sent or archived) and name.upper() != "INBOX":
-            result.append({"name": name, "sent": sent, "archived": archived})
+        trash = b"\\trash" in flags.lower() or name.lower() in {"trash", "deleted messages", "deleted items"}
+        if (sent or archived or trash) and name.upper() != "INBOX":
+            result.append({"name": name, "sent": sent, "archived": archived, "trash": trash})
     return result
 
 
@@ -113,6 +117,54 @@ class SyncEngine:
         self.store, self.ai = store, ai
         self._locks = {}
         self._guard = threading.Lock()
+        self._progress = {}
+        self._thread_progress = {}
+
+    def report(self, account_id, phase, downloaded=None):
+        with self._guard:
+            current = self._progress.get(account_id, {"downloaded": 0})
+            self._progress[account_id] = {**current, "account_id": account_id, "phase": phase,
+                                          "updated": time.time()}
+            if downloaded is not None:
+                self._progress[account_id]["downloaded"] = downloaded
+
+    def status(self):
+        with self._guard:
+            return [dict(progress) for progress in self._progress.values()]
+
+    def thread_status(self, message_id):
+        with self._guard:
+            return dict(self._thread_progress.get(message_id, {}))
+
+    def sync_thread(self, message_id):
+        from .google import Gmail
+
+        message = self.store.message(message_id)
+        if not message or not message.get("thread_id"):
+            return
+        account = self.store.account(message["account_id"])
+        if not account or account["provider"] != "google" or not account["enabled"]:
+            return
+        with self._guard:
+            current = self._thread_progress.get(message_id, {})
+            if current.get("phase") == "downloading" or current.get("updated", 0) > time.time() - 30:
+                return
+            self._thread_progress[message_id] = {"phase": "downloading", "updated": time.time()}
+        client = None
+        try:
+            client = Gmail(self.store, account["id"])
+            thread = client.request("GET", "threads/" + message["thread_id"], params={"format": "minimal"})
+            for remote in (thread or {}).get("messages", []):
+                if "DRAFT" not in remote.get("labelIds", []):
+                    client.fetch_message(remote["id"])
+            result = {"phase": "ready", "updated": time.time()}
+        except Exception as exc:
+            result = {"phase": "error", "error": safe_error(exc), "updated": time.time()}
+        finally:
+            if client:
+                client.close()
+        with self._guard:
+            self._thread_progress[message_id] = result
 
     def account_lock(self, account_id):
         with self._guard:
@@ -129,7 +181,9 @@ class SyncEngine:
             current = self.store.account(account_id, private=True)
             if not current or not current["enabled"]:
                 return {"account_id": account_id, "ok": True, "paused": True, "added": 0}
+            self.report(account_id, "connecting", 0)
             result = self._sync_google(current) if current["provider"] == "google" else self._sync_imap(current)
+            self.report(account_id, "ready" if result["ok"] else "error")
         if result["ok"]:
             self.analyze_pending(account_id)
         return result
@@ -143,6 +197,8 @@ class SyncEngine:
             self.flush_changes(client, account, remote_folders)
             added = []
             for folder in remote_folders:
+                if folder.get("trash"):
+                    continue
                 added.extend(self.sync_folder(client, account, folder))
             self.store.execute("UPDATE accounts SET last_sync=?,error=NULL WHERE id=?", (time.time(), account_id))
             return {"account_id": account_id, "added": len(added), "ok": True}
@@ -176,7 +232,7 @@ class SyncEngine:
         account_id = account["id"]
         client = None
         try:
-            client = Gmail(self.store, account_id)
+            client = Gmail(self.store, account_id, lambda phase, count: self.report(account_id, phase, count))
             result = client.sync()
             self.store.execute("UPDATE accounts SET last_sync=?,error=NULL WHERE id=?", (time.time(), account_id))
             return result
@@ -204,11 +260,21 @@ class SyncEngine:
             self.store.execute("DELETE FROM messages WHERE id=?", (by_uid[uid],))
         added = []
         # Newest first, then backfill in bounded batches without losing older mail.
-        for uid in sorted(remote_uids - by_uid.keys(), reverse=True)[:200]:
-            status, parts = client.uid("FETCH", str(uid), "(UID FLAGS BODY.PEEK[])")
+        new_uids = sorted(remote_uids - by_uid.keys(), reverse=True)
+        batch_size = 500
+        for batch_start in range(0, len(new_uids), batch_size):
+            self.report(account["id"], "downloading")
+            uid_batch = new_uids[batch_start:batch_start + batch_size]
+            uids_str = ",".join(str(uid) for uid in uid_batch)
+            status, parts = client.uid("FETCH", uids_str, "(UID FLAGS BODY.PEEK[])")
             check(status)
             for part in parts or []:
                 if isinstance(part, tuple) and isinstance(part[1], bytes):
+                    header_info = part[0].decode("utf-8", "replace") if isinstance(part[0], bytes) else str(part[0])
+                    uid_match = re.search(r"UID (\d+)", header_info)
+                    if not uid_match:
+                        continue
+                    uid = int(uid_match.group(1))
                     if len(part[1]) > 25 * 1024 * 1024:
                         raise RuntimeError("Messaggio oltre il limite di 25 MB")
                     parsed = parse_message(part[1], account["id"], name, validity, uid, part[0],
@@ -226,7 +292,8 @@ class SyncEngine:
                             self.store.execute("DELETE FROM messages WHERE account_id=? AND folder='Milo/Sent' "
                                                "AND message_id=?", (account["id"], parsed["message_id"]))
                     added.append(message_id)
-                    break
+                    with self._guard:
+                        self._progress[account["id"]]["downloaded"] += 1
         known = sorted(remote_uids & by_uid.keys())
         for start in range(0, len(known), 100):
             uids = ",".join(str(uid) for uid in known[start:start + 100])
@@ -250,10 +317,11 @@ class SyncEngine:
                     self.store.execute("DELETE FROM outbox WHERE id=?", (operation["id"],))
                     continue
                 kind, value = operation["kind"], json.loads(operation["value"])
-                if kind == "archived":
-                    target = next((f["name"] for f in remote_folders if f["archived"]), None) if value else "INBOX"
+                if kind in {"archived", "trash"}:
+                    target = (next((f["name"] for f in remote_folders if f.get("trash")), None) if kind == "trash"
+                              else next((f["name"] for f in remote_folders if f["archived"]), None) if value else "INBOX")
                     if not target:
-                        raise RuntimeError("Il server non espone una cartella Archivio")
+                        raise RuntimeError("Il server non espone una cartella " + ("Cestino" if kind == "trash" else "Archivio"))
                     if target == operation["folder"]:
                         self.store.execute("DELETE FROM outbox WHERE id=?", (operation["id"],))
                         continue
@@ -264,7 +332,7 @@ class SyncEngine:
                     # Destination is reimported with the server-assigned UID on this sync.
                     # Keep local intelligence attached via Message-ID on the destination.
                     source = self.store.message(operation["message_id"])
-                    if source["message_id"]:
+                    if kind != "trash" and source["message_id"]:
                         self.store.set_setting(self.moved_key(account["id"], source["message_id"]),
                                                {k: source[k] for k in ("category", "analysis", "snoozed_until")})
                 else:
@@ -291,12 +359,14 @@ def safe_error(exc):
 
 
 def build_message(account, draft, original=None):
-    recipients = [address for _, address in getaddresses([draft["to"]])]
+    recipients = [address for _, address in getaddresses([value for value in (draft["to"], draft.get("cc", "")) if value])]
     if not recipients or any("@" not in address or any(c in address for c in "\r\n") for address in recipients):
         raise ValueError("Inserisci destinatari validi")
     message = EmailMessage()
     message["From"] = account["email"]
     message["To"] = draft["to"]
+    if draft.get("cc"):
+        message["Cc"] = draft["cc"]
     message["Subject"] = draft["subject"]
     message["Message-ID"] = make_msgid()
     message["Date"] = email.utils.formatdate(localtime=True)
@@ -309,7 +379,8 @@ def build_message(account, draft, original=None):
 
 def send_mail(account, draft, original=None):
     message = build_message(account, draft, original)
-    recipients = [address for _, address in getaddresses([draft["to"]])]
+    recipients = list(dict.fromkeys(address for _, address in getaddresses(
+        [value for value in (draft["to"], draft.get("cc", "")) if value])))
     context = ssl.create_default_context()
     if account["smtp_security"] == "tls":
         client = smtplib.SMTP_SSL(account["smtp_host"], account["smtp_port"], timeout=20, context=context)

@@ -210,11 +210,12 @@ def test_google_send_uses_gmail_and_single_remote_identity(store, monkeypatch):
     account = store.accounts()[0]
     sent = []
     monkeypatch.setattr(client, "request", lambda method, path, **kwargs: sent.append((path, kwargs)) or {"id": "sent-1", "threadId": "thread-1"})
-    client.send(account, {"to": "person@example.com", "subject": "Re: Hello", "body": "Reply"}, original)
+    client.send(account, {"to": "person@example.com", "cc": "copy@example.com", "subject": "Re: Hello", "body": "Reply"}, original)
     assert sent[0][0] == "messages/send" and sent[0][1]["json"]["threadId"] == "thread-1"
     sent_message = store.messages("sent")[0]
     assert sent_message["provider_id"] == "sent-1" and sent_message["thread_id"] == "thread-1"
     assert "In-Reply-To:" in base64.urlsafe_b64decode(sent[0][1]["json"]["raw"]).decode()
+    assert "Cc: copy@example.com" in base64.urlsafe_b64decode(sent[0][1]["json"]["raw"]).decode()
     client.store_message(remote("sent-1", ["SENT"]))
     assert len(store.messages("sent")) == 1
     client.close()

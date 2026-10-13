@@ -1,5 +1,6 @@
-const CACHE = 'milo-shell-v2';
-const SHELL = ['/', '/static/style.css', '/static/app.js', '/static/icon.svg', '/static/fonts/Geist.woff2'];
+import {deviceCache} from '/static/cache.js';
+const CACHE = 'milo-shell-v11';
+const SHELL = ['/', '/static/style.css', '/static/app.js', '/static/cache.js', '/static/replica.js', '/static/search-worker.js', '/static/icon.svg', '/static/fonts/Geist.woff2'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
   self.skipWaiting();
@@ -10,7 +11,24 @@ self.addEventListener('activate', event => {
 });
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  // Authentication, messages and attachments never enter a shared browser cache.
+  if(url.origin===self.location.origin&&/^\/api\/messages\/[^/]+\/attachments\/\d+$/.test(url.pathname)&&event.request.method==='GET'){
+    event.respondWith(fetch(event.request).then(async response=>{
+      if(response.ok)event.waitUntil(deviceCache.setAsset(url.pathname,response.clone()).catch(()=>{}));
+      if(response.status>=500||response.status===429)return await deviceCache.getAsset(url.pathname)||response;
+      return response;
+    }).catch(async()=>await deviceCache.getAsset(url.pathname)||Response.error()));
+    return;
+  }
+  // API data is managed explicitly in the device's encrypted IndexedDB cache.
   if (url.origin !== self.location.origin || url.pathname.startsWith('/api/') || event.request.method !== 'GET') return;
-  event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
+  // The installed app must start from the device even if a remote host stalls.
+  event.respondWith(caches.match(event.request).then(cached=>{
+    const fresh=fetch(event.request).then(async response=>{
+      if(response.status===401||response.status===404)await caches.delete(CACHE);
+      else if(response.ok&&SHELL.includes(url.pathname)){const cache=await caches.open(CACHE);await cache.put(event.request,response.clone());}
+      return response;
+    });
+    if(cached){event.waitUntil(fresh.catch(()=>{}));return cached;}
+    return fresh;
+  }));
 });

@@ -23,6 +23,26 @@ GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me/"
 HIDDEN_LABELS = {"TRASH", "SPAM", "DRAFT"}
 
 
+def gmail_error(response):
+    # Use structured reasons only; Google's free-form message can contain
+    # account identifiers, URLs and request data.
+    try:
+        error = response.json().get("error", {})
+        reasons = {item.get("reason") for group in ("errors", "details")
+                   for item in error.get(group, []) if isinstance(item, dict)}
+    except (ValueError, TypeError, AttributeError):
+        reasons = set()
+    if reasons & {"insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}:
+        return "Manca il permesso Gmail. Ricollega la casella e consenti di leggere e gestire le email."
+    if reasons & {"accessNotConfigured", "SERVICE_DISABLED"}:
+        return "Gmail API è disabilitata nel progetto del client OAuth. Abilitala in Google Cloud."
+    if "domainPolicy" in reasons:
+        return "L’amministratore Google Workspace blocca Milo. Deve autorizzare l’app per questa casella."
+    if response.status_code == 429 or reasons & {"rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded", "quotaExceeded"}:
+        return "Google ha limitato temporaneamente le richieste. Milo riproverà la sincronizzazione."
+    return "Google ha rifiutato questa operazione Gmail. Controlla i permessi della casella nelle impostazioni."
+
+
 def decode_raw(raw):
     return base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
 
@@ -97,6 +117,10 @@ class GoogleOAuth:
                 response = session.get(GMAIL_API + "profile", timeout=30)
                 response.raise_for_status()
                 address = response.json()["emailAddress"]
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code in {403, 429}:
+                raise RuntimeError(gmail_error(exc.response)) from exc
+            raise RuntimeError("Google non ha completato il collegamento. Controlla client OAuth, Gmail API e consenso.") from exc
         except (requests.RequestException, OAuth2Error, GoogleAuthError, KeyError, Warning) as exc:
             raise RuntimeError("Google non ha completato il collegamento. Controlla client OAuth, Gmail API e consenso.") from exc
         if not isinstance(address, str) or "@" not in address:
@@ -109,8 +133,10 @@ class GoogleOAuth:
 
 
 class Gmail:
-    def __init__(self, store, account_id):
+    def __init__(self, store, account_id, progress=None):
         self.store, self.account_id = store, account_id
+        self.progress = progress or (lambda phase, count: None)
+        self.downloaded = 0
         rows = store.rows("SELECT secret FROM accounts WHERE id=? AND provider='google'", (account_id,))
         if not rows:
             raise RuntimeError("Account Google non trovato")
@@ -135,8 +161,8 @@ class Gmail:
                 self.last_token = self.credentials.token
             if response.status_code == 404:
                 return None
-            if response.status_code == 403:
-                raise RuntimeError("Google ha rifiutato l'accesso. Controlla consenso e abilitazione della Gmail API.")
+            if response.status_code in {403, 429}:
+                raise RuntimeError(gmail_error(response))
             response.raise_for_status()
             return response.json()
         except GoogleAuthError as exc:
@@ -218,11 +244,15 @@ class Gmail:
         return added
 
     def fetch_message(self, remote_id):
+        self.progress("downloading", self.downloaded)
         remote = self.request("GET", "messages/" + quote(remote_id, safe=""), params={"format": "raw"})
         if remote is None:
             self.remove_message(remote_id)
             return 0
-        return self.store_message(remote)
+        added = self.store_message(remote)
+        self.downloaded += 1
+        self.progress("downloading", self.downloaded)
+        return added
 
     def store_message(self, remote):
         remote_id = remote["id"]
@@ -244,7 +274,7 @@ class Gmail:
                 message_id = existing[0]["id"]
                 pending = {op["kind"] for op in self.store.rows("SELECT kind FROM outbox WHERE message_id=?", (message_id,))}
                 for key in ("read", "starred", "archived", "sent", "hidden", "labels", "thread_id"):
-                    if key not in pending:
+                    if key not in pending and not (key == "hidden" and "trash" in pending):
                         self.store.execute(f"UPDATE messages SET {key}=? WHERE id=?", (data[key], message_id))
             else:
                 self.store.upsert_message(data)
@@ -256,16 +286,20 @@ class Gmail:
         self.store.execute("DELETE FROM gmail_scan WHERE account_id=? AND provider_id=?", (self.account_id, remote_id))
 
     def flush_changes(self):
+        self.progress("applying", self.downloaded)
         pending = self.store.rows("SELECT o.*,m.provider_id FROM outbox o JOIN messages m ON m.id=o.message_id "
                                   "WHERE m.account_id=? ORDER BY o.created", (self.account_id,))
         for operation in pending:
             value = json.loads(operation["value"])
             kind = operation["kind"]
-            label = {"read": "UNREAD", "starred": "STARRED", "archived": "INBOX"}[kind]
-            add = value if kind == "starred" else not value
             try:
-                result = self.request("POST", "messages/" + quote(operation["provider_id"], safe="") + "/modify",
-                                      json={"addLabelIds": [label] if add else [], "removeLabelIds": [] if add else [label]})
+                if kind == "trash":
+                    result = self.request("POST", "messages/" + quote(operation["provider_id"], safe="") + "/trash")
+                else:
+                    label = {"read": "UNREAD", "starred": "STARRED", "archived": "INBOX"}[kind]
+                    add = value if kind == "starred" else not value
+                    result = self.request("POST", "messages/" + quote(operation["provider_id"], safe="") + "/modify",
+                                          json={"addLabelIds": [label] if add else [], "removeLabelIds": [] if add else [label]})
                 if result is None:
                     self.remove_message(operation["provider_id"])
                 else:

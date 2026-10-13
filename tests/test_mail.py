@@ -167,6 +167,7 @@ def test_html_scripts_not_in_plain_email():
 
 def test_smtp_requires_tls_and_preserves_reply_headers(account_data, monkeypatch):
     calls = []
+    envelopes = []
 
     class SMTP:
         def __init__(self, host, port, timeout, **kwargs):
@@ -189,6 +190,7 @@ def test_smtp_requires_tls_and_preserves_reply_headers(account_data, monkeypatch
 
         def send_message(self, message, **kwargs):
             calls.append(message)
+            envelopes.append(kwargs['to_addrs'])
             return {}
 
     monkeypatch.setattr("milo.mail.smtplib.SMTP_SSL", SMTP)
@@ -201,5 +203,8 @@ def test_smtp_requires_tls_and_preserves_reply_headers(account_data, monkeypatch
     calls.clear()
     send_mail({**account_data, "smtp_port": 587, "smtp_security": "starttls"}, draft)
     assert calls.index("starttls") < calls.index("login")
+    message = send_mail(account_data, {**draft, 'cc': 'Marco <marco@example.com>, giulia@example.com'})
+    assert 'marco@example.com' in message['Cc']
+    assert envelopes[-1] == ['giulia@example.com', 'marco@example.com']
     with pytest.raises(ValueError):
         send_mail(account_data, {**draft, "to": "invalid"})

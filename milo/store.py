@@ -17,6 +17,7 @@ class Store:
         directory.chmod(0o700)
         self.directory = directory
         self.lock = threading.RLock()
+        self.on_mail_change = lambda: None
         key_path = directory / "vault.key"
         if not key_path.exists():
             fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -63,7 +64,8 @@ class Store:
         migrations = {
             "accounts": {"provider": "TEXT NOT NULL DEFAULT 'imap'", "enabled": "INTEGER NOT NULL DEFAULT 1"},
             "messages": {"provider_id": "TEXT", "thread_id": "TEXT", "labels": "TEXT",
-                         "hidden": "INTEGER NOT NULL DEFAULT 0"},
+                         "hidden": "INTEGER NOT NULL DEFAULT 0", "pinned": "INTEGER NOT NULL DEFAULT 0",
+                         "trashed": "INTEGER NOT NULL DEFAULT 0", "content_version": "TEXT"},
         }
         with self.lock, self.db:
             for table, columns in migrations.items():
@@ -82,6 +84,11 @@ class Store:
                 CREATE TABLE IF NOT EXISTS gmail_scan(
                     account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
                     provider_id TEXT, PRIMARY KEY(account_id,provider_id));
+                CREATE INDEX IF NOT EXISTS messages_thread ON messages(account_id,thread_id);
+                CREATE INDEX IF NOT EXISTS messages_conversation ON messages(account_id,COALESCE(thread_id,id));
+                CREATE INDEX IF NOT EXISTS messages_client_catalogue
+                    ON messages(account_id,COALESCE(thread_id,id),date DESC,id)
+                    WHERE hidden=0 AND trashed=0;
             """)
 
     def encrypt_json(self, value):
@@ -160,9 +167,14 @@ class Store:
     def set_setting(self, key, value):
         self.execute("INSERT OR REPLACE INTO settings VALUES(?,?)", (key, json.dumps(value)))
 
+    def setup_allowed(self, token):
+        with self.lock:
+            return bool(token and self.bootstrap and not self.setting("password")
+                        and secrets.compare_digest(token.encode(), self.bootstrap.encode()))
+
     def setup(self, password, bootstrap):
         with self.lock:
-            if self.setting("password") or not secrets.compare_digest(bootstrap, self.bootstrap or ""):
+            if not self.setup_allowed(bootstrap):
                 return False
             salt = secrets.token_hex(16)
             self.set_setting("password", {"salt": salt, "hash": self.hash_password(password, salt)})
@@ -209,14 +221,14 @@ class Store:
         return account
 
     def update_account(self, account_id, patch):
-        allowed = {"name", "enabled", "username", "password", "imap_host", "imap_port", "smtp_host", "smtp_port", "smtp_security"}
+        allowed = {"name", "enabled", "color", "username", "password", "imap_host", "imap_port", "smtp_host", "smtp_port", "smtp_security"}
         if set(patch) - allowed or any(value is None for value in patch.values()):
             raise ValueError("Impostazioni account non valide")
         with self.lock:
             account = self.account(account_id)
             if not account:
                 raise ValueError("Account non trovato")
-            connection = set(patch) - {"name", "enabled"}
+            connection = set(patch) - {"name", "enabled", "color"}
             if account["provider"] == "google" and connection:
                 raise ValueError("Per aggiornare l'accesso Google usa Ricollega")
             values = dict(patch)
@@ -238,11 +250,17 @@ class Store:
                      tuple(value.values()))
         return value["id"]
 
-    def message(self, message_id, raw=False):
-        rows = self.rows("SELECT * FROM messages WHERE id=?", (message_id,))
+    def message(self, message_id, raw=False, metadata=False):
+        fields = self.message_fields(metadata, raw)
+        rows = self.rows(f"SELECT {fields} FROM messages WHERE id=?", (message_id,))
         if not rows:
             return None
         return self.public_message(rows[0], raw)
+
+    @staticmethod
+    def message_fields(metadata=False, raw=False):
+        fields = "id,account_id,thread_id,provider_id,message_id,sender,sender_email,recipients,subject,preview,date,read,starred,archived,sent,category,snoozed_until,analysis,pinned,trashed,hidden,content_version"
+        return "*" if raw else fields if metadata else fields + ",folder,uidvalidity,uid,body,labels"
 
     @staticmethod
     def public_message(row, raw=False):
@@ -253,7 +271,7 @@ class Store:
         return row
 
     def messages(self, view="inbox", category=None, account=None, search="", limit=500):
-        clauses, params = ["hidden=0"], []
+        clauses, params = ["hidden=0", "trashed=0"], []
         if view == "inbox":
             clauses.extend(["archived=0", "sent=0", "(snoozed_until IS NULL OR snoozed_until<=?)"])
             params.append(time.time())
@@ -286,6 +304,11 @@ class Store:
             if existing:
                 return existing[0]["id"]
             data = dict(data)
+            data["content_version"] = hashlib.sha256(data["raw"]).hexdigest()
+            if data.get("thread_id"):
+                pinned = self.rows("SELECT MAX(pinned) AS pinned FROM messages WHERE account_id=? AND thread_id=?",
+                                   (data["account_id"], data["thread_id"]))
+                data["pinned"] = pinned[0]["pinned"] or 0
             data["id"] = uuid.uuid4().hex
             for rule in self.rules():
                 field = {"sender": data.get("sender_email", ""), "subject": data.get("subject", ""),
@@ -296,6 +319,7 @@ class Store:
             columns = list(data)
             self.execute(f"INSERT INTO messages({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
                          tuple(data.values()))
+            self.on_mail_change()
             return data["id"]
 
     def patch_message(self, message_id, patch):
@@ -309,6 +333,123 @@ class Store:
                     self.db.execute("INSERT INTO outbox VALUES(?,?,?,?,?,NULL)",
                                     (uuid.uuid4().hex, message_id, key, json.dumps(value), time.time()))
             return True
+
+    def conversation(self, message_id, raw=False, metadata=False, limit=None, body_limit=None):
+        message = self.message(message_id, metadata=True)
+        if not message:
+            return []
+        if not message.get("thread_id"):
+            return [self.message(message_id, raw=raw, metadata=metadata)]
+        fields = self.message_fields(metadata, raw)
+        params = []
+        if body_limit is not None and not metadata and not raw:
+            fields = fields.replace(",body,", ",substr(body,1,?) AS body,")
+            params.append(body_limit)
+        params.extend((message["account_id"], message["thread_id"]))
+        order = "date DESC,id DESC LIMIT ?" if limit else "date,id"
+        if limit:
+            params.append(limit)
+        result = [self.public_message(row, raw=raw) for row in self.rows(
+            f"SELECT {fields} FROM messages WHERE account_id=? AND thread_id=? AND hidden=0 AND trashed=0 ORDER BY {order}",
+            params)]
+        return list(reversed(result)) if limit else result
+
+    def message_headers(self, message_id):
+        size = 65536
+        while True:
+            rows = self.rows("SELECT substr(raw,1,?) AS headers FROM messages WHERE id=?", (size, message_id))
+            headers = rows[0]["headers"] or b"" if rows else b""
+            for separator in (b"\r\n\r\n", b"\n\n"):
+                if separator in headers:
+                    return headers.split(separator, 1)[0] + separator
+            if len(headers) < size:
+                return headers
+            if size >= 1048576:
+                raise ValueError("Intestazioni del messaggio troppo grandi")
+            size *= 2
+
+    def patch_conversation(self, message_id, patch):
+        with self.lock, self.db:
+            messages = self.conversation(message_id)
+            for message in messages:
+                self.patch_message(message["id"], patch)
+            return bool(messages)
+
+    def trash_conversation(self, message_id):
+        with self.lock, self.db:
+            messages = self.conversation(message_id)
+            for message in messages:
+                self.db.execute("UPDATE messages SET trashed=1 WHERE id=?", (message["id"],))
+                self.db.execute("DELETE FROM outbox WHERE message_id=?", (message["id"],))
+                self.db.execute("INSERT INTO outbox VALUES(?,?,?,?,?,NULL)",
+                                (uuid.uuid4().hex, message["id"], "trash", "true", time.time()))
+            return bool(messages)
+
+    def conversations(self, view="inbox", category=None, account=None, search="", limit=100,
+                      before=None, chronological=False, thread=None):
+        # Fetch only list metadata. Bodies and MIME blobs belong to the reader.
+        clauses, params = ["hidden=0", "trashed=0"], []
+        views = {"inbox": "archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?)",
+                 "starred": "starred=1", "archive": "archived=1 AND sent=0", "sent": "sent=1",
+                 "snoozed": "snoozed_until>?"}
+        if view in views:
+            clauses.append(views[view])
+            if view in {"inbox", "snoozed"}:
+                params.append(time.time())
+        if category:
+            clauses.append("category=?")
+            params.append(category)
+        if account:
+            clauses.append("account_id=?")
+            params.append(account)
+        if thread:
+            clauses.append("COALESCE(thread_id,id)=?")
+            params.append(thread)
+        if search:
+            clauses.append("(sender LIKE ? OR sender_email LIKE ? OR subject LIKE ? OR body LIKE ?)")
+            params.extend([f"%{search}%"] * 4)
+        cursor = " AND (date<? OR (date=? AND id<?))" if before else ""
+        ordering = "date DESC,id DESC" if chronological else "pinned DESC,date DESC"
+        if before:
+            params.extend((before[0], before[0], before[1]))
+        eligible = """WITH eligible AS (
+            SELECT account_id,COALESCE(thread_id,id) AS thread FROM messages WHERE """ + " AND ".join(clauses) + """
+            GROUP BY account_id,COALESCE(thread_id,id)
+        ), ranked AS ("""
+        if chronological and view == "all" and not any((category, account, search, thread)):
+            eligible = """WITH latest AS (
+                SELECT id,account_id,COALESCE(thread_id,id) AS thread,date,
+                       ROW_NUMBER() OVER (PARTITION BY account_id,COALESCE(thread_id,id) ORDER BY date DESC,id) AS rank
+                FROM messages WHERE hidden=0 AND trashed=0
+            ), eligible AS MATERIALIZED (
+                SELECT account_id,thread FROM latest WHERE rank=1""" + cursor + """
+                ORDER BY date DESC,id DESC LIMIT ?
+            ), ranked AS ("""
+            params.append(limit)
+            cursor = ""
+        rows = self.rows(eligible + """
+                SELECT m.id,m.account_id,m.thread_id,m.sender,m.sender_email,m.subject,m.preview,m.date,
+                       m.read,m.content_version,MAX(m.starred) OVER w AS starred,m.archived,m.sent,m.category,
+                       MAX(m.snoozed_until) OVER w AS snoozed_until,
+                       MAX(m.sent=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<=CAST(strftime('%s','now') AS REAL))) OVER w AS has_inbox,
+                       MAX(m.sent=0 AND m.archived=1) OVER w AS has_archive,
+                       MAX(m.sent=1) OVER w AS has_sent,
+                       SUM(m.sent=0) OVER w AS received_count,
+                       SUM(m.sent=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<=CAST(strftime('%s','now') AS REAL))) OVER w AS inbox_count,
+                       SUM(m.sent=0 AND m.read=0 AND m.archived=0 AND (m.snoozed_until IS NULL OR m.snoozed_until<=CAST(strftime('%s','now') AS REAL))) OVER w AS inbox_unread_count,
+                       MAX(m.pinned) OVER w AS pinned,COUNT(*) OVER w AS message_count,
+                       SUM(m.read=0 AND m.sent=0) OVER w AS unread_count,
+                       SUM(m.analysis IS NOT NULL) OVER w AS analyzed_count,
+                       ROW_NUMBER() OVER (PARTITION BY m.account_id,COALESCE(m.thread_id,m.id) ORDER BY m.date DESC,m.id) AS rank
+                FROM messages m JOIN eligible e ON m.account_id=e.account_id AND COALESCE(m.thread_id,m.id)=e.thread
+                WHERE m.hidden=0 AND m.trashed=0
+                WINDOW w AS (PARTITION BY m.account_id,COALESCE(m.thread_id,m.id))
+            ) SELECT * FROM ranked WHERE rank=1""" + cursor + " ORDER BY " + ordering + " LIMIT ?", (*params, limit))
+        for row in rows:
+            row.pop("rank")
+            row["read"] = int(not row["unread_count"])
+            row["replied"] = bool(row["sent"])
+        return rows
 
     def reconcile_flags(self, message_id, read, starred):
         with self.lock:

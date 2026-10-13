@@ -1,0 +1,50 @@
+name: milo
+services:
+  server:
+    image: milo-server:current
+    build: .
+    restart: unless-stopped
+    init: true
+    user: "${MILO_UID:-501}:${MILO_GID:-20}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment:
+      MILO_DATA: /data
+      MILO_CONTAINER: "1"
+      MILO_PROXY_PEER: "10.241.84.1"
+      MILO_PUBLIC_URL: https://milo.grooooog.space
+      MILO_OLLAMA_URL: "${MILO_OLLAMA_URL:-http://host.docker.internal:11434}"
+    volumes:
+      - type: bind
+        source: "${MILO_ARCHIVE:?Set MILO_ARCHIVE to the existing archive}"
+        target: /data
+        bind:
+          create_host_path: false
+    ports:
+      - "127.0.0.1:${MILO_LANDING_PORT:-8025}:8025"
+      - "127.0.0.1:${MILO_PRIVATE_PORT:-8029}:8029"
+    networks:
+      - server
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; a=urllib.request.urlopen('http://127.0.0.1:8025/',timeout=3); assert a.headers.get('X-Milo-Surface')=='public'; s=json.load(urllib.request.urlopen('http://127.0.0.1:8029/api/status',timeout=3)); assert s['service']=='milo' and s['access']=='tailscale'"]
+      interval: 15s
+      timeout: 8s
+      start_period: 30s
+      retries: 3
+    stop_grace_period: 180s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+networks:
+  server:
+    ipam:
+      config:
+        - subnet: 10.241.84.0/24
+          gateway: 10.241.84.1
