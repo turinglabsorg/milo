@@ -1,4 +1,10 @@
 // Device-local, origin-isolated cache. Provider tokens never enter this database.
+// Ask the browser to keep this origin's storage instead of treating it as
+// evictable: granted to installed/high-engagement apps on Chromium and to
+// home-screen apps on iOS, where IndexedDB is the shared local store.
+if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
+  navigator.storage.persist().catch(() => {});
+}
 const memory=new Map();
 const sizes=new Map(),versions=new Map();
 let memoryBytes=0,generation=0;

@@ -37,7 +37,15 @@ the complete archive; a server-side archive alone does not satisfy this requirem
 ## Current client
 
 The shared client uses an origin-isolated IndexedDB database with AES-GCM payloads
-and a persisted non-extractable CryptoKey. Its private service worker retains the
+and a persisted non-extractable CryptoKey. On load it requests persistent
+storage (`navigator.storage.persist()`), so the browser treats the cache as
+durable rather than evictable where the platform grants it — installed apps
+on Chromium and home-screen apps on iOS. IndexedDB is the one local store
+shared by the Linux and iOS web clients; the future native iOS app keeps the
+same contract on SQLite with Keychain-protected keys instead. A hard refresh
+never clears this cache: only logout, an authorization loss, or the user
+clearing site data does, and even then only the device copy is lost — the
+server archive remains authoritative and the client downloads again. Its private service worker retains the
 app shell, retires previous shell versions and refreshes client resources in
 background while serving the current cached copy immediately. API data is managed explicitly; OAuth/provider credentials are never
 cached. Browser profile and device access remain the local trust boundary. Cache
