@@ -10,6 +10,11 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import httpx
 
 TODO_WINDOW = 30 * 86400
+NO_ACTION = ("nessuna azione", "nessun'azione", "no action", "non è richiesta alcuna azione", "non serve alcuna azione")
+# An action item stays open while its mail is in the inbox and the owner has not replied since.
+OPEN_TODO = ("t.done IS NULL AND m.trashed=0 AND m.hidden=0 AND (t.kind<>'action' OR (m.archived=0 AND NOT EXISTS ("
+             "SELECT 1 FROM messages r WHERE r.account_id=m.account_id AND r.thread_id=m.thread_id AND r.sent=1 "
+             "AND r.date>m.date)))")
 PRIORITY = {"high": 0, "normal": 1, "low": 2}
 
 
@@ -90,7 +95,8 @@ class Features:
     # To-do list from AI action items
 
     def sync_todos(self, message_id, analysis):
-        items = [item.strip() for item in (analysis or {}).get("action_items", []) if isinstance(item, str) and item.strip()]
+        items = [item.strip() for item in (analysis or {}).get("action_items", []) if isinstance(item, str) and item.strip()
+                 and not item.strip().casefold().startswith(NO_ACTION)]
         priority = (analysis or {}).get("priority", "normal")
         with self.store.transaction():
             done = {row["text"] for row in self.store.rows(
@@ -120,13 +126,12 @@ class Features:
         rows = self.store.rows(
             "SELECT t.id,t.message_id,t.text,t.priority,t.kind,t.created,m.sender,m.sender_email,m.subject,m.date,"
             "m.account_id,m.thread_id FROM todos t JOIN messages m ON m.id=t.message_id "
-            "WHERE t.done IS NULL AND m.trashed=0 AND m.hidden=0 ORDER BY t.seq DESC LIMIT 300")
+            f"WHERE {OPEN_TODO} ORDER BY t.seq DESC LIMIT 300")
         # Newest first overall; items of one message keep the order the analysis gave them.
         return sorted(reversed(rows), key=lambda row: (PRIORITY.get(row["priority"], 1), -(row["date"] or 0)))
 
     def todo_count(self):
-        return self.store.rows("SELECT COUNT(*) AS count FROM todos t JOIN messages m ON m.id=t.message_id "
-                               "WHERE t.done IS NULL AND m.trashed=0 AND m.hidden=0")[0]["count"]
+        return self.store.rows(f"SELECT COUNT(*) AS count FROM todos t JOIN messages m ON m.id=t.message_id WHERE {OPEN_TODO}")[0]["count"]
 
     def set_todo(self, todo_id, done):
         return bool(self.store.execute("UPDATE todos SET done=? WHERE id=?",

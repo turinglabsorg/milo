@@ -132,6 +132,10 @@ def test_analysis_action_items_become_todos_and_can_be_completed(logged_in, acco
     features.sync_todos(message_id, {"priority": "high", "action_items": ["Inviare il preventivo", "Rispondere"]})
     assert [todo["text"] for todo in logged_in.get("/api/todos").json()["todos"]] == ["Rispondere"]
     assert logged_in.patch("/api/todos/missing", json={"done": True}).status_code == 404
+    features.sync_todos(message_id, {"priority": "low", "action_items": ["Nessuna azione richiesta", "Rispondere"]})
+    assert [todo["text"] for todo in logged_in.get("/api/todos").json()["todos"]] == ["Rispondere"]
+    store.execute("UPDATE messages SET archived=1 WHERE id=?", (message_id,))
+    assert logged_in.get("/api/todos").json()["todos"] == [] and logged_in.get("/api/state").json()["counts"]["todo"] == 0
 
 
 def test_blocked_sender_is_archived_now_and_later(logged_in, account_data):
