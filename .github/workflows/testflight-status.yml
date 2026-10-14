@@ -1,0 +1,39 @@
+name: TestFlight status
+on:
+  workflow_dispatch:
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List builds and beta groups (read-only)
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          pip install --quiet "pyjwt[crypto]==2.10.1" "requests==2.32.3"
+          python3 - <<'PY'
+          import os, time, jwt, requests
+          token = jwt.encode({"iss": os.environ["ASC_ISSUER_ID"], "iat": int(time.time()), "exp": int(time.time()) + 600,
+                              "aud": "appstoreconnect-v1"}, os.environ["ASC_KEY_P8"], algorithm="ES256",
+                             headers={"kid": os.environ["ASC_KEY_ID"]})
+          api = lambda path, **params: requests.get("https://api.appstoreconnect.apple.com/v1" + path,
+                                                    headers={"Authorization": f"Bearer {token}"}, params=params, timeout=30).json()
+          apps = api("/apps", **{"filter[bundleId]": "io.meaningtech.milo"})["data"]
+          app = apps[0]
+          print("app", app["attributes"]["name"], app["id"])
+          for build in api("/builds", **{"filter[app]": app["id"], "sort": "-uploadedDate", "limit": 5,
+                                         "include": "buildBetaDetail"}).get("data", []):
+              a = build["attributes"]
+              detail = api(f"/builds/{build['id']}/buildBetaDetail")["data"]["attributes"]
+              print("build", a["version"], a["processingState"], "expired" if a["expired"] else "", a["uploadedDate"],
+                    "internal:", detail.get("internalBuildState"), "external:", detail.get("externalBuildState"),
+                    "encryption:", a.get("usesNonExemptEncryption"))
+          for group in api(f"/apps/{app['id']}/betaGroups").get("data", []):
+              g = group["attributes"]
+              builds = api(f"/betaGroups/{group['id']}/builds").get("data", [])
+              testers = api(f"/betaGroups/{group['id']}/betaTesters").get("data", [])
+              print("group", g["name"], "internal" if g["isInternalGroup"] else "external",
+                    "automatic:", g.get("hasAccessToAllBuilds"), "builds:", [b["attributes"]["version"] for b in builds],
+                    "testers:", len(testers))
+          PY
