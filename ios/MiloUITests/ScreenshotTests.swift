@@ -34,7 +34,8 @@ final class ScreenshotTests: XCTestCase {
 
         row.tap()
         XCTAssertTrue(app.buttons["reply"].waitForExistence(timeout: 10))
-        sleep(2)
+        let body = app.webViews.staticTexts.containing(NSPredicate(format: "label CONTAINS 'design'")).firstMatch
+        XCTAssertTrue(body.waitForExistence(timeout: 15), "The mail body must render in the web view")
         save("02-thread")
 
         app.buttons["reply"].tap()
