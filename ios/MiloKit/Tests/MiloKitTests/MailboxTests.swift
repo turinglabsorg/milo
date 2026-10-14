@@ -164,6 +164,20 @@ final class MailboxTests: XCTestCase {
         XCTAssertEqual(mailbox.thread.first?.bodyLoaded, true)
     }
 
+    func testRestartingServiceIsRetriedForReadsAndSuggestions() async throws {
+        let transport = RestartingTransport(failures: 2)
+        let api = APIClient(baseURL: URL(string: "https://milo.example")!, transport: transport, retryDelays: [0.01, 0.01, 0.01])
+        let replies = try await api.suggestions(for: "m1")
+        XCTAssertEqual(replies.count, 3)
+        transport.failures = 2
+        let todos = try await api.todos()
+        XCTAssertEqual(todos.count, 2)
+        transport.failures = 1
+        do { try await api.setTodo("t1", done: true); XCTFail("Writes are not repeated") } catch let error as APIError {
+            XCTAssertEqual(error.status, 502)
+        }
+    }
+
     func testSubjectCore() {
         XCTAssertEqual(Mailbox.subjectCore("Re: Fwd: RE: Progetto"), "Progetto")
         XCTAssertEqual(Mailbox.subjectCore(""), "Senza oggetto")
@@ -177,6 +191,20 @@ final class WakingTransport: Transport, @unchecked Sendable {
     init(failures: Int) { self.failures = failures }
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         if failures > 0 { failures -= 1; throw URLError(.networkConnectionLost) }
+        return try await demo.send(request)
+    }
+}
+
+/// Answers 502 like the Tailscale proxy while the service restarts.
+final class RestartingTransport: Transport, @unchecked Sendable {
+    let demo = DemoTransport()
+    var failures: Int
+    init(failures: Int) { self.failures = failures }
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        if failures > 0 {
+            failures -= 1
+            return (Data(), HTTPURLResponse(url: request.url!, statusCode: 502, httpVersion: nil, headerFields: nil)!)
+        }
         return try await demo.send(request)
     }
 }

@@ -85,10 +85,13 @@ struct ThreadView: View {
                     ForEach(replies, id: \.self) { reply in
                         Button { compose = mailbox.replyDraft(body: reply) } label: {
                             Text(reply).font(.subheadline).multilineTextAlignment(.leading)
-                                .padding(.horizontal, 12).padding(.vertical, 8)
-                                .overlay(Capsule().strokeBorder(Color.milo.line))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 16).padding(.vertical, 12)
+                                .background(Color.milo.surfaceAlt, in: RoundedRectangle(cornerRadius: 14))
+                                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.milo.line))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityHint("Apre una risposta con questo testo")
                     }
                 } else {
                     Button {

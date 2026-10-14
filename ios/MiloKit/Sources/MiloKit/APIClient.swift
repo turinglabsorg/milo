@@ -70,14 +70,16 @@ public final class APIClient: Sendable {
     }
 
     func data(_ method: String, _ path: String, query: [String: String] = [:], body: Data? = nil,
-              timeout: TimeInterval = 15) async throws -> Data {
+              timeout: TimeInterval = 15, idempotent: Bool? = nil, attempt start: Int = 0) async throws -> Data {
+        // Reads and side-effect-free AI requests are retried; writes are never sent twice.
+        let repeatable = idempotent ?? (method == "GET")
         var request = URLRequest(url: url(path, query), timeoutInterval: timeout)
         request.httpMethod = method
         if let body {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
-        var attempt = 0
+        var attempt = start
         var result: (Data, HTTPURLResponse)?
         while result == nil {
             do {
@@ -85,8 +87,7 @@ public final class APIClient: Sendable {
             } catch let error as APIError {
                 throw error
             } catch {
-                // Only reads are repeated: a write that may have arrived is never sent twice.
-                guard method == "GET", attempt < retryDelays.count, !Task.isCancelled else {
+                guard repeatable, attempt < retryDelays.count, !Task.isCancelled else {
                     throw APIError(status: 0, message: "Milo non è raggiungibile. Controlla che Tailscale sia attivo.")
                 }
                 try? await Task.sleep(nanoseconds: UInt64(retryDelays[attempt] * 1_000_000_000))
@@ -94,6 +95,12 @@ public final class APIClient: Sendable {
             }
         }
         let (data, response) = result!
+        // A restarting service answers 502/503/504 through the Tailscale proxy for a moment.
+        if repeatable, [502, 503, 504].contains(response.statusCode), attempt < retryDelays.count, !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: UInt64(retryDelays[attempt] * 1_000_000_000))
+            return try await self.data(method, path, query: query, body: body, timeout: timeout,
+                                  idempotent: repeatable, attempt: attempt + 1)
+        }
         guard (200..<300).contains(response.statusCode) else {
             let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"] as? String
             throw APIError(status: response.statusCode, message: detail ?? "Operazione non riuscita (\(response.statusCode))")
@@ -110,8 +117,9 @@ public final class APIClient: Sendable {
     }
 
     @discardableResult
-    func call(_ method: String, _ path: String, body: [String: Any]? = nil) async throws -> Data {
-        try await data(method, path, body: try body.map { try JSONSerialization.data(withJSONObject: $0) }, timeout: 60)
+    func call(_ method: String, _ path: String, body: [String: Any]? = nil, idempotent: Bool? = nil) async throws -> Data {
+        try await data(method, path, body: try body.map { try JSONSerialization.data(withJSONObject: $0) }, timeout: 90,
+                       idempotent: idempotent)
     }
 
     static func encode(_ id: String) -> String {
@@ -203,12 +211,12 @@ public final class APIClient: Sendable {
 
     public func suggestions(for messageId: String) async throws -> [String] {
         struct Replies: Decodable { var replies: [String] }
-        let data = try await call("POST", "/messages/\(Self.encode(messageId))/suggestions")
+        let data = try await call("POST", "/messages/\(Self.encode(messageId))/suggestions", idempotent: true)
         return try Self.decoder.decode(Replies.self, from: data).replies
     }
 
     public func ask(_ question: String) async throws -> Answer {
-        try Self.decoder.decode(Answer.self, from: try await call("POST", "/ask", body: ["question": question]))
+        try Self.decoder.decode(Answer.self, from: try await call("POST", "/ask", body: ["question": question], idempotent: true))
     }
 
     public func setVIP(_ email: String, _ vip: Bool) async throws {
