@@ -114,7 +114,9 @@ class Push:
     def payload(item):
         return {"aps": {"alert": {"title": item.get("sender") or item.get("sender_email") or "Nuova email",
                                   "body": item.get("subject") or "(senza oggetto)"},
-                        "sound": "default", "thread-id": f"{item.get('account_id')}:{item.get('thread_id') or item.get('id')}"},
+                        "sound": "default", "thread-id": f"{item.get('account_id')}:{item.get('thread_id') or item.get('id')}",
+                        # Wakes the app in background to download the conversation before it is opened.
+                        "content-available": 1},
                 "message_id": item.get("id"), "account_id": item.get("account_id"), "thread_id": item.get("thread_id")}
 
     # APNs transport

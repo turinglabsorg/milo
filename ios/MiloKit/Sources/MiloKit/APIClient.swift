@@ -18,7 +18,18 @@ public protocol Transport: Sendable {
 public struct URLSessionTransport: Transport {
     let session: URLSession
 
-    public init(session: URLSession = .shared) { self.session = session }
+    public init(session: URLSession = URLSessionTransport.patient) { self.session = session }
+
+    /// Waits for the network (a VPN like Tailscale may take a moment to wake) instead of failing at once.
+    public static let patient: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        #if os(iOS) || os(macOS)
+        configuration.waitsForConnectivity = true
+        #endif
+        configuration.timeoutIntervalForRequest = 20
+        configuration.timeoutIntervalForResource = 60
+        return URLSession(configuration: configuration)
+    }()
 
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let (data, response) = try await session.data(for: request)
@@ -30,6 +41,8 @@ public struct URLSessionTransport: Transport {
 public final class APIClient: Sendable {
     public let baseURL: URL
     let transport: Transport
+    /// Pauses before retrying a read that never reached the service.
+    let retryDelays: [Double]
 
     static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
@@ -42,9 +55,10 @@ public final class APIClient: Sendable {
         return encoder
     }()
 
-    public init(baseURL: URL, transport: Transport = URLSessionTransport()) {
+    public init(baseURL: URL, transport: Transport = URLSessionTransport(), retryDelays: [Double] = [0.4, 1.2, 2.5, 4]) {
         self.baseURL = baseURL
         self.transport = transport
+        self.retryDelays = retryDelays
     }
 
     func url(_ path: String, _ query: [String: String] = [:]) -> URL {
@@ -63,14 +77,23 @@ public final class APIClient: Sendable {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
-        let data: Data, response: HTTPURLResponse
-        do {
-            (data, response) = try await transport.send(request)
-        } catch let error as APIError {
-            throw error
-        } catch {
-            throw APIError(status: 0, message: "Milo non è raggiungibile. Controlla che Tailscale sia attivo.")
+        var attempt = 0
+        var result: (Data, HTTPURLResponse)?
+        while result == nil {
+            do {
+                result = try await transport.send(request)
+            } catch let error as APIError {
+                throw error
+            } catch {
+                // Only reads are repeated: a write that may have arrived is never sent twice.
+                guard method == "GET", attempt < retryDelays.count, !Task.isCancelled else {
+                    throw APIError(status: 0, message: "Milo non è raggiungibile. Controlla che Tailscale sia attivo.")
+                }
+                try? await Task.sleep(nanoseconds: UInt64(retryDelays[attempt] * 1_000_000_000))
+                attempt += 1
+            }
         }
+        let (data, response) = result!
         guard (200..<300).contains(response.statusCode) else {
             let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"] as? String
             throw APIError(status: response.statusCode, message: detail ?? "Operazione non riuscita (\(response.statusCode))")

@@ -8,6 +8,7 @@ import UserNotifications
 final class PushCenter {
     static let shared = PushCenter()
     var token: String?
+    @ObservationIgnored weak var mailbox: Mailbox?
     /// Set when the user taps a notification; MainView opens that conversation.
     var openRequest: (messageId: String, accountId: String?, threadId: String?)?
 
@@ -37,6 +38,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {}
+
+    /// New-mail pushes carry content-available: download the conversation now, before it is tapped.
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async
+        -> UIBackgroundFetchResult {
+        guard let messageId = userInfo["message_id"] as? String,
+              let mailbox = await MainActor.run(body: { PushCenter.shared.mailbox }) else { return .noData }
+        await mailbox.prefetch(messageId: messageId, accountId: userInfo["account_id"] as? String,
+                               threadId: userInfo["thread_id"] as? String)
+        return .newData
+    }
 
     /// Show new-mail banners even while Milo is open.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async

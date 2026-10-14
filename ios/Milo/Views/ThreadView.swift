@@ -5,6 +5,7 @@ import WebKit
 struct ThreadView: View {
     var key: String
     @Binding var compose: Draft?
+    @Binding var selectedKey: String?
     @Environment(Mailbox.self) private var mailbox
     @Environment(Notice.self) private var notice
     @Environment(\.dismiss) private var dismiss
@@ -155,6 +156,10 @@ struct ThreadView: View {
     }
 
     private func act(_ conversation: Conversation, _ patch: MailEdit.Patch, _ message: String? = nil, deleted: Bool = false) {
+        // Leaving the list moves on to the next conversation, like the desktop client.
+        if deleted || patch.archived == true || patch.snoozedUntil != nil {
+            selectedKey = mailbox.neighbour(of: conversation.key)
+        }
         Task { await mailbox.mutate(conversation, patch, deleted: deleted) }
         if let message { notice.show(message) }
     }

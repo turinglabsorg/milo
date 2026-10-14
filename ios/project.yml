@@ -42,6 +42,7 @@ targets:
     info:
       path: Milo/Info.plist
       properties:
+        UIBackgroundModes: [remote-notification]
         CFBundleURLTypes:
           - CFBundleURLName: io.meaningtech.milo.mailto
             CFBundleURLSchemes: [mailto]

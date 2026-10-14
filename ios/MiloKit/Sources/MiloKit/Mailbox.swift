@@ -237,6 +237,34 @@ public final class Mailbox {
         return draft
     }
 
+    /// A push said new mail arrived: store its thread and latest body now, so it opens instantly.
+    public func prefetch(messageId: String, accountId: String?, threadId: String?) async {
+        guard let messages = try? await api.thread(messageId) else { return }
+        let key = (accountId ?? messages.last?.accountId ?? "") + ":" + (threadId ?? messages.last?.threadId ?? messageId)
+        try? await cache.storeThread(key, messages)
+        if let latest = messages.last, await cache.body(latest.id, version: latest.contentVersion) == nil,
+           let body = try? await api.message(latest.id) {
+            try? await cache.storeBody(body)
+        }
+        if let rows = try? await api.conversations(view: .inbox) {
+            try? await cache.merge(rows)
+            await reloadCatalogue()
+        }
+    }
+
+    /// The conversation to show after the current one leaves the list (trash, archive, snooze).
+    public func neighbour(of key: String) -> String? {
+        guard let index = conversations.firstIndex(where: { $0.key == key }) else { return nil }
+        if index + 1 < conversations.count { return conversations[index + 1].key }
+        return index > 0 ? conversations[index - 1].key : nil
+    }
+
+    /// Back in the foreground: a conversation left on an error is tried again.
+    public func retryOpenThread() async {
+        guard threadError != nil, let key = selectedKey, let row = catalogue[key] else { return }
+        await open(row)
+    }
+
     public func close() {
         selectedKey = nil
         thread = []

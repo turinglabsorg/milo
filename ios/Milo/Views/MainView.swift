@@ -35,7 +35,7 @@ struct MainView: View {
             }
         } detail: {
             if let selectedKey {
-                ThreadView(key: selectedKey, compose: $compose)
+                ThreadView(key: selectedKey, compose: $compose, selectedKey: $selectedKey)
                     .id(selectedKey)
             } else {
                 ContentUnavailableView("Spazio per una conversazione.", systemImage: "envelope",
@@ -63,7 +63,10 @@ struct MainView: View {
                 compose = draft
             }
         }
-        .task { if !ProcessInfo.processInfo.arguments.contains("-MiloDemo") { await PushCenter.shared.requestAuthorization() } }
+        .task {
+            PushCenter.shared.mailbox = mailbox
+            if !ProcessInfo.processInfo.arguments.contains("-MiloDemo") { await PushCenter.shared.requestAuthorization() }
+        }
         .onChange(of: PushCenter.shared.token) { _, token in
             guard let token else { return }
             Task { try? await mailbox.api.registerDevice(token: token, environment: PushCenter.environment) }

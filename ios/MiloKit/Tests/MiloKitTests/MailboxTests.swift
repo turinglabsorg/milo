@@ -40,7 +40,7 @@ final class MailboxTests: XCTestCase {
         XCTAssertEqual(mailbox.conversations.count, DemoTransport.rows.count)
         XCTAssertEqual(mailbox.conversations.first?.id, "m1")
 
-        let offline = Mailbox(api: APIClient(baseURL: URL(string: "https://unreachable.invalid")!, transport: FailingTransport()),
+        let offline = Mailbox(api: APIClient(baseURL: URL(string: "https://unreachable.invalid")!, transport: FailingTransport(), retryDelays: []),
                               cache: MailCache(root: directory))
         await offline.start()
         XCTAssertEqual(offline.conversations.count, DemoTransport.rows.count)
@@ -80,7 +80,7 @@ final class MailboxTests: XCTestCase {
     func testEditsAreJournaledAndSurviveOffline() async throws {
         let (mailbox, _) = make()
         await mailbox.start()
-        let offline = Mailbox(api: APIClient(baseURL: URL(string: "https://unreachable.invalid")!, transport: FailingTransport()),
+        let offline = Mailbox(api: APIClient(baseURL: URL(string: "https://unreachable.invalid")!, transport: FailingTransport(), retryDelays: []),
                               cache: MailCache(root: directory))
         await offline.start()
         let row = try XCTUnwrap(offline.conversations.first { $0.id == "m3" })
@@ -148,9 +148,34 @@ final class MailboxTests: XCTestCase {
         XCTAssertNil(Draft.mailto(URL(string: "https://example.com")!, accountId: "demo", signature: nil))
     }
 
+    func testReadsRetryWhileTheNetworkWakesUp() async throws {
+        let transport = WakingTransport(failures: 3)
+        let mailbox = Mailbox(api: APIClient(baseURL: URL(string: "https://milo.example")!, transport: transport,
+                                             retryDelays: [0.01, 0.01, 0.01, 0.01]),
+                              cache: MailCache(root: directory))
+        await mailbox.start()
+        XCTAssertTrue(mailbox.online)
+        XCTAssertEqual(mailbox.conversations.count, DemoTransport.rows.count)
+        transport.failures = 2
+        await mailbox.open(try XCTUnwrap(mailbox.conversations.first { $0.id == "m2" }))
+        XCTAssertNil(mailbox.threadError)
+        XCTAssertEqual(mailbox.thread.first?.bodyLoaded, true)
+    }
+
     func testSubjectCore() {
         XCTAssertEqual(Mailbox.subjectCore("Re: Fwd: RE: Progetto"), "Progetto")
         XCTAssertEqual(Mailbox.subjectCore(""), "Senza oggetto")
+    }
+}
+
+/// Fails the first requests like a VPN that is still waking up, then answers.
+final class WakingTransport: Transport, @unchecked Sendable {
+    let demo = DemoTransport()
+    var failures: Int
+    init(failures: Int) { self.failures = failures }
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        if failures > 0 { failures -= 1; throw URLError(.networkConnectionLost) }
+        return try await demo.send(request)
     }
 }
 

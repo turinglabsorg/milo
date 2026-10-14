@@ -29,7 +29,12 @@ struct MiloApp: App {
             .task { if mailbox == nil { start() } }
         }
         .onChange(of: phase) { _, phase in
-            if phase == .active { Task { await mailbox?.refresh() } }
+            if phase == .active {
+                Task {
+                    await mailbox?.refresh()
+                    await mailbox?.retryOpenThread()
+                }
+            }
         }
     }
 
