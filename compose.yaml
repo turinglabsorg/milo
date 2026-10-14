@@ -18,7 +18,7 @@ services:
       MILO_DATABASE_URL: postgresql://milo@db:5432/milo
       MILO_DATABASE_PASSWORD_FILE: /data/db-password
       MILO_APNS_KEY_FILE: /data/apns.p8
-      MILO_APNS_KEY_ID: "${MILO_APNS_KEY_ID:-}"
+      MILO_APNS_KEY_ID: 8WUQ44SUHT
       MILO_APNS_TEAM_ID: 89J2AG5K92
       MILO_APNS_TOPIC: io.meaningtech.milo
       MILO_PROXY_PEER: "10.241.84.1"
