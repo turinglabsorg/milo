@@ -168,25 +168,42 @@ public final class Mailbox {
 
     // MARK: Reading
 
+    /// Loads independently of the view that asked: a re-created screen must not cancel the download.
     public func open(_ conversation: Conversation) async {
+        await Task { await self.load(conversation) }.value
+    }
+
+    /// Keeps "loading" and retries until the conversation arrives or another one is opened.
+    /// Errors are not shown: a mailbox on Tailscale can need a few attempts after a pause.
+    private func load(_ conversation: Conversation) async {
         selectedKey = conversation.key
         threadError = nil
         loadingThread = true
-        defer { loadingThread = false }
+        defer { if selectedKey == conversation.key { loadingThread = false } }
         if let cached = await cache.thread(conversation.key) { thread = await withBodies(cached) }
         else { thread = [] }
-        do {
-            let fresh = try await api.thread(conversation.id)
-            try? await cache.storeThread(conversation.key, fresh)
-            guard selectedKey == conversation.key else { return }
-            thread = await withBodies(fresh)
-            if let latest = fresh.last { try await loadBody(latest.id) }
-            if !conversation.read.value && conversation.unreadCount ?? 1 > 0 {
-                await mutate(conversation, MailEdit.Patch(read: true))
-            }
-        } catch {
-            if thread.isEmpty, selectedKey == conversation.key {
-                threadError = (error as? APIError)?.message ?? error.localizedDescription
+        var pause: Double = 0.5
+        while selectedKey == conversation.key {
+            do {
+                let fresh = try await api.thread(conversation.id)
+                try? await cache.storeThread(conversation.key, fresh)
+                guard selectedKey == conversation.key else { return }
+                thread = await withBodies(fresh)
+                if let latest = fresh.last { try? await loadBody(latest.id) }
+                if !conversation.read.value && conversation.unreadCount ?? 1 > 0 {
+                    await mutate(conversation, MailEdit.Patch(read: true))
+                }
+                return
+            } catch is CancellationError {
+                return
+            } catch let error as APIError where error.status == 404 {
+                if thread.isEmpty, selectedKey == conversation.key { threadError = "Questa conversazione non c’è più." }
+                return
+            } catch {
+                // Cached content is already on screen: refresh it later instead of retrying now.
+                if !thread.isEmpty { return }
+                try? await Task.sleep(nanoseconds: UInt64(pause * 1_000_000_000))
+                pause = min(pause * 2, 5)
             }
         }
     }

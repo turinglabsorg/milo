@@ -87,8 +87,13 @@ public final class APIClient: Sendable {
             } catch let error as APIError {
                 throw error
             } catch {
-                guard repeatable, attempt < retryDelays.count, !Task.isCancelled else {
-                    throw APIError(status: 0, message: "Milo non è raggiungibile. Controlla che Tailscale sia attivo.")
+                // A cancelled request is not a network failure: let the caller ignore it.
+                if error is CancellationError || (error as? URLError)?.code == .cancelled || Task.isCancelled {
+                    throw CancellationError()
+                }
+                guard repeatable, attempt < retryDelays.count else {
+                    let code = (error as? URLError).map { " (rete \($0.code.rawValue))" } ?? ""
+                    throw APIError(status: 0, message: "Milo non è raggiungibile\(code). Controlla che Tailscale sia attivo.")
                 }
                 try? await Task.sleep(nanoseconds: UInt64(retryDelays[attempt] * 1_000_000_000))
                 attempt += 1

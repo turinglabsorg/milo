@@ -178,6 +178,19 @@ final class MailboxTests: XCTestCase {
         }
     }
 
+    func testConversationKeepsLoadingUntilItArrives() async throws {
+        let transport = WakingTransport(failures: 0)
+        let mailbox = Mailbox(api: APIClient(baseURL: URL(string: "https://milo.example")!, transport: transport,
+                                             retryDelays: [0.01]),
+                              cache: MailCache(root: directory))
+        await mailbox.start()
+        transport.failures = 5
+        await mailbox.open(try XCTUnwrap(mailbox.conversations.first { $0.id == "m4" }))
+        XCTAssertNil(mailbox.threadError)
+        XCTAssertFalse(mailbox.loadingThread)
+        XCTAssertEqual(mailbox.thread.first?.id, "m4")
+    }
+
     func testSubjectCore() {
         XCTAssertEqual(Mailbox.subjectCore("Re: Fwd: RE: Progetto"), "Progetto")
         XCTAssertEqual(Mailbox.subjectCore(""), "Senza oggetto")
