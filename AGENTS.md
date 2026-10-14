@@ -51,3 +51,8 @@ external action. That file is the single source of global agent instructions.
 - The device cache follows docs/CLIENT_CACHE.md with plain JSON files under
   Application Support protected by iOS Data Protection; sending always goes
   through a 10-second schedule so it can be undone, never auto-retried.
+- TestFlight: run the `TestFlight` workflow (`gh workflow run TestFlight`).
+  Bundle id `io.meaningtech.milo`, team `89J2AG5K92`; signing is automatic
+  through the App Store Connect API key (repo secrets `ASC_KEY_P8`,
+  `ASC_KEY_ID`, `ASC_ISSUER_ID`, `APPLE_TEAM_ID`). The build number is the
+  workflow run number. Never read the `.p8` file yourself.
