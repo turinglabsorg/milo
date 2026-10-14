@@ -24,7 +24,7 @@ final class ScreenshotTests: XCTestCase {
     }
 
     func testInboxThreadComposeAndTodo() {
-        let row = app.descendants(matching: .any)["row-m2"]
+        let row = app.descendants(matching: .any).matching(identifier: "row-m2").firstMatch
         if !row.waitForExistence(timeout: 10) {
             // iPhone starts on the sidebar: open the inbox first.
             app.staticTexts["Smart inbox"].firstMatch.tap()
@@ -47,7 +47,7 @@ final class ScreenshotTests: XCTestCase {
 
         app.navigationBars.buttons.element(boundBy: 0).tap()
         if app.navigationBars.buttons.element(boundBy: 0).exists { app.navigationBars.buttons.element(boundBy: 0).tap() }
-        let todo = app.descendants(matching: .any)["view-todo"]
+        let todo = app.descendants(matching: .any).matching(identifier: "view-todo").firstMatch
         if todo.waitForExistence(timeout: 5) {
             todo.tap()
             XCTAssertTrue(app.staticTexts["Rivedere il design"].waitForExistence(timeout: 10))
