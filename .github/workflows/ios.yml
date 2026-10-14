@@ -1,0 +1,40 @@
+name: iOS
+on:
+  push:
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select the newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          xcodebuild -version
+      - name: MiloKit tests
+        run: swift test --package-path ios/MiloKit
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+      - name: Build, run on the simulator and capture screenshots
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          devices = json.load(sys.stdin)["devices"]
+          runtimes = sorted((k for k in devices if "iOS" in k), key=lambda k: [int(x) for x in re.findall(r"\d+", k)], reverse=True)
+          print(next(d["udid"] for k in runtimes for d in devices[k] if d["name"].startswith("iPhone") and "Pro" not in d["name"]))')
+          echo "Simulator $DEVICE"
+          cd ios
+          set -o pipefail
+          xcodebuild test -project Milo.xcodeproj -scheme Milo -destination "id=$DEVICE" \
+            -resultBundlePath "$GITHUB_WORKSPACE/build/Milo.xcresult" CODE_SIGNING_ALLOWED=NO \
+            TEST_RUNNER_MILO_SCREENSHOTS="$GITHUB_WORKSPACE/build/screenshots" 2>&1 | tail -80
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-screenshots
+          path: build/screenshots
+          if-no-files-found: warn

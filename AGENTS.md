@@ -35,3 +35,19 @@ external action. That file is the single source of global agent instructions.
   health check. Back up with an APFS clone (`cp -c`, container stopped) and run
   bulk migrations natively on the Mac with the container stopped (the 10 GB
   raw move took ~6 minutes), then restart.
+
+## iOS app (`ios/`)
+
+- Native SwiftUI app (iOS 17+). `ios/MiloKit` is a Foundation-only Swift
+  package (API client, file-based device cache, edit journal, `Mailbox` model)
+  that builds and tests on Linux: `. ~/.local/share/swiftly/env.sh && swift test
+  --package-path ios/MiloKit` (Arch needs ncurses/libxml2 compat links inside
+  the toolchain's `usr/lib/swift/linux`).
+- The Xcode project is generated from `ios/project.yml` (XcodeGen); never
+  commit `Milo.xcodeproj`. Linux cannot build iOS: the `iOS` GitHub Actions
+  workflow builds on macOS, runs `ScreenshotTests` on a simulator with
+  `-MiloDemo` (fictional `DemoTransport` data) and uploads the screenshots
+  artifact (`gh run download -n ios-screenshots`).
+- The device cache follows docs/CLIENT_CACHE.md with plain JSON files under
+  Application Support protected by iOS Data Protection; sending always goes
+  through a 10-second schedule so it can be undone, never auto-retried.

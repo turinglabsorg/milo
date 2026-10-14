@@ -3,6 +3,18 @@ on: [push, pull_request]
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.4-alpine
+        env:
+          POSTGRES_USER: milo
+          POSTGRES_PASSWORD: milo
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U milo" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      MILO_TEST_DATABASE_URL: postgresql://milo:milo@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -12,13 +24,14 @@ jobs:
       - run: uv run pytest -q
       - name: Browser flows
         run: |
-          uv run milo --demo --data /tmp/milo-ci-demo --port 8026 > /tmp/milo-ci.log 2>&1 &
+          for name in milo_ci_demo milo_ci_live; do psql "$MILO_TEST_DATABASE_URL" -c "CREATE DATABASE $name"; done
+          MILO_DATABASE_URL=postgresql://milo:milo@127.0.0.1:5432/milo_ci_demo uv run milo --demo --data /tmp/milo-ci-demo --port 8026 > /tmp/milo-ci.log 2>&1 &
           server_pid=$!
-          uv run milo --data /tmp/milo-ci-live --port 8027 > /tmp/milo-ci-live.log 2>&1 &
+          MILO_DATABASE_URL=postgresql://milo:milo@127.0.0.1:5432/milo_ci_live uv run milo --data /tmp/milo-ci-live --port 8027 > /tmp/milo-ci-live.log 2>&1 &
           live_pid=$!
           trap 'kill "$server_pid" "$live_pid"' EXIT
           for attempt in $(seq 1 40); do
             if curl --fail --silent http://127.0.0.1:8026/api/status > /dev/null && curl --fail --silent http://127.0.0.1:8027/api/status > /dev/null; then break; fi
             sleep 0.25
           done
-          MILO_TEST_URL=http://127.0.0.1:8026 MILO_LIVE_TEST_URL=http://127.0.0.1:8027 MILO_LIVE_TEST_DATA=/tmp/milo-ci-live uv run pytest tests/test_browser.py -q
+          MILO_TEST_URL=http://127.0.0.1:8026 MILO_LIVE_TEST_URL=http://127.0.0.1:8027 MILO_LIVE_TEST_DATA=/tmp/milo-ci-live MILO_DATABASE_URL=postgresql://milo:milo@127.0.0.1:5432/milo_ci_live uv run pytest tests/test_browser.py -q

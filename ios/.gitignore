@@ -1,0 +1,4 @@
+MiloKit/.build/
+Milo.xcodeproj/
+build/
+*.xcresult
