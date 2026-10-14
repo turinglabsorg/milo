@@ -128,6 +128,16 @@ final class MailboxTests: XCTestCase {
         XCTAssertTrue(mailbox.isVIP("Marco@example.com"))
     }
 
+    func testRefreshDropsConversationsDeletedElsewhere() async throws {
+        let (mailbox, transport) = make()
+        await mailbox.start()
+        XCTAssertTrue(mailbox.conversations.contains { $0.id == "m3" })
+        transport.remove("m3")
+        await mailbox.refresh()
+        XCTAssertFalse(mailbox.conversations.contains { $0.id == "m3" })
+        XCTAssertEqual(mailbox.conversations.count, DemoTransport.rows.count - 1)
+    }
+
     func testSubjectCore() {
         XCTAssertEqual(Mailbox.subjectCore("Re: Fwd: RE: Progetto"), "Progetto")
         XCTAssertEqual(Mailbox.subjectCore(""), "Senza oggetto")

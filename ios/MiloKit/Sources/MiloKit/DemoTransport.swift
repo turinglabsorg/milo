@@ -9,6 +9,17 @@ public final class DemoTransport: Transport, @unchecked Sendable {
     private var drafts: [String: [String: Any]] = [:]
     private var scheduled: [String: Double] = [:]
     public private(set) var requests: [String] = []
+    private var removed: Set<String> = []
+
+    /// Simulate a conversation deleted on another device.
+    public func remove(_ id: String) {
+        lock.lock(); removed.insert(id); lock.unlock()
+    }
+
+    private var visibleRows: [[String: Any]] {
+        lock.lock(); defer { lock.unlock() }
+        return Self.rows.filter { !removed.contains($0["id"] as? String ?? "") }
+    }
 
     public init() {}
 
@@ -81,7 +92,14 @@ public final class DemoTransport: Transport, @unchecked Sendable {
                           "templates": [["name": "Grazie", "body": "Grazie mille, ti aggiorno a breve."]],
                           "vips": ["marco@example.com"]])
         case ("GET", "/api/messages"), ("GET", "/api/client/messages"):
-            return (200, ["messages": Self.rows, "next": NSNull()])
+            return (200, ["messages": visibleRows, "next": NSNull()])
+        case ("GET", "/api/client/thread"):
+            let thread = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "thread" }?.value ?? ""
+            guard let row = visibleRows.first(where: { $0["thread_id"] as? String == thread }) else {
+                return (404, ["detail": "Conversazione non trovata"])
+            }
+            return (200, ["message": row])
         case ("GET", "/api/todos"):
             return (200, ["todos": [
                 ["id": "t1", "message_id": "m2", "text": "Rivedere il design", "priority": "high", "kind": "action",

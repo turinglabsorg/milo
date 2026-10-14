@@ -115,6 +115,12 @@ public final class APIClient: Sendable {
         return try await get(Page.self, "/client/messages", query: query)
     }
 
+    /// Current catalogue row of one conversation; 404 when it no longer exists on the service.
+    public func conversation(account: String, thread: String) async throws -> Conversation {
+        struct One: Decodable { var message: Conversation }
+        return try await get(One.self, "/client/thread", query: ["account": account, "thread": thread]).message
+    }
+
     public func thread(_ messageId: String) async throws -> [Message] {
         try await get(Thread.self, "/messages/\(Self.encode(messageId))/thread", query: ["lazy": "true"]).messages
     }

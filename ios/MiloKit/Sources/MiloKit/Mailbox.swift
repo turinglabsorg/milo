@@ -66,9 +66,11 @@ public final class Mailbox {
             case .todo: todos = try await api.todos()
             case .drafts: drafts = mergeDrafts(try await api.drafts(), await cache.pendingDrafts())
             default:
+                let shown = conversations
                 let rows = try await api.conversations(view: view, account: account, search: search)
                 if !search.isEmpty { serverSearch[searchKey] = rows.map(\.key) }
                 try await cache.merge(rows)
+                if search.isEmpty { await reconcile(shown: shown, returned: rows) }
                 await reloadCatalogue()
             }
             if Date().timeIntervalSince(lastCatalogueRefresh) > 120 {
@@ -81,6 +83,23 @@ public final class Mailbox {
             lastError = error.message
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    /// Rows this view showed but the service no longer lists (trashed, archived or moved on
+    /// another device) are checked one by one: gone ones leave the device, moved ones update.
+    private func reconcile(shown: [Conversation], returned: [Conversation]) async {
+        let keys = Set(returned.map(\.key))
+        let oldest = returned.count >= 100 ? (returned.map(\.date).min() ?? 0) : 0
+        let pending = Set(await cache.pending().map(\.key))
+        for row in shown where !keys.contains(row.key) && row.date >= oldest && !pending.contains(row.key) {
+            do {
+                try await cache.merge([try await api.conversation(account: row.accountId, thread: row.threadId ?? row.id)])
+            } catch let error as APIError where error.status == 404 {
+                try? await cache.remove(row.key)
+            } catch {
+                break
+            }
         }
     }
 
