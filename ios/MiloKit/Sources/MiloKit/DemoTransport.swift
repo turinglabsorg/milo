@@ -26,7 +26,15 @@ public final class DemoTransport: Transport, @unchecked Sendable {
             "Stavo pensando di andare al mare sabato, ti va?", 86400, starred: 1),
         row("m5", "The Pragmatic Engineer", "news@pragmatic.example", "Building software that people love",
             "This week: why the best software starts with a clear problem.", 90000, category: "newsletters"),
+        row("m6", "TestFlight", "testflight@example.com", "Milo is now available to test",
+            "You've been invited to test Milo.", 120000, category: "updates"),
     ]
+    /// A fixed-width newsletter layout, wider than a phone.
+    static let wideHTML = "<table width=\"600\" style=\"width:600px\"><tr><td style=\"width:600px;padding:20px\">" +
+        "<div style=\"width:560px;height:180px;background:#2563eb;border-radius:24px\"></div>" +
+        "<p style=\"font-size:28px;text-align:right\">Milo AI Mail by Sebastiano</p>" +
+        "<p style=\"font-size:17px\">You've been invited to test Milo. This line is long on purpose so it must wrap inside six hundred pixels.</p>" +
+        "</td></tr></table>"
 
     static func row(_ id: String, _ sender: String, _ email: String, _ subject: String, _ preview: String,
                     _ age: Double, read: Int = 1, starred: Int = 0, category: String = "people", count: Int = 1) -> [String: Any] {
@@ -51,6 +59,7 @@ public final class DemoTransport: Transport, @unchecked Sendable {
                 "</p><p>Il programma è su https://example.com/programma, dimmi se ti torna.</p><p>A presto,<br>" +
                 (row["sender"] as? String ?? "") + "</p>"
             message["attachments"] = [[String: Any]]()
+            if row["id"] as? String == "m6" { message["html"] = wideHTML }
         }
         if row["id"] as? String == "m2" {
             message["analysis"] = ["summary": "Marco chiede un feedback sul primo design entro giovedì.",

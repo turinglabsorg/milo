@@ -37,13 +37,13 @@ final class MailboxTests: XCTestCase {
     func testInboxRendersFromCacheAfterRestart() async throws {
         let (mailbox, _) = make()
         await mailbox.start()
-        XCTAssertEqual(mailbox.conversations.count, 5)
+        XCTAssertEqual(mailbox.conversations.count, DemoTransport.rows.count)
         XCTAssertEqual(mailbox.conversations.first?.id, "m1")
 
         let offline = Mailbox(api: APIClient(baseURL: URL(string: "https://unreachable.invalid")!, transport: FailingTransport()),
                               cache: MailCache(root: directory))
         await offline.start()
-        XCTAssertEqual(offline.conversations.count, 5)
+        XCTAssertEqual(offline.conversations.count, DemoTransport.rows.count)
         XCTAssertFalse(offline.online)
     }
 

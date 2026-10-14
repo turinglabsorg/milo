@@ -24,6 +24,7 @@ public final class Mailbox {
     public private(set) var thread: [Message] = []
     public private(set) var selectedKey: String?
     public private(set) var loadingThread = false
+    public private(set) var threadError: String?
     public private(set) var pendingCount = 0
 
     private var catalogue: [String: Conversation] = [:]
@@ -143,6 +144,7 @@ public final class Mailbox {
 
     public func open(_ conversation: Conversation) async {
         selectedKey = conversation.key
+        threadError = nil
         loadingThread = true
         defer { loadingThread = false }
         if let cached = await cache.thread(conversation.key) { thread = await withBodies(cached) }
@@ -157,7 +159,9 @@ public final class Mailbox {
                 await mutate(conversation, MailEdit.Patch(read: true))
             }
         } catch {
-            if thread.isEmpty { lastError = (error as? APIError)?.message ?? error.localizedDescription }
+            if thread.isEmpty, selectedKey == conversation.key {
+                threadError = (error as? APIError)?.message ?? error.localizedDescription
+            }
         }
     }
 

@@ -26,6 +26,17 @@ struct ThreadView: View {
                 }
                 if mailbox.thread.isEmpty && mailbox.loadingThread {
                     ProgressView("Carico la conversazione…").frame(maxWidth: .infinity).padding(.top, 40)
+                } else if mailbox.thread.isEmpty {
+                    VStack(spacing: 12) {
+                        Text(mailbox.threadError ?? "Questa conversazione non è ancora sul dispositivo.")
+                            .foregroundStyle(Color.milo.muted)
+                            .multilineTextAlignment(.center)
+                        Button("Riprova") { Task { if let conversation { await mailbox.open(conversation) } } }
+                            .buttonStyle(.bordered)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
+                    .accessibilityIdentifier("thread-error")
                 }
                 ForEach(mailbox.thread) { message in
                     MessageCard(message: message, expanded: isExpanded(message)) {
@@ -312,7 +323,17 @@ struct MailWebView: UIViewRepresentable {
 
         @MainActor
         func measure(_ webView: WKWebView) async {
-            let script = "return Math.ceil(document.querySelector('.milo-email-document').scrollHeight)"
+            // Fixed-width newsletters (600px tables) shrink to the screen like in Mail, instead of
+            // overflowing a view that cannot scroll sideways.
+            let script = """
+            const c = document.querySelector('.milo-email-document');
+            if (!c.dataset.fitted) {
+              c.dataset.fitted = '1';
+              const natural = c.scrollWidth, available = document.documentElement.clientWidth;
+              if (natural > available + 2) c.style.zoom = String(available / natural);
+            }
+            return Math.ceil(c.getBoundingClientRect().height);
+            """
             guard let value = try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? NSNumber else { return }
             let measured = max(80, CGFloat(value.doubleValue))
             if abs(height.wrappedValue - measured) > 1 { height.wrappedValue = measured }

@@ -38,6 +38,20 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(body.waitForExistence(timeout: 15), "The mail body must render in the web view")
         save("02-thread")
 
+        // A fixed-width newsletter must fit the screen width.
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let wide = app.descendants(matching: .any).matching(identifier: "row-m6").firstMatch
+        XCTAssertTrue(wide.waitForExistence(timeout: 10))
+        wide.tap()
+        let wideText = app.webViews.staticTexts.containing(NSPredicate(format: "label CONTAINS 'invited'")).firstMatch
+        XCTAssertTrue(wideText.waitForExistence(timeout: 15))
+        sleep(1)
+        XCTAssertLessThanOrEqual(app.webViews.firstMatch.frame.maxX, app.windows.firstMatch.frame.maxX)
+        save("02b-wide-newsletter")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        XCTAssertTrue(app.buttons["reply"].waitForExistence(timeout: 10))
         app.buttons["reply"].tap()
         XCTAssertTrue(app.textViews["compose-body"].waitForExistence(timeout: 10))
         save("03-reply")
