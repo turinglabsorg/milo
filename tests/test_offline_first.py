@@ -323,9 +323,26 @@ def test_service_worker_retires_old_shell_and_refreshes_cached_client_assets(tmp
         page.goto(url + '/static/icon.svg')
         page.evaluate('()=>caches.open("milo-shell-v10").then(cache=>cache.put("/static/app.js",new Response("// obsolete-client")))')
         warm(page, url, sent)
-        wait_for_async(page, 'async()=>{const keys=await caches.keys();return keys.includes("milo-shell-v18")&&!keys.includes("milo-shell-v10");}')
+        wait_for_async(page, 'async()=>{const keys=await caches.keys();return keys.includes("milo-shell-v19")&&!keys.includes("milo-shell-v10");}')
         version['name'] = 'updated'
         old = page.evaluate('()=>fetch("/static/app.js").then(response=>response.text())')
         assert 'shell-version-original' in old
         wait_for_async(page, 'async()=>{const response=await caches.match("/static/app.js");return (await response.text()).includes("shell-version-updated");}')
+        browser.close()
+
+
+def test_conversation_deleted_on_another_device_disappears_on_refresh(tmp_path):
+    apps = []
+
+    def prepare(app, received, sent):
+        read_mail(app, received, sent)
+        apps.append(app)
+
+    with service(tmp_path, prepare) as (url, sent), sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(service_workers='block')
+        page.goto(url)
+        expect(page.locator('.message-row')).to_have_count(2)
+        apps[0].state.store.trash_conversation(sent)
+        expect(page.locator('.message-row')).to_have_count(1, timeout=15000)
         browser.close()

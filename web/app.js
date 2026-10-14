@@ -384,7 +384,7 @@ function revalidateView(query=currentQuery()){
       if(query.view==='drafts'){if(started===replica.revision)S.cachedDrafts=list.drafts;}
       else if(query.view==='todo')S.todos=list.todos;
       else if(query.view==='screener')S.screening=list.senders;
-      else{replica.merge(list.messages,query.view,started,ticket);replica.rememberQuery(path,list.messages);}
+      else{const shown=replica.select(query,path,S.optimistic);replica.merge(list.messages,query.view,started,ticket);replica.rememberQuery(path,list.messages);if(!query.search)reconcileView(shown,list.messages);}
       paintLocal();
     }catch(error){
       if(!temporarilyUnavailable(error)&&S.status?.authenticated)toast(error.message);
@@ -394,6 +394,20 @@ function revalidateView(query=currentQuery()){
       if(started!==replica.revision&&S.status?.authenticated)revalidateView();
     }
   })();viewRequests.set(path,promise);return promise;
+}
+// Rows this view showed but the service no longer lists were changed on another device
+// (trashed, archived, moved): verify them now instead of waiting for the full catalogue pass.
+const reconciling=new Set();
+async function reconcileView(shown,returned){
+  const keys=new Set(returned.map(threadKey)),oldest=returned.length>=100?Math.min(...returned.map(row=>row.date)):0;
+  const stale=shown.filter(row=>!keys.has(threadKey(row))&&row.date>=oldest&&!S.optimistic.has(threadKey(row))&&!reconciling.has(threadKey(row))).slice(0,20);
+  for(const row of stale){
+    const id=threadKey(row);reconciling.add(id);
+    try{const started=replica.revision,ticket=++S.remoteTicket,data=await api('/client/thread?'+new URLSearchParams({account:row.account_id,thread:row.thread_id||row.id}));if(S.status?.authenticated)replica.merge([data.message],'all',started,ticket);}
+    catch(error){if(error.status===404){replica.remove(id);if(S.selected&&threadKey(S.selected)===id){S.readerVersion++;S.readerAnchor=null;S.selected=null;S.thread=[];$('.shell')?.classList.remove('has-selection');renderReading();}}else break;}
+    finally{reconciling.delete(id);}
+  }
+  if(stale.length){paintLocal();replica.commit();}
 }
 async function refresh(resetSelection=false,showLoading=false){
   if(!S.status?.authenticated)return;
