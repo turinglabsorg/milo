@@ -138,6 +138,16 @@ final class MailboxTests: XCTestCase {
         XCTAssertEqual(mailbox.conversations.count, DemoTransport.rows.count - 1)
     }
 
+    func testMailtoLinksBecomeDrafts() throws {
+        let url = try XCTUnwrap(URL(string: "mailto:anna@example.com?subject=Ciao%20Anna&body=Ci%20vediamo&cc=marco@example.com"))
+        let draft = try XCTUnwrap(Draft.mailto(url, accountId: "demo", signature: "\n\n-- \nSam"))
+        XCTAssertEqual(draft.to, "anna@example.com")
+        XCTAssertEqual(draft.cc, "marco@example.com")
+        XCTAssertEqual(draft.subject, "Ciao Anna")
+        XCTAssertEqual(draft.body, "Ci vediamo\n\n-- \nSam")
+        XCTAssertNil(Draft.mailto(URL(string: "https://example.com")!, accountId: "demo", signature: nil))
+    }
+
     func testSubjectCore() {
         XCTAssertEqual(Mailbox.subjectCore("Re: Fwd: RE: Progetto"), "Progetto")
         XCTAssertEqual(Mailbox.subjectCore(""), "Senza oggetto")

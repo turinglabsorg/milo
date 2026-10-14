@@ -197,6 +197,19 @@ public struct Schedule: Codable, Hashable, Sendable {
     public var error: String?
 }
 
+extension Draft {
+    /// A new draft from a `mailto:` link (RFC 6068): recipients, subject, body and cc.
+    public static func mailto(_ url: URL, accountId: String, signature: String?) -> Draft? {
+        guard url.scheme?.lowercased() == "mailto",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        var fields: [String: String] = [:]
+        for item in components.queryItems ?? [] { fields[item.name.lowercased()] = item.value ?? "" }
+        let to = [components.path, fields["to"]].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+        return Draft(accountId: accountId, to: to, cc: fields["cc"] ?? "", subject: fields["subject"] ?? "",
+                     body: (fields["body"] ?? "") + (signature ?? ""))
+    }
+}
+
 public struct Draft: Codable, Hashable, Identifiable, Sendable {
     public enum Mode: String, Codable, Sendable { case new, reply, replyAll = "reply_all", forward }
     public var id: String

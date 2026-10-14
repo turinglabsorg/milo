@@ -3,6 +3,7 @@ import SwiftUI
 
 @main
 struct MiloApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @AppStorage("serverURL") private var serverURL = ""
     @State private var mailbox: Mailbox?
     @State private var notice = Notice()

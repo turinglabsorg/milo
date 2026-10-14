@@ -33,6 +33,18 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Milo/Milo.entitlements
+      configs:
+        Debug:
+          APS_ENVIRONMENT: development
+        Release:
+          APS_ENVIRONMENT: production
+    info:
+      path: Milo/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: io.meaningtech.milo.mailto
+            CFBundleURLSchemes: [mailto]
   MiloUITests:
     type: bundle.ui-testing
     platform: iOS

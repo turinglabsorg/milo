@@ -56,6 +56,26 @@ struct MainView: View {
         .sheet(item: $compose) { draft in ComposeView(draft: draft) }
         .sheet(isPresented: $showSettings) { SettingsView(onSignOut: onSignOut) }
         .sheet(isPresented: $showRecap) { RecapView(selectedKey: $selectedKey) }
+        .onOpenURL { url in
+            // mailto: links open the composer (once Milo is the default mail app).
+            if let account = mailbox.state?.accounts.first,
+               let draft = Draft.mailto(url, accountId: account.id, signature: mailbox.signature(for: account.id)) {
+                compose = draft
+            }
+        }
+        .task { if !ProcessInfo.processInfo.arguments.contains("-MiloDemo") { await PushCenter.shared.requestAuthorization() } }
+        .onChange(of: PushCenter.shared.token) { _, token in
+            guard let token else { return }
+            Task { try? await mailbox.api.registerDevice(token: token, environment: PushCenter.environment) }
+        }
+        .onChange(of: PushCenter.shared.openRequest?.messageId) { _, _ in
+            guard let request = PushCenter.shared.openRequest else { return }
+            PushCenter.shared.openRequest = nil
+            Task {
+                await mailbox.open(messageId: request.messageId, accountId: request.accountId, threadId: request.threadId)
+                selectedKey = mailbox.selectedKey
+            }
+        }
         .task {
             // Refresh while the app is in the foreground; the service polls providers every minute.
             while !Task.isCancelled {

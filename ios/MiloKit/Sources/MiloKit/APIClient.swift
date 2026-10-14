@@ -162,6 +162,11 @@ public final class APIClient: Sendable {
 
     public func unschedule(_ id: String) async throws { try await call("DELETE", "/drafts/\(Self.encode(id))/schedule") }
 
+    /// Register this device's APNs token so the service can notify it about new mail.
+    public func registerDevice(token: String, environment: String) async throws {
+        try await call("POST", "/devices", body: ["token": token, "environment": environment])
+    }
+
     public func todos() async throws -> [Todo] {
         struct List: Decodable { var todos: [Todo] }
         return try await get(List.self, "/todos").todos
