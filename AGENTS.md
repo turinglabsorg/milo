@@ -56,3 +56,13 @@ external action. That file is the single source of global agent instructions.
   through the App Store Connect API key (repo secrets `ASC_KEY_P8`,
   `ASC_KEY_ID`, `ASC_ISSUER_ID`, `APPLE_TEAM_ID`). The build number is the
   workflow run number. Never read the `.p8` file yourself.
+- Push notifications: `milo/push.py` sends through APNs with the key file
+  `apns.p8` in the archive (mode 0600, `MILO_APNS_KEY_ID`/`MILO_APNS_TEAM_ID`
+  in compose). Devices register via `POST /api/devices`. Only mail newer than
+  an hour from people/VIP notifies; never blocked or unapproved senders.
+  The iOS app registers its token (TestFlight = `production`) and opens the
+  conversation from a tapped notification.
+- `mailto:` links open the composer; becoming the default mail app also needs
+  Apple's `com.apple.developer.mail-client` entitlement (requested by the owner).
+- CI runs on every push: watch it in the background (`run_in_background`),
+  never block the conversation waiting for it.
