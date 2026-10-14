@@ -142,7 +142,9 @@ def test_account_management_browser_ui(width, height):
         page.locator('[name="password"]').fill('isolated browser test passphrase')
         page.locator('#login-form button[type="submit"]').click()
         expect(page.locator('.shell')).to_be_visible()
-        page.locator('.topbar [data-action="settings"]').click()
+        if width <= 600:
+            page.get_by_role('button', name='Apri menu').click()
+        page.locator('.sidebar [data-action="settings"]').click()
         row = page.locator('.settings-account').filter(has_text='browser-managed@example.test')
         expect(row).to_contain_text('In pausa')
         row.get_by_role('button', name='Gestisci').click()

@@ -17,7 +17,7 @@ const paths = {
   logout:'M10 3H4v18h6 M13 8l5 4-5 4 M8 12h13', help:'M9 8a3 3 0 1 1 5 2c-1 1-2 1-2 4 M12 17h.01 M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0'
 };
 paths.pin='m8 3 8 0-1 6 4 4H5l4-4z M12 13v8';
-Object.assign(paths,{ban:'M5.6 5.6l12.8 12.8 M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0',bell:'M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9 M10 21h4',
+Object.assign(paths,{sync:'M20 12a8 8 0 1 1-2.35-5.65 M20 4.5v4h-4',chat:'M4 5h16v11H9l-5 4z M8 9.5h8 M8 12.5h5',ban:'M5.6 5.6l12.8 12.8 M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0',bell:'M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9 M10 21h4',
   crown:'m3 7 4.5 4L12 4l4.5 7L21 7l-2 12H5z',todo:'M4 4h16v16H4z M8 12l3 3 5-6',screener:'M15 19v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M12 6a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0 M19 8v6 M16 11h6',
   ask:'M21 12a8 8 0 0 1-12 7l-5 1 1-4a8 8 0 1 1 16-4z M10 9a2 2 0 1 1 3 2c-1 .5-1 1-1 2 M12 16h.01',download:'M12 3v12 M7 10l5 5 5-5 M4 21h16',keyboard:'M2 6h20v12H2z M6 10h.01 M10 10h.01 M14 10h.01 M18 10h.01 M7 14h10'});
 const icon = (name, extra = '') => `<svg class="icon ${extra}" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.mail}"/></svg>`;
@@ -48,12 +48,13 @@ const threadKey=m=>m.account_id+':'+(m.thread_id||m.id);
 function skeleton(lines=4,kind='block',label='Caricamento…') {
   return `<div class="skeleton-group ${kind}" role="status" aria-label="${esc(label)}"><span class="sr-only">${esc(label)}</span>${Array.from({length:lines},(_,i)=>`<div class="skeleton-line" style="--width:${i%3===2?62: i%3===1?88:100}%"></div>`).join('')}</div>`;
 }
+function syncWorking(){return S.syncing||(S.state.sync||[]).some(p=>['connecting','downloading','applying'].includes(p.phase));}
 function syncMarkup() {
   const active=(S.state.sync||[]).filter(p=>['connecting','downloading','applying'].includes(p.phase));
   const count=active.reduce((n,p)=>n+(p.downloaded||0),0);
   const pending=(S.state.pending||[]).reduce((n,p)=>n+p.count,0)+S.optimistic.size+S.pendingSettings.size;
   const text=S.queueErrors.size?'Modifiche da controllare · riprova con Sincronizza':active.some(p=>p.phase==='downloading')?`Scarico messaggi · ${count} salvati`:active.some(p=>p.phase==='applying')?'Sincronizzo le modifiche':active.length||S.syncing?'Collegamento alla posta…':pending?`${pending} ${pending===1?"modifica":"modifiche"} in sincronizzazione`:S.online?'Posta aggiornata':'Connessione interrotta';
-  return `<span class="sync-status ${active.length||S.syncing?'working':''}" role="status">${icon(active.length||S.syncing?'refresh':'check')}<span>${esc(text)}</span></span>`;
+  return `<span class="sync-status ${active.length||S.syncing?'working':''}" role="status"><span>${esc(text)}</span></span>`;
 }
 
 const temporarilyUnavailable=error=>!error.status||error.status>=500||[408,429].includes(error.status);
@@ -125,6 +126,7 @@ function accountMarkup() {
 }
 function renderChrome() {
   if($('#sync-status')) $('#sync-status').innerHTML=syncMarkup();
+  $('.sync-button')?.classList.toggle('spinning',syncWorking());
   const section=$('.account-section');
   if(section && section.innerHTML!==accountMarkup()) section.innerHTML=accountMarkup();
   document.querySelectorAll('.nav-button[data-view]').forEach(button=>{
@@ -139,7 +141,7 @@ function renderChrome() {
 function renderShell() {
   const counts=S.state.counts;
   const folders=[['inbox','inbox'],['todo','todo'],...(S.state.screener?.enabled?[['screener','screener']]:[]),['starred','star'],['drafts','edit'],['sent','sent'],['snoozed','clock'],['archive','archive']];
-  $('#app').innerHTML=`<main class="shell ${S.selected?'has-selection':''} ${S.menu?'menu-open':''}"><aside class="sidebar">${logo()}<button class="primary compose-button" data-action="compose">${icon('plus')}Nuovo messaggio</button><div class="nav-label">La tua posta</div><nav class="nav">${folders.map(([view,name])=>`<button class="nav-button ${S.view===view?'active':''}" data-view="${view}">${icon(name)}${viewNames[view]}${counts[view]?`<span class="count">${counts[view]}</span>`:''}</button>`).join('')}</nav><div class="account-section">${accountMarkup()}</div><div class="sidebar-bottom"><div class="sidebar-footer"><div class="user-avatar">${esc(initials(S.state.identity?.name || S.state.accounts[0]?.name || 'Tu'))}</div><span>${esc(S.state.identity?.name||'Il tuo spazio')}</span><button data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div>${S.status.demo?'<div class="demo-label">DEMO · messaggi fittizi</div>':''}</div></aside><header class="topbar"><button class="icon-button mobile-menu" data-action="menu" aria-label="Apri menu">${icon('menu')}</button><div class="breadcrumbs">Il tuo spazio ${icon('arrow')}<strong>${viewNames[S.view]}</strong></div><div class="top-tools"><div id="sync-status">${syncMarkup()}</div><label class="search">${icon('search')}<input id="search-input" placeholder="Cerca nella tua posta" value="${esc(S.search)}" aria-label="Cerca nella tua posta"><kbd>/</kbd></label><button class="icon-button" data-action="ask" aria-label="Chiedi a Milo sulla tua posta" title="Chiedi a Milo">${icon('ask')}</button><button class="icon-button" data-action="palette" aria-label="Comandi" title="Comandi (Ctrl+K)" aria-keyshortcuts="Control+K">${icon('keyboard')}</button><button class="icon-button ${S.syncing?'spinner':''}" data-action="sync" aria-label="Sincronizza" title="Sincronizza">${icon('refresh')}</button><span class="sync-indicator ${!S.online||S.state.accounts.some(a=>a.error)?'offline':''}" title="${S.online?'Servizio connesso':'Servizio non raggiungibile'}"></span><button class="icon-button" data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div></header><section class="list-panel" id="list-panel"></section><section class="reading-panel" id="reading-panel"></section></main>`;
+  $('#app').innerHTML=`<main class="shell ${S.selected?'has-selection':''} ${S.menu?'menu-open':''}"><aside class="sidebar">${logo()}<button class="primary compose-button" data-action="compose">${icon('plus')}Nuovo messaggio</button><div class="nav-label">La tua posta</div><nav class="nav">${folders.map(([view,name])=>`<button class="nav-button ${S.view===view?'active':''}" data-view="${view}">${icon(name)}${viewNames[view]}${counts[view]?`<span class="count">${counts[view]}</span>`:''}</button>`).join('')}</nav><div class="account-section">${accountMarkup()}</div><div class="sidebar-bottom"><div class="sidebar-footer"><div class="user-avatar">${esc(initials(S.state.identity?.name || S.state.accounts[0]?.name || 'Tu'))}</div><span>${esc(S.state.identity?.name||'Il tuo spazio')}</span><button data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div>${S.status.demo?'<div class="demo-label">DEMO · messaggi fittizi</div>':''}</div></aside><header class="topbar"><button class="icon-button mobile-menu" data-action="menu" aria-label="Apri menu">${icon('menu')}</button><div class="breadcrumbs">Il tuo spazio ${icon('arrow')}<strong>${viewNames[S.view]}</strong></div><div class="top-tools"><div id="sync-status">${syncMarkup()}</div><label class="search">${icon('search')}<input id="search-input" placeholder="Cerca nella tua posta" value="${esc(S.search)}" aria-label="Cerca nella tua posta"><kbd>/</kbd></label><button class="icon-button sync-button ${syncWorking()?'spinning':''}" data-action="sync" aria-label="Sincronizza ora" title="Sincronizza ora">${icon('sync')}</button><span class="sync-indicator ${!S.online||S.state.accounts.some(a=>a.error)?'offline':''}" title="${S.online?'Servizio connesso':'Servizio non raggiungibile'}"></span></div></header><section class="list-panel" id="list-panel"></section><section class="reading-panel" id="reading-panel"></section><div id="ask-dock"></div><button class="ask-fab" data-action="ask" aria-label="Chiedi a Milo sulla tua posta" aria-expanded="false" title="Chiedi a Milo">${icon('chat')}</button></main>`;
   renderList(); renderReading();
 }
 
@@ -882,8 +884,12 @@ function showShortcuts(){
   const rows=[['C','Nuovo messaggio'],['/','Cerca'],['Ctrl+K','Comandi'],['J / ↓','Conversazione successiva'],['K / ↑','Conversazione precedente'],['R','Rispondi'],['A','Rispondi a tutti'],['F','Inoltra'],['E','Archivia'],['U','Segna come letta o da leggere'],['P / S','Preferito'],['# / Canc','Elimina'],['X','Seleziona per azioni multiple'],['Ctrl+clic, Maiusc+clic','Seleziona più conversazioni'],['Esc','Chiudi o annulla la selezione'],['?','Questo elenco']];
   showModal('Scorciatoie da tastiera',`<div class="shortcut-list">${rows.map(([key,label])=>`<div><kbd>${esc(key)}</kbd><span>${esc(label)}</span></div>`).join('')}</div>`);
 }
-function showAsk(){
-  showModal('Chiedi a Milo',`<form id="ask-form"><p>Fai una domanda sulla tua posta. Milo cerca le email pertinenti e risponde citandole.</p><label class="field"><span>Domanda</span><textarea name="question" required minlength="3" maxlength="500" rows="2" placeholder="Quando mi ha mandato Marco il contratto?"></textarea></label><div class="form-error" role="alert"></div><div class="form-actions"><button class="primary" type="submit">${icon('ask')}Chiedi</button></div></form><div id="ask-result" aria-live="polite"></div>`,true);
+function showAsk(open=!$('#ask-dock .ask-panel')){
+  const dock=$('#ask-dock');if(!dock)return;
+  $('.ask-fab')?.classList.toggle('open',open);$('.ask-fab')?.setAttribute('aria-expanded',String(open));
+  if(!open){dock.innerHTML='';return;}
+  dock.innerHTML=`<section class="ask-panel" role="dialog" aria-label="Chiedi a Milo"><div class="modal-header"><h2>Chiedi a Milo</h2><button class="icon-button" data-action="close-ask" aria-label="Chiudi">${icon('close')}</button></div><div class="ask-body"><div id="ask-result" aria-live="polite"><p class="ask-hint">Fai una domanda sulla tua posta. Milo cerca le email pertinenti e risponde citandole.</p></div></div><form id="ask-form"><textarea name="question" required minlength="3" maxlength="500" rows="2" placeholder="Quando mi ha mandato Marco il contratto?" aria-label="Domanda"></textarea><div class="form-error" role="alert"></div><button class="primary" type="submit" aria-label="Chiedi">${icon('sent')}</button></form></section>`;
+  setTimeout(()=>$('#ask-form textarea')?.focus(),0);
 }
 async function showNewsletterSenders(){
   showModal('Mittenti di newsletter',skeleton(6,'block','Carico i mittenti…'),true);
@@ -987,6 +993,7 @@ document.addEventListener('click', async event => {
     if(['recap','analyze','ai-reply'].includes(action)) { await runAI(action,target);return; }
     if(action==='palette'){showPalette();return;}
     if(action==='ask'){showAsk();return;}
+    if(action==='close-ask'){showAsk(false);return;}
     if(action==='newsletter-senders'){await showNewsletterSenders();return;}
     if(action==='unsubscribe'){
       await unsubscribeFrom(target.dataset.messageId,null);
@@ -1100,10 +1107,16 @@ document.addEventListener('submit', async event => {
       await scheduleDraft(S.scheduling.id,at,S.scheduling.followup);S.scheduling=null;closeModal();toast('Invio programmato per '+dateLabel(at,true)+'.');await refresh();renderList();
     }
     if(form.id==='ask-form'){
-      const box=$('#ask-result');box.innerHTML=skeleton(3,'block','Milo cerca nella tua posta…');
-      try{const result=await api('/ask','POST',{question:data.question});
-        box.innerHTML=`<div class="ask-answer"><p>${esc(result.answer)}</p>${result.sources.length?`<h3 class="recap-section-title">Dalle tue email</h3><div class="recap-priorities">${result.sources.map(source=>`<button class="priority-item" data-recap-message="${esc(source.id)}"><span>${esc(source.sender)} · ${esc(subjectCore(source.subject))}<small>${esc(dateLabel(source.date,true))}</small></span>${icon('arrow')}</button>`).join('')}</div>`:''}</div>`;
-      }catch(error){box.innerHTML='';throw error;}
+      const box=$('#ask-result'),question=String(data.question||'').trim();if(!question)return;
+      box.querySelector('.ask-hint')?.remove();form.reset();
+      const turn=document.createElement('div');turn.className='ask-turn';
+      turn.innerHTML=`<p class="ask-question">${esc(question)}</p><div class="ask-answer">${skeleton(2,'block','Milo cerca nella tua posta…')}</div>`;
+      box.append(turn);turn.scrollIntoView({block:'end'});
+      const answer=turn.querySelector('.ask-answer');
+      try{const result=await api('/ask','POST',{question});
+        answer.innerHTML=`<p>${esc(result.answer)}</p>${result.sources.length?`<div class="recap-priorities">${result.sources.map(source=>`<button class="priority-item" data-recap-message="${esc(source.id)}"><span>${esc(source.sender)} · ${esc(subjectCore(source.subject))}<small>${esc(dateLabel(source.date,true))}</small></span>${icon('arrow')}</button>`).join('')}</div>`:''}`;
+        turn.scrollIntoView({block:'end'});
+      }catch(error){answer.innerHTML=`<p class="form-error">${esc(error.message)}</p>`;}
     }
     if(form.id==='signatures-form'){S.state.signatures=(await api('/settings/signatures','PUT',{signatures:data})).signatures;closeModal();toast('Firme salvate.');}
     if(form.id==='template-form'){S.state.templates=(await api('/settings/templates','PUT',{templates:[...(S.state.templates||[]),{name:data.name,body:data.body}]})).templates;showSettings('compose');toast('Risposta salvata.');}
@@ -1166,6 +1179,8 @@ async function handleKeydown(event) {
     if(event.key==='Enter'){event.preventDefault();runPalette(S.palette.active);return;}
   }
   if((event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='k'&&S.status?.authenticated){event.preventDefault();showPalette();return;}
+  if(event.target?.closest?.('#ask-form')&&event.key==='Enter'&&!event.shiftKey){event.preventDefault();event.target.closest('form').requestSubmit();return;}
+  if(event.key==='Escape'&&$('#ask-dock .ask-panel')&&!$('#overlay').children.length){showAsk(false);return;}
   const editing=['INPUT','TEXTAREA','SELECT'].includes(event.target?.tagName)||event.target?.isContentEditable;
   if(event.key==='Escape') {
     try { if(S.multi.size&&!$('#overlay').children.length&&!$('#compose-form')){S.multi.clear();renderList();}else if($('#compose-form')){closeCompose().catch(error=>toast(error.message));}else closeModal();S.palette=null;S.menu=false;$('.shell')?.classList.remove('menu-open'); }
