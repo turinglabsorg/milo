@@ -47,7 +47,7 @@ final class ScreenshotTests: XCTestCase {
 
         app.navigationBars.buttons.element(boundBy: 0).tap()
         if app.navigationBars.buttons.element(boundBy: 0).exists { app.navigationBars.buttons.element(boundBy: 0).tap() }
-        let todo = app.descendants(matching: .any).matching(identifier: "view-todo").firstMatch
+        let todo = app.staticTexts["Da fare"].firstMatch
         if todo.waitForExistence(timeout: 5) {
             todo.tap()
             XCTAssertTrue(app.staticTexts["Rivedere il design"].waitForExistence(timeout: 10))
