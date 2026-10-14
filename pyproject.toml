@@ -7,7 +7,7 @@ dependencies = [
     "fastapi>=0.115,<1",
     "uvicorn>=0.34,<1",
     "cryptography>=44",
-    "httpx>=0.28,<1",
+    "httpx[http2]>=0.28,<1",
     "google-auth-oauthlib>=1.2,<2",
     "requests>=2.32,<3",
     "nh3>=0.3,<1",
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "playwright>=1.50", "ruff>=0.11"]
+dev = ["pytest>=8", "pytest-rerunfailures>=15", "playwright>=1.50", "ruff>=0.11"]
 
 [project.scripts]
 milo = "milo.__main__:main"

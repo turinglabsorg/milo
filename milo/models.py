@@ -169,3 +169,8 @@ class ScreenerSettings(BaseModel):
 
 class Question(BaseModel):
     question: str = Field(min_length=3, max_length=500)
+
+
+class DeviceInput(BaseModel):
+    token: str = Field(min_length=32, max_length=200)
+    environment: Literal["production", "sandbox"] = "production"

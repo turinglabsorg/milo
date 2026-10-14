@@ -29,6 +29,7 @@ from .models import (
     AccountUpdate,
     AISettings,
     Appearance,
+    DeviceInput,
     DraftInput,
     GoogleStart,
     Identity,
@@ -45,6 +46,7 @@ from .models import (
     Templates,
     TodoPatch,
 )
+from .push import Push
 from .recap import RecapWorker
 from .render import render_html
 from .store import Store
@@ -67,6 +69,8 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     client_url = (private_url or public_url).rstrip("/")
     store = Store(directory)
     features = Features(store)
+    push = Push.from_environment(store)
+    store.on_new_message = push.message_added
     ai = AI(store, ollama_url)
     ai.on_analysis = features.sync_todos
     recaps = RecapWorker(store, ai)
@@ -98,6 +102,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                 continue
 
     def feature_tick(minute):
+        push.flush()
         for draft_id in features.due():
             try:
                 deliver(draft_id)
@@ -162,6 +167,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     app.state.recaps = recaps
     app.state.store, app.state.engine, app.state.ai, app.state.google = store, engine, ai, google
     app.state.features, app.state.feature_tick = features, feature_tick
+    app.state.push = push
     app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=4)
 
     def owner(request):
@@ -661,6 +667,19 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         with store.lock:
             if draft_id in sending or not features.unschedule(draft_id):
                 raise HTTPException(409, "Il messaggio è già in invio e non può essere annullato")
+        return {"ok": True}
+
+    @app.post("/api/devices", dependencies=[Depends(auth)])
+    def register_device(data: DeviceInput):
+        try:
+            push.register(data.token, data.environment)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"ok": True, "push": push.configured}
+
+    @app.delete("/api/devices/{token}", dependencies=[Depends(auth)])
+    def unregister_device(token: str):
+        push.unregister(token)
         return {"ok": True}
 
     @app.get("/api/todos", dependencies=[Depends(auth)])

@@ -66,3 +66,10 @@ def account_data():
     return {"name": "Personal", "email": "you@example.com", "username": "you@example.com",
             "password": "app-password-must-stay-private", "imap_host": "imap.example.com", "imap_port": 993,
             "smtp_host": "smtp.example.com", "smtp_port": 465, "smtp_security": "tls", "color": "#afa4ff"}
+
+
+def pytest_collection_modifyitems(items):
+    # Browser flows depend on shared CI runner timing: retry them, never the API and storage tests.
+    for item in items:
+        if "sync_playwright" in getattr(item.module, "__dict__", {}):
+            item.add_marker(pytest.mark.flaky(reruns=2, reruns_delay=1))

@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS followups(
     id TEXT PRIMARY KEY, account_id TEXT NOT NULL, rfc_message_id TEXT, thread_id TEXT, subject TEXT,
     recipients TEXT, created DOUBLE PRECISION, due DOUBLE PRECISION, resolved DOUBLE PRECISION);
 CREATE INDEX IF NOT EXISTS followups_open ON followups(due) WHERE resolved IS NULL;
+CREATE TABLE IF NOT EXISTS devices(
+    token TEXT PRIMARY KEY, environment TEXT NOT NULL, created DOUBLE PRECISION, last_seen DOUBLE PRECISION);
 """
 
 
@@ -206,6 +208,7 @@ class Store:
         self._readers = []
         self._txn_depth = 0
         self.on_mail_change = lambda: None
+        self.on_new_message = lambda data: None
         key_path = directory / "vault.key"
         if not key_path.exists():
             fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -517,6 +520,7 @@ class Store:
             self.execute(f"INSERT INTO messages({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
                          tuple(data.values()))
             self.on_mail_change()
+            self.on_new_message(data)
             return data["id"]
 
     def patch_message(self, message_id, patch):
