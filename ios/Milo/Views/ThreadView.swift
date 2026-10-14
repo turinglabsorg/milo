@@ -276,11 +276,11 @@ struct MailWebView: UIViewRepresentable {
         context.coordinator.html = html
         // Images arriving later and opened quotes change the size: follow the content.
         let coordinator = context.coordinator
-        coordinator.observation = view.scrollView.observe(\.contentSize, options: [.new]) { [weak coordinator] _, change in
-            guard let size = change.newValue, size.height > 0 else { return }
+        coordinator.observation = view.scrollView.observe(\.contentSize, options: [.new]) { [weak coordinator, weak view] _, _ in
+            // The scroll size never shrinks below the frame: measure the document itself.
             Task { @MainActor in
-                guard let coordinator, abs(coordinator.height.wrappedValue - size.height) > 1 else { return }
-                coordinator.height.wrappedValue = max(80, size.height)
+                guard let coordinator, let view, coordinator.ready else { return }
+                await coordinator.measure(view)
             }
         }
         return view
@@ -300,12 +300,22 @@ struct MailWebView: UIViewRepresentable {
 
         init(height: Binding<CGFloat>) { self.height = height }
 
+        var ready = false
+
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             Task { @MainActor in
-                if let value = try? await webView.callAsyncJavaScript(MailHTML.enhanceScript, contentWorld: .defaultClient) as? NSNumber {
-                    height.wrappedValue = max(80, CGFloat(value.doubleValue))
-                }
+                _ = try? await webView.callAsyncJavaScript(MailHTML.enhanceScript, contentWorld: .defaultClient)
+                ready = true
+                await measure(webView)
             }
+        }
+
+        @MainActor
+        func measure(_ webView: WKWebView) async {
+            let script = "return Math.ceil(document.querySelector('.milo-email-document').scrollHeight)"
+            guard let value = try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? NSNumber else { return }
+            let measured = max(80, CGFloat(value.doubleValue))
+            if abs(height.wrappedValue - measured) > 1 { height.wrappedValue = measured }
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
