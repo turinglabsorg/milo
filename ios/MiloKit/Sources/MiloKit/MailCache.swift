@@ -6,7 +6,7 @@ import Foundation
 public actor MailCache {
     let root: URL
     private var catalogue: [String: Conversation] = [:]
-    private var journal: [Operation] = []
+    private var journal: [MailEdit] = []
     private var drafts: [String: Draft] = [:]
     private var loaded = false
 
@@ -107,7 +107,7 @@ public actor MailCache {
     // MARK: Journal
 
     /// Commit a local edit before the UI confirms it; apply it to the catalogue optimistically.
-    public func enqueue(_ operation: Operation) throws {
+    public func enqueue(_ operation: MailEdit) throws {
         ensureLoaded()
         journal.append(operation)
         try write(journal, "journal.json")
@@ -127,7 +127,7 @@ public actor MailCache {
         }
     }
 
-    public func pending() -> [Operation] {
+    public func pending() -> [MailEdit] {
         ensureLoaded()
         return journal
     }

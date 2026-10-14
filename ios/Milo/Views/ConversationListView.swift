@@ -31,7 +31,7 @@ struct ConversationListView: View {
                     .tag(row.key)
                     .swipeActions(edge: .leading) {
                         Button {
-                            Task { await mailbox.mutate(row, Operation.Patch(read: !row.read.value)) }
+                            Task { await mailbox.mutate(row, MailEdit.Patch(read: !row.read.value)) }
                         } label: {
                             Label(row.read.value ? "Da leggere" : "Letta", systemImage: row.read.value ? "envelope.badge" : "envelope.open")
                         }
@@ -39,26 +39,26 @@ struct ConversationListView: View {
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
-                            Task { await mailbox.mutate(row, Operation.Patch(), deleted: true) }
+                            Task { await mailbox.mutate(row, MailEdit.Patch(), deleted: true) }
                             notice.show("Conversazione nel cestino.")
                         } label: { Label("Elimina", systemImage: "trash") }
                         Button {
-                            Task { await mailbox.mutate(row, Operation.Patch(archived: true)) }
+                            Task { await mailbox.mutate(row, MailEdit.Patch(archived: true)) }
                             notice.show("Archiviata. Milo sincronizza in background.")
                         } label: { Label("Archivia", systemImage: "archivebox") }
                         .tint(.indigo)
                     }
                     .contextMenu {
                         Button(row.starred.value ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti", systemImage: "star") {
-                            Task { await mailbox.mutate(row, Operation.Patch(starred: !row.starred.value)) }
+                            Task { await mailbox.mutate(row, MailEdit.Patch(starred: !row.starred.value)) }
                         }
                         Button(row.pinned.value ? "Rimuovi pin" : "Fissa in alto", systemImage: "pin") {
-                            Task { await mailbox.mutate(row, Operation.Patch(pinned: !row.pinned.value)) }
+                            Task { await mailbox.mutate(row, MailEdit.Patch(pinned: !row.pinned.value)) }
                         }
                         Button("Rimanda a domani", systemImage: "clock") {
                             let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))!
                                 .addingTimeInterval(8 * 3600)
-                            Task { await mailbox.mutate(row, Operation.Patch(snoozedUntil: tomorrow.timeIntervalSince1970)) }
+                            Task { await mailbox.mutate(row, MailEdit.Patch(snoozedUntil: tomorrow.timeIntervalSince1970)) }
                         }
                     }
             }

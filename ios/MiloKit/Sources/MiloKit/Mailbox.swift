@@ -154,7 +154,7 @@ public final class Mailbox {
             thread = await withBodies(fresh)
             if let latest = fresh.last { try await loadBody(latest.id) }
             if !conversation.read.value && conversation.unreadCount ?? 1 > 0 {
-                await mutate(conversation, Operation.Patch(read: true))
+                await mutate(conversation, MailEdit.Patch(read: true))
             }
         } catch {
             if thread.isEmpty { lastError = (error as? APIError)?.message ?? error.localizedDescription }
@@ -232,8 +232,8 @@ public final class Mailbox {
 
     // MARK: Editing
 
-    public func mutate(_ conversation: Conversation, _ patch: Operation.Patch, deleted: Bool = false) async {
-        let operation = Operation(key: conversation.key, messageId: conversation.id, patch: patch, deleted: deleted)
+    public func mutate(_ conversation: Conversation, _ patch: MailEdit.Patch, deleted: Bool = false) async {
+        let operation = MailEdit(key: conversation.key, messageId: conversation.id, patch: patch, deleted: deleted)
         do {
             try await cache.enqueue(operation)
         } catch {

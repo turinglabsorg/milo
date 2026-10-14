@@ -101,18 +101,18 @@ struct ThreadView: View {
     private var toolbar: some ToolbarContent {
         if let conversation {
             ToolbarItemGroup(placement: .bottomBar) {
-                Button { act(conversation, Operation.Patch(archived: true), "Archiviata.") } label: { Image(systemName: "archivebox") }
+                Button { act(conversation, MailEdit.Patch(archived: true), "Archiviata.") } label: { Image(systemName: "archivebox") }
                     .accessibilityLabel("Archivia")
                 Spacer()
-                Button { act(conversation, Operation.Patch(), "Nel cestino.", deleted: true) } label: { Image(systemName: "trash") }
+                Button { act(conversation, MailEdit.Patch(), "Nel cestino.", deleted: true) } label: { Image(systemName: "trash") }
                     .accessibilityLabel("Elimina")
                 Spacer()
-                Button { act(conversation, Operation.Patch(starred: !conversation.starred.value)) } label: {
+                Button { act(conversation, MailEdit.Patch(starred: !conversation.starred.value)) } label: {
                     Image(systemName: conversation.starred.value ? "star.fill" : "star")
                 }
                 .accessibilityLabel(conversation.starred.value ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti")
                 Spacer()
-                Button { act(conversation, Operation.Patch(read: !conversation.read.value)) } label: {
+                Button { act(conversation, MailEdit.Patch(read: !conversation.read.value)) } label: {
                     Image(systemName: conversation.read.value ? "envelope.badge" : "envelope.open")
                 }
                 .accessibilityLabel(conversation.read.value ? "Segna da leggere" : "Segna come letta")
@@ -136,14 +136,14 @@ struct ThreadView: View {
                     Button("Rimanda a domani", systemImage: "clock") {
                         let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))!
                             .addingTimeInterval(8 * 3600)
-                        act(conversation, Operation.Patch(snoozedUntil: tomorrow.timeIntervalSince1970), "Rimandata a domani.")
+                        act(conversation, MailEdit.Patch(snoozedUntil: tomorrow.timeIntervalSince1970), "Rimandata a domani.")
                     }
                 } label: { Image(systemName: "ellipsis.circle") }
             }
         }
     }
 
-    private func act(_ conversation: Conversation, _ patch: Operation.Patch, _ message: String? = nil, deleted: Bool = false) {
+    private func act(_ conversation: Conversation, _ patch: MailEdit.Patch, _ message: String? = nil, deleted: Bool = false) {
         Task { await mailbox.mutate(conversation, patch, deleted: deleted) }
         if let message { notice.show(message) }
     }

@@ -127,7 +127,7 @@ public final class APIClient: Sendable {
         url("/messages/\(Self.encode(messageId))/attachments/\(index)", preview ? ["preview": "true"] : [:])
     }
 
-    public func apply(_ operation: Operation) async throws {
+    public func apply(_ operation: MailEdit) async throws {
         let path = "/messages/\(Self.encode(operation.messageId))/thread"
         if operation.deleted {
             try await call("DELETE", path)

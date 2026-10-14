@@ -18,8 +18,13 @@ def postgres(monkeypatch):
         pytest.skip("Set MILO_TEST_DATABASE_URL to a PostgreSQL server for tests")
     created = {}
 
+    live = os.environ.get("MILO_LIVE_TEST_DATA")
+
     def resolve(directory):
         key = str(Path(directory).resolve())
+        # Browser tests against the separately started CI service share its database.
+        if live and key == str(Path(live).resolve()) and os.environ.get("MILO_DATABASE_URL"):
+            return os.environ["MILO_DATABASE_URL"]
         if key not in created:
             name = "milo_test_" + uuid.uuid4().hex[:16]
             with psycopg.connect(admin, autocommit=True) as connection:

@@ -268,7 +268,7 @@ public enum MailView: String, CaseIterable, Codable, Sendable, Identifiable {
 }
 
 /// A local edit waiting to reach the service. Committed to disk before the UI confirms it.
-public struct Operation: Codable, Hashable, Identifiable, Sendable {
+public struct MailEdit: Codable, Hashable, Identifiable, Sendable {
     public struct Patch: Codable, Hashable, Sendable {
         public var read: Bool?
         public var starred: Bool?

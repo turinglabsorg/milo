@@ -84,7 +84,7 @@ final class MailboxTests: XCTestCase {
                               cache: MailCache(root: directory))
         await offline.start()
         let row = try XCTUnwrap(offline.conversations.first { $0.id == "m3" })
-        await offline.mutate(row, Operation.Patch(archived: true))
+        await offline.mutate(row, MailEdit.Patch(archived: true))
         XCTAssertFalse(offline.conversations.contains { $0.id == "m3" })
         XCTAssertEqual(offline.pendingCount, 1)
 
