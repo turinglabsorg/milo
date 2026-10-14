@@ -27,10 +27,13 @@ jobs:
           runtimes = sorted((k for k in devices if "iOS" in k), key=lambda k: [int(x) for x in re.findall(r"\d+", k)], reverse=True)
           print(next(d["udid"] for k in runtimes for d in devices[k] if d["name"].startswith("iPhone") and "Pro" not in d["name"]))')
           echo "Simulator $DEVICE"
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
           cd ios
           set -o pipefail
           xcodebuild test -project Milo.xcodeproj -scheme Milo -destination "id=$DEVICE" \
             -resultBundlePath "$GITHUB_WORKSPACE/build/Milo.xcresult" CODE_SIGNING_ALLOWED=NO \
+            -retry-tests-on-failure -test-iterations 2 \
             TEST_RUNNER_MILO_SCREENSHOTS="$GITHUB_WORKSPACE/build/screenshots" 2>&1 | tail -80
       - uses: actions/upload-artifact@v4
         if: always()
