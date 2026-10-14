@@ -7,8 +7,6 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from test_features import add, setup_account
 
-from milo.push import Push
-
 TOKEN = "a" * 64
 
 
