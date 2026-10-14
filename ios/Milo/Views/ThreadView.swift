@@ -266,7 +266,7 @@ struct MailWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
-        configuration.dataDetectorTypes = [.link, .phoneNumber]
+        configuration.dataDetectorTypes = [.phoneNumber]
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.scrollView.isScrollEnabled = false
