@@ -82,7 +82,7 @@ struct MainView: View {
         .task {
             // Refresh while the app is in the foreground; the service polls providers every minute.
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
                 await mailbox.refresh()
             }
         }

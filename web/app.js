@@ -1270,7 +1270,12 @@ async function runClientQueue(){
   }catch(error){queueRetryAt=Date.now()+3000;if(!temporarilyUnavailable(error)&&S.status?.authenticated)toast(error.message);}
   finally{renderChrome();}
 }
+let lastHiddenRefresh=0;
 async function poll(){
+  // A hidden window (another workspace, minimized) keeps the list current every 30 seconds.
+  if(S.status?.authenticated&&document.hidden&&Date.now()-lastHiddenRefresh>30000){
+    lastHiddenRefresh=Date.now();await refresh().catch(()=>{});flushClientQueue().catch(()=>{});
+  }
   if(S.status?.authenticated&&!document.hidden){
     await refresh();flushClientQueue().catch(()=>{});queueCatalogue();
     if(Date.now()-lastWarm>120000)warmRecentBodies();
@@ -1282,6 +1287,7 @@ async function poll(){
   setTimeout(poll,3000);
 }
 setTimeout(poll,1500);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&S.status?.authenticated){revalidateView();flushClientQueue().catch(()=>{});}});
 addEventListener('online',()=>{updateOnlineState();queueRetryAt=0;flushClientQueue().catch(()=>{});revalidateView();queueCatalogue();});
 addEventListener('offline',()=>{S.online=false;renderChrome();});
 addEventListener('pagehide',()=>{const draft=captureCompose();if(draft)rememberDraft(draft);else storePendingDrafts();});
