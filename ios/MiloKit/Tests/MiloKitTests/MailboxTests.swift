@@ -44,6 +44,8 @@ final class MailboxTests: XCTestCase {
                               cache: MailCache(root: directory))
         await offline.start()
         XCTAssertEqual(offline.conversations.count, DemoTransport.rows.count)
+        XCTAssertTrue(offline.online, "One unreachable refresh is not an outage")
+        await offline.refresh()
         XCTAssertFalse(offline.online)
     }
 

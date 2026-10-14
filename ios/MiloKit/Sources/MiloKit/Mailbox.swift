@@ -31,6 +31,9 @@ public final class Mailbox {
     private var serverSearch: [String: [String]] = [:]
     private var lastCatalogueRefresh = Date.distantPast
     private var flushing = false
+    /// "Offline" is shown only after two refreshes in a row could not reach the service:
+    /// one failed request while the VPN wakes up is not an outage.
+    private var unreachableRefreshes = 0
 
     public static let undoSeconds: TimeInterval = 10
 
@@ -60,6 +63,7 @@ public final class Mailbox {
             state = fresh
             try? await cache.storeState(fresh)
             online = true
+            unreachableRefreshes = 0
             lastError = nil
             await flush()
             switch view {
@@ -78,7 +82,10 @@ public final class Mailbox {
                 Task { await self.refreshCatalogue() }
             }
         } catch let error as APIError {
-            online = error.status != 0
+            if error.status == 0 {
+                unreachableRefreshes += 1
+                online = unreachableRefreshes < 2
+            }
             if error.status == 401 { authenticated = false }
             lastError = error.message
         } catch {
@@ -307,7 +314,6 @@ public final class Mailbox {
                 try await api.apply(operation)
                 try await cache.acknowledge(operation.id)
             } catch let error as APIError where error.isTemporary {
-                online = error.status != 0
                 break
             } catch let error as APIError where error.status == 404 {
                 try? await cache.acknowledge(operation.id)
