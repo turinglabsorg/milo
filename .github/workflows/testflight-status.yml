@@ -22,7 +22,7 @@ jobs:
           apps = api("/apps", **{"filter[bundleId]": "io.meaningtech.milo"})["data"]
           app = apps[0]
           print("app", app["attributes"]["name"], app["id"])
-          for build in api("/builds", **{"filter[app]": app["id"], "sort": "-uploadedDate", "limit": 5,
+          for build in api("/builds", **{"filter[app]": app["id"], "sort": "-version", "limit": 10,
                                          "include": "buildBetaDetail"}).get("data", []):
               a = build["attributes"]
               detail = api(f"/builds/{build['id']}/buildBetaDetail")["data"]["attributes"]
