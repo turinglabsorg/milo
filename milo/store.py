@@ -197,6 +197,9 @@ class WriterLock:
         return self._owner == threading.get_ident()
 
 
+READER_POOL = 12
+
+
 class Store:
     def __init__(self, directory: Path, dsn=None):
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -204,8 +207,12 @@ class Store:
         self.directory = directory
         self.dsn = dsn or database_url(directory)
         self.lock = WriterLock()
-        self._local = threading.local()
+        # Bounded reader pool: worker threads come and go (anyio retires idle
+        # ones), so per-thread connections leaked until Postgres refused clients.
         self._readers = []
+        self._idle = []
+        self._slots = threading.BoundedSemaphore(READER_POOL)
+        self._pool_lock = threading.Lock()
         self._txn_depth = 0
         self.on_mail_change = lambda: None
         self.on_new_message = lambda data: None
@@ -243,19 +250,36 @@ class Store:
             self.db = self.connect()
         return self.db
 
+    @contextmanager
     def reader(self):
-        """Per-thread connection: readers never wait for the sync writer."""
-        connection = getattr(self._local, "db", None)
-        if connection is None or connection.closed or connection.broken:
-            connection = self.connect()
-            self._local.db = connection
-            with self.lock:
-                self._readers.append(connection)
-        return connection
+        """Borrow a pooled connection: readers never wait for the sync writer."""
+        self._slots.acquire()
+        connection = None
+        try:
+            with self._pool_lock:
+                while self._idle and connection is None:
+                    candidate = self._idle.pop()
+                    if candidate.closed or candidate.broken:
+                        self._readers.remove(candidate)
+                        candidate.close()
+                    else:
+                        connection = candidate
+            if connection is None:
+                connection = self.connect()
+                with self._pool_lock:
+                    self._readers.append(connection)
+            yield connection
+        finally:
+            if connection is not None:
+                with self._pool_lock:
+                    self._idle.append(connection)
+            self._slots.release()
 
     def rows(self, query, params=()):
-        connection = self.writer() if self.lock.owned() else self.reader()
-        return connection.execute(sql(query, params), params or None).fetchall()
+        if self.lock.owned():
+            return self.writer().execute(sql(query, params), params or None).fetchall()
+        with self.reader() as connection:
+            return connection.execute(sql(query, params), params or None).fetchall()
 
     def execute(self, query, params=()):
         with self.lock:
@@ -674,6 +698,8 @@ class Store:
         return rule_id
 
     def close(self):
-        for connection in self._readers:
+        with self._pool_lock:
+            readers, self._readers, self._idle = self._readers, [], []
+        for connection in readers:
             connection.close()
         self.db.close()

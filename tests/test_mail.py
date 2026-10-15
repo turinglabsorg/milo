@@ -279,6 +279,21 @@ def test_reads_do_not_wait_for_a_running_write(store, account_data):
     assert store.rows("SELECT name FROM accounts")[0]["name"] == "Busy"
 
 
+def test_short_lived_reader_threads_share_a_bounded_pool(store):
+    import threading
+
+    from milo.store import READER_POOL
+    for _ in range(4):
+        threads = [threading.Thread(target=store.rows, args=("SELECT pg_sleep(0.01)",)) for _ in range(30)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    assert len(store._readers) <= READER_POOL
+    count = store.rows("SELECT count(*) AS n FROM pg_stat_activity WHERE datname=current_database()")[0]["n"]
+    assert count <= READER_POOL + 1
+
+
 def test_original_mime_lives_compressed_outside_the_database(store, account_data):
     account_id = store.add_account(account_data)
     current = raw_mail("Current", "<current@example.com>")
