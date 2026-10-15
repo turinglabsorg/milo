@@ -210,6 +210,7 @@ struct MessageCard: View {
     var onToggle: () -> Void
     @Environment(Mailbox.self) private var mailbox
     @State private var height: CGFloat = 120
+    @State private var showQuoted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -234,9 +235,18 @@ struct MessageCard: View {
                             .frame(height: height)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     } else {
-                        Text(linked(message.body ?? ""))
+                        let split = Mailbox.splitQuoted(message.body ?? "")
+                        Text(linked(split.text))
                             .font(.body)
                             .textSelection(.enabled)
+                        if let quoted = split.quoted {
+                            DisclosureGroup(isExpanded: $showQuoted) {
+                                Text(linked(quoted)).font(.callout).foregroundStyle(Color.milo.muted)
+                                    .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                            } label: {
+                                Text("Mostra il testo citato").font(.footnote).foregroundStyle(Color.milo.muted)
+                            }
+                        }
                     }
                     if let attachments = message.attachments, !attachments.isEmpty {
                         ForEach(attachments, id: \.index) { attachment in

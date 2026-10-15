@@ -5,7 +5,7 @@ from email.message import EmailMessage
 
 import pytest
 
-from milo.mail import SyncEngine, parse_message, send_mail
+from milo.mail import SyncEngine, build_message, parse_message, send_mail
 
 
 def raw_mail(subject="Hello", msg_id="<mail-1@example.com>", body="Ciao,\nParliamone domani."):
@@ -230,6 +230,21 @@ def test_smtp_requires_tls_and_preserves_reply_headers(account_data, monkeypatch
     assert envelopes[-1] == ['giulia@example.com', 'marco@example.com']
     with pytest.raises(ValueError):
         send_mail(account_data, {**draft, "to": "invalid"})
+
+
+def test_replies_quote_the_original_below_the_answer():
+    account = {"email": "me@example.com"}
+    draft = {"to": "anna@example.com", "subject": "Re: Cena", "body": "Volentieri!\n\n-- \nSeb", "mode": "reply"}
+    original = {"message_id": "<cena@example.com>", "sender": "Anna Rossi", "sender_email": "anna@example.com",
+                "date": 1792044000.0, "body": "Ci vediamo sabato?\n\nA."}
+    body = build_message(account, draft, original).get_content()
+    assert body.startswith("Volentieri!\n\n-- \nSeb\n\nIl giorno ")
+    assert "Anna Rossi <anna@example.com> ha scritto:\n> Ci vediamo sabato?\n>\n> A.\n" in body
+    already = {**draft, "body": "Ok\n\nIl giorno ieri Anna ha scritto:\n> Ci vediamo sabato?"}
+    assert build_message(account, already, original).get_content().count("ha scritto:") == 1
+    assert "ha scritto" not in build_message(account, {**draft, "mode": "forward"}, original).get_content()
+    assert "ha scritto" not in build_message(account, draft, {**original, "body": ""}).get_content()
+    assert "ha scritto" not in build_message(account, draft).get_content()
 
 
 def test_preview_skips_newsletter_links():

@@ -194,6 +194,11 @@ final class MailboxTests: XCTestCase {
     func testSubjectCore() {
         XCTAssertEqual(Mailbox.subjectCore("Re: Fwd: RE: Progetto"), "Progetto")
         XCTAssertEqual(Mailbox.subjectCore(""), "Senza oggetto")
+        let split = Mailbox.splitQuoted("Va bene.\n\nIl giorno mer 14 ott 2026 alle 10:00 Anna <anna@example.com> ha scritto:\n> Ci vediamo?")
+        XCTAssertEqual(split.text, "Va bene.")
+        XCTAssertEqual(split.quoted, "Il giorno mer 14 ott 2026 alle 10:00 Anna <anna@example.com> ha scritto:\n> Ci vediamo?")
+        XCTAssertNil(Mailbox.splitQuoted("Solo testo").quoted)
+        XCTAssertNil(Mailbox.splitQuoted("> tutto citato").quoted)
     }
 }
 

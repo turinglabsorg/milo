@@ -6,11 +6,14 @@ import re
 import smtplib
 import ssl
 import threading
+import os
 import time
+from datetime import datetime
 from email import policy
 from email.message import EmailMessage
 from email.utils import getaddresses, make_msgid, parsedate_to_datetime
 from html.parser import HTMLParser
+from zoneinfo import ZoneInfo
 
 from .store import preview_text
 
@@ -365,8 +368,29 @@ def build_message(account, draft, original=None):
     if original and original.get("message_id"):
         message["In-Reply-To"] = original["message_id"]
         message["References"] = original["message_id"]
-    message.set_content(draft["body"])
+    message.set_content(draft["body"] + reply_quote(draft, original))
     return message
+
+
+DAYS = ("lun", "mar", "mer", "gio", "ven", "sab", "dom")
+MONTHS = ("gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic")
+QUOTE_HEADER = re.compile(r"^(?:Il giorno .{0,300}ha scritto:|On .{0,300}wrote:)\s*$", re.M)
+
+
+def reply_quote(draft, original):
+    """The quoted original below a reply, unless the writer already quoted it."""
+    if not original or draft.get("mode") == "forward" or QUOTE_HEADER.search(draft["body"]):
+        return ""
+    text = (original.get("body") or "").strip()
+    if not text:
+        return ""
+    when = datetime.fromtimestamp(original["date"], ZoneInfo(os.environ.get("MILO_TIMEZONE", "Europe/Rome")))
+    stamp = f"{DAYS[when.weekday()]} {when.day} {MONTHS[when.month - 1]} {when.year} alle {when:%H:%M}"
+    sender = original.get("sender") or ""
+    address = original.get("sender_email") or ""
+    who = f"{sender} <{address}>" if sender and sender != address else address or sender
+    quoted = "\n".join(">" + (" " + line if line else "") for line in text.splitlines())
+    return f"\n\nIl giorno {stamp} {who} ha scritto:\n{quoted}\n"
 
 
 def send_mail(account, draft, original=None):

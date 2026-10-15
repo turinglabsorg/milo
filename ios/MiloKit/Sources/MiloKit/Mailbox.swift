@@ -441,4 +441,14 @@ public final class Mailbox {
             .trimmingCharacters(in: .whitespaces)
         return core.isEmpty ? "Senza oggetto" : core
     }
+
+    /// Splits plain-text mail into the new text and the quoted history below it, like the web reader.
+    public static func splitQuoted(_ body: String) -> (text: String, quoted: String?) {
+        let pattern = #"^(?:On [^\n]{0,300}wrote:|Il giorno [^\n]{0,300}ha scritto:|Le [^\n]{0,300}[ée]crit\s*:|Am [^\n]{0,300}schrieb[^\n]*:|>\s)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines, .caseInsensitive]),
+              let match = regex.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)),
+              match.range.location > 0, let range = Range(match.range, in: body) else { return (body, nil) }
+        let text = String(body[..<range.lowerBound])
+        return (text.replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression), String(body[range.lowerBound...]))
+    }
 }
