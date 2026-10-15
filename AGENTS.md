@@ -73,6 +73,25 @@ external action. That file is the single source of global agent instructions.
   bulk migrations natively on the Mac with the container stopped (the 10 GB
   raw move took ~6 minutes), then restart.
 
+- Automatic AI analyzes only arrivals after activation: `ai_automatic_boundary`
+  stores `since` and `after_seq`. `Store.set_setting("ai", ...)` resets it when
+  automatic analysis is enabled (including configuration restore); `SyncEngine`
+  initializes a missing boundary once, without scanning the archive. Automatic
+  notification senders and Gmail Updates/Social labels classify as `updates`;
+  Auto-Submitted/no-reply mail does too unless it has newsletter headers.
+  Updates are excluded from automatic analysis and recap sources. Newsletters
+  remain eligible; manual analysis remains available.
+- AI action items are proposals until explicitly accepted. `todos.accepted` is
+  a nullable timestamp; only accepted action items enter `/api/todos` and the
+  navigation count. `POST /api/messages/{id}/todos` accepts `{text}` only from
+  that message's current proposals and is idempotent. Message/body and thread
+  responses include `todos` with acceptance/completion state. Accepted tasks
+  survive reanalysis, replies and archiving; existing unaccepted rows remain
+  proposals. Backup/restore and the iOS thread/body caches preserve acceptance.
+  Web and iOS show **Accetta da fare**, then **Nei da fare** or **Fatto**.
+- The offline web shell cache is `milo-shell-v27` (`web/sw.js`); bump its version
+  when changing shell assets so installed clients fetch the new controls.
+
 ## iOS app (`ios/`)
 
 - Native SwiftUI app (iOS 17+). `ios/MiloKit` is a Foundation-only Swift
