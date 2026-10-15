@@ -388,7 +388,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         # Group on the covering catalogue index; COUNT(DISTINCT expr) needs a temp B-tree per call.
         counts = store.rows("SELECT SUM(inbox) AS inbox,SUM(inbox*unread) AS unread,SUM(starred) AS starred,SUM(snoozed) AS snoozed "
                             "FROM (SELECT MAX((archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?))::int) AS inbox,"
-                            "SUM((read=0 AND archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?))::int) AS unread,"
+                            "MAX((read=0 AND archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?))::int) AS unread,"
                             "MAX(starred) AS starred,MAX((snoozed_until>?)::int) AS snoozed FROM messages "
                             "WHERE hidden=0 AND trashed=0 GROUP BY account_id,COALESCE(thread_id,id))", (now, now, now))[0]
         return {"accounts": store.accounts(), "ai": store.setting("ai"), "ai_error": store.setting("ai_error"),

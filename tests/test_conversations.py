@@ -40,6 +40,20 @@ def test_threads_include_sent_replies_and_lightweight_list(logged_in, account_da
     assert store.message(later)['pinned']
 
 
+def test_unread_counts_conversations_and_da_leggere_lists_them(logged_in, account_data):
+    store = logged_in.app.state.store
+    account_id = store.add_account(account_data)
+    add(store, account_id, 1, date=100)
+    add(store, account_id, 2, date=200)
+    read_id = add(store, account_id, 3, thread="other", date=300)
+    store.execute("UPDATE messages SET read=1 WHERE id=?", (read_id,))
+    # Two unread messages in one conversation count once, like the list shows.
+    assert logged_in.get('/api/state').json()['counts']['unread'] == 1
+    unread = logged_in.get('/api/messages', params={'view': 'unread'}).json()['messages']
+    assert len(unread) == 1 and unread[0]['inbox_unread_count'] == 2
+    assert logged_in.get('/api/messages').json()['messages']
+
+
 def test_reading_mail_never_calls_the_provider(logged_in, monkeypatch):
     store = logged_in.app.state.store
     account_id = store.google_account('mail@example.com', dict(CREDS))

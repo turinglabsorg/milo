@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UserNotifications
 
 struct StateResponse: Decodable {
     struct Counts: Decodable {
@@ -30,6 +31,9 @@ final class DockBadge {
     }
 
     func start() {
+        // macOS hides Dock badges for apps without the badge
+        // notification permission, so ask for it up front (both modes).
+        UNUserNotificationCenter.current().requestAuthorization(options: [.badge]) { _, _ in }
         task = Task { [weak self] in
             await self?.run()
         }
@@ -47,11 +51,13 @@ final class DockBadge {
             (200..<300).contains(http.statusCode),
             let state = try? JSONDecoder().decode(StateResponse.self, from: data)
         else { return }
-        let label = Self.label(unread: state.counts.unread)
+        let unread = state.counts.unread
+        let label = Self.label(unread: unread)
         await MainActor.run {
             NSApp.dockTile.badgeLabel = label
             NSApp.dockTile.display()
         }
+        try? await UNUserNotificationCenter.current().setBadgeCount(unread)
     }
 
     private func follow() async throws {

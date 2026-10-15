@@ -63,9 +63,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             at: directory, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
-        let temporary = Self.stateFile.appendingPathExtension("tmp")
         if let data = try? JSONSerialization.data(withJSONObject: ["cursor": newValue]) {
-            try? data.write(to: temporary, options: .atomic)
+            try? data.write(to: Self.stateFile, options: .atomic)
         }
     }
 

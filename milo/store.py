@@ -901,11 +901,12 @@ class Store:
         # Fetch only list metadata. Bodies and MIME blobs belong to the reader.
         clauses, params = ["hidden=0", "trashed=0"], []
         views = {"inbox": "archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?)",
+                 "unread": "archived=0 AND sent=0 AND read=0 AND (snoozed_until IS NULL OR snoozed_until<=?)",
                  "starred": "starred=1", "archive": "archived=1 AND sent=0", "sent": "sent=1",
                  "snoozed": "snoozed_until>?"}
         if view in views:
             clauses.append(views[view])
-            if view in {"inbox", "snoozed"}:
+            if view in {"inbox", "unread", "snoozed"}:
                 params.append(time.time())
         if category:
             clauses.append("category=?")

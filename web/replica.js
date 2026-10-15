@@ -61,6 +61,7 @@ function select(query,path,optimistic,screened=new Set()){
     if(query.category&&query.view==='inbox'&&row.category!==query.category)return false;
     if(query.view==='inbox'&&(!(row.has_inbox||row.snoozed_until&&row.snoozed_until<=now&&!row.archived&&row.received_count)||row.snoozed_until>now))return false;
     if(query.view==='inbox'&&screened.size&&screened.has((row.sender_email||'').toLowerCase()))return false;
+    if(query.view==='unread'&&!(row.has_inbox&&(row.inbox_unread_count??row.unread_count??(row.read?0:1))>0))return false;
     if(query.view==='archive'&&!row.has_archive)return false;
     if(query.view==='sent'&&!row.has_sent)return false;
     if(query.view==='starred'&&!row.starred)return false;

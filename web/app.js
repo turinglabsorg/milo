@@ -27,7 +27,7 @@ const S = {status:null, setupAuthorized:false, state:{accounts:[], counts:{}, ai
 const MAX_SERVER_ERRORS=3;
 function updateOnlineState(){const wasOnline=S.online;S.online=navigator.onLine&&S.serverErrors<MAX_SERVER_ERRORS;if(wasOnline&&!S.online)renderChrome();}
 const categoryNames = {people:'Persone', updates:'Notifiche', newsletters:'Newsletter'};
-const viewNames = {inbox:'Smart inbox', todo:'Da fare', screener:'Nuovi mittenti', starred:'Preferiti', drafts:'Bozze', sent:'Posta inviata', snoozed:'Per dopo', archive:'Archivio'};
+const viewNames = {inbox:'Smart inbox', unread:'Da leggere', todo:'Da fare', screener:'Nuovi mittenti', starred:'Preferiti', drafts:'Bozze', sent:'Posta inviata', snoozed:'Per dopo', archive:'Archivio'};
 let toastTimer, searchTimer, autosaveTimer, localDraftTimer;
 S.pendingDrafts=new Map();S.draftWrites=new Map();S.discardedDrafts=new Set();
 S.pendingSettings=new Map();S.queueErrors=new Map();S.remoteTicket=0;
@@ -140,7 +140,7 @@ function renderChrome() {
 
 function renderShell() {
   const counts=S.state.counts;
-  const folders=[['inbox','inbox'],['todo','todo'],...(S.state.screener?.enabled?[['screener','screener']]:[]),['starred','star'],['drafts','edit'],['sent','sent'],['snoozed','clock'],['archive','archive']];
+  const folders=[['inbox','inbox'],['unread','mail'],['todo','todo'],...(S.state.screener?.enabled?[['screener','screener']]:[]),['starred','star'],['drafts','edit'],['sent','sent'],['snoozed','clock'],['archive','archive']];
   $('#app').innerHTML=`<main class="shell ${S.selected?'has-selection':''} ${S.menu?'menu-open':''}"><aside class="sidebar">${logo()}<button class="primary compose-button" data-action="compose">${icon('plus')}Nuovo messaggio</button><div class="nav-label">La tua posta</div><nav class="nav">${folders.map(([view,name])=>`<button class="nav-button ${S.view===view?'active':''}" data-view="${view}">${icon(name)}${viewNames[view]}${counts[view]?`<span class="count">${counts[view]}</span>`:''}</button>`).join('')}</nav><div class="account-section">${accountMarkup()}</div><div class="sidebar-bottom"><div class="sidebar-footer"><div class="user-avatar">${esc(initials(S.state.identity?.name || S.state.accounts[0]?.name || 'Tu'))}</div><span>${esc(S.state.identity?.name||'Il tuo spazio')}</span><button data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div>${S.status.demo?'<div class="demo-label">DEMO · messaggi fittizi</div>':''}</div></aside><header class="topbar"><button class="icon-button mobile-menu" data-action="menu" aria-label="Apri menu">${icon('menu')}</button><div class="breadcrumbs">Il tuo spazio ${icon('arrow')}<strong>${viewNames[S.view]}</strong></div><div class="top-tools"><div id="sync-status">${syncMarkup()}</div><label class="search">${icon('search')}<input id="search-input" placeholder="Cerca nella tua posta" value="${esc(S.search)}" aria-label="Cerca nella tua posta"><kbd>/</kbd></label><button class="icon-button sync-button ${syncWorking()?'spinning':''}" data-action="sync" aria-label="Sincronizza ora" title="Sincronizza ora">${icon('sync')}</button><span class="sync-indicator ${!S.online||S.state.accounts.some(a=>a.error)?'offline':''}" title="${S.online?'Servizio connesso':'Servizio non raggiungibile'}"></span></div></header><section class="list-panel" id="list-panel"></section><section class="reading-panel" id="reading-panel"></section><div id="ask-dock"></div><button class="ask-fab" data-action="ask" aria-label="Chiedi a Milo sulla tua posta" aria-expanded="false" title="Chiedi a Milo">${icon('chat')}</button></main>`;
   renderList(); renderReading();
 }
@@ -589,7 +589,8 @@ function adjustCounts(before,after,deleted=false){
   const inbox=Number(Boolean(before.has_inbox)),nextInbox=deleted?0:Number(Boolean(after.has_inbox));
   counts.inbox=Math.max(0,(counts.inbox||0)+nextInbox-inbox);
   counts.starred=Math.max(0,(counts.starred||0)+(deleted?0:Number(Boolean(after.starred)))-Number(Boolean(before.starred)));
-  counts.unread=Math.max(0,(counts.unread||0)+(deleted||!nextInbox?0:(after.inbox_unread_count??after.unread_count??0))-((before.inbox_unread_count??before.unread_count??0)));
+  const unreadThread=row=>(row.inbox_unread_count??row.unread_count??(row.read?0:1))>0?1:0;
+  counts.unread=Math.max(0,(counts.unread||0)+(deleted||!nextInbox?0:unreadThread(after))-unreadThread(before));
   counts.snoozed=Math.max(0,(counts.snoozed||0)+(deleted?0:Number(after.snoozed_until>Date.now()/1000))-Number(before.snoozed_until>Date.now()/1000));
   S.state={...S.state,counts};
 }
@@ -989,7 +990,7 @@ async function undoSend(id,draft){
 }
 function showPalette(){
   const go=view=>()=>document.querySelector(`.nav-button[data-view="${view}"]`)?.click();
-  const commands=[['Nuovo messaggio','C',()=>showCompose()],['Smart inbox','',go('inbox')],['Da fare','',go('todo')],
+  const commands=[['Nuovo messaggio','C',()=>showCompose()],['Smart inbox','',go('inbox')],['Da leggere','',go('unread')],['Da fare','',go('todo')],
     ...(S.state.screener?.enabled?[['Nuovi mittenti','',go('screener')]]:[]),['Preferiti','',go('starred')],['Bozze','',go('drafts')],['Posta inviata','',go('sent')],['Per dopo','',go('snoozed')],['Archivio','',go('archive')],
     ['Chiedi a Milo','',()=>showAsk()],['Recap dell’inbox','',()=>openRecap()],['Gestisci i mittenti di newsletter','',()=>showNewsletterSenders()],
     ['Sincronizza ora','',()=>document.querySelector('[data-action="sync"]')?.click()],['Impostazioni','',()=>showSettings('accounts')],['Firme e risposte salvate','',()=>showSettings('compose')],
