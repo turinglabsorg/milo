@@ -28,7 +28,7 @@ jobs:
       - run: uv run playwright install --with-deps chromium
       - name: Repeat browser suites
         run: |
-          modules=$(grep -l sync_playwright tests/*.py | grep -v test_browser.py)
+          modules=$(grep -l sync_playwright tests/test_*.py | grep -v test_browser.py)
           for round in $(seq 1 "${{ inputs.rounds }}"); do
             echo "::group::round $round"
             uv run pytest $modules -q -p no:rerunfailures -rf --tb=short || true

@@ -86,7 +86,16 @@ def test_delete_shortcut_removes_conversation_before_response(tmp_path, key):
         expect(page.locator('.message-row')).to_have_count(1)
         expect(page.locator('.thread-message')).to_have_count(1)
         expect(page.locator('#toast')).to_contain_text('Conversazione eliminata')
+        # The delete leaves through the client queue after the UI updates: wait for it.
+        for _ in range(100):
+            if deleted:
+                break
+            page.wait_for_timeout(50)
         assert len(deleted) == 1
+        for _ in range(100):  # let the server apply it before reloading
+            if all(m['id'] != sent for m in page.request.get(url + '/api/messages').json()['messages']):
+                break
+            page.wait_for_timeout(50)
         page.reload()
         expect(page.locator('.message-row')).to_have_count(1)
         assert not page.request.get(url + '/api/messages').json()['messages'][0]['id'] == sent
