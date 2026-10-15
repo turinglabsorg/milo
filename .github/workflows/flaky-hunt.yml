@@ -1,0 +1,38 @@
+name: Flaky hunt
+# Manual: repeat the browser suites without retries to expose unstable tests.
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: Repetitions
+        default: "6"
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.4-alpine
+        env:
+          POSTGRES_USER: milo
+          POSTGRES_PASSWORD: milo
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U milo" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      MILO_TEST_DATABASE_URL: postgresql://milo:milo@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --extra dev --frozen
+      - run: uv run playwright install --with-deps chromium
+      - name: Repeat browser suites
+        run: |
+          modules=$(grep -l sync_playwright tests/*.py | grep -v test_browser.py)
+          for round in $(seq 1 "${{ inputs.rounds }}"); do
+            echo "::group::round $round"
+            uv run pytest $modules -q -p no:rerunfailures -rf --tb=short || true
+            echo "::endgroup::"
+          done 2>&1 | tee hunt.log
+          echo "== failures =="
+          grep -E "^FAILED" hunt.log | sort | uniq -c | sort -rn || true
