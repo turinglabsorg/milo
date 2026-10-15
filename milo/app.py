@@ -54,6 +54,7 @@ from .store import ATTACHMENT_LIMIT, DRAFT_ID, Store
 
 EVENT_HEARTBEAT = 25
 EVENT_COALESCE = 1
+NOTIFY_RECENT = 3600
 
 
 def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434", secure_cookies=False,
@@ -361,6 +362,22 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                 yield f"event: change\ndata: {seen}\n\n"
         return StreamingResponse(stream(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+    @app.get("/api/notifications", dependencies=[Depends(auth)])
+    def notifications(after: int | None = None):
+        """New mail worth a desktop notification, in arrival order (`seq`).
+
+        Without `after` only the cursor is returned: a client starts from now.
+        Same rules as phone pushes: recent people or VIP mail, never blocked or
+        unscreened senders.
+        """
+        latest = store.rows("SELECT COALESCE(MAX(seq),0) AS seq FROM messages")[0]["seq"]
+        if after is None or after >= latest:
+            return {"cursor": latest, "messages": []}
+        rows = store.rows("SELECT seq,id,account_id,thread_id,sender,sender_email,subject,category,date FROM messages "
+                          "WHERE seq>? AND sent=0 AND hidden=0 AND trashed=0 AND archived=0 AND read=0 AND date>? "
+                          "ORDER BY seq LIMIT 50", (after, time.time() - NOTIFY_RECENT))
+        return {"cursor": latest, "messages": push.eligible(rows)}
 
     @app.get("/api/state", dependencies=[Depends(auth)])
     def state():

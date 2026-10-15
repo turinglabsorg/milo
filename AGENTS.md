@@ -51,6 +51,11 @@ external action. That file is the single source of global agent instructions.
   `messages_search_<column>`) make it indexed. They are built CONCURRENTLY on a
   dedicated connection after startup (`ensure_search_indexes`), invalid leftovers
   are rebuilt, and shutdown cancels a running build.
+- Linux notifications: `scripts/notifier.py` (systemd user unit
+  `milo-notifier.service`, written by `install.py` when `.data/server.json`
+  exists) follows `/api/events` and asks `GET /api/notifications?after=<seq>`
+  (arrival order, push rules from `Push.eligible`); banners are skipped while
+  the Milo window is focused (Hyprland). Cursor in `~/.local/state/milo/`.
 - Heavy archive rewrites saturate Docker Desktop's bind-mount I/O and trip the
   health check. Back up with an APFS clone (`cp -c`, container stopped) and run
   bulk migrations natively on the Mac with the container stopped (the 10 GB

@@ -344,3 +344,45 @@ def test_orphaned_attachments_are_swept(store):
     assert store.sweep_draft_attachments(older_than=-1) == 1
     assert store.draft_attachments("gone") == [] and len(store.draft_attachments("kept")) == 1
     assert not store.attachment_path("gone").exists()
+
+
+def test_desktop_notifications_follow_arrival_order_and_push_rules(logged_in, account_data):
+    store, account_id = setup_account(logged_in, account_data)
+    add(store, account_id, 1, subject="Vecchia", msg_id="<old@example.com>")
+    start = logged_in.get("/api/notifications").json()
+    assert start["messages"] == [] and start["cursor"] > 0
+    add(store, account_id, 2, subject="Cena sabato?", msg_id="<n1@example.com>")
+    add(store, account_id, 3, subject="Offerta", msg_id="<n2@example.com>", sender="Shop <shop@example.com>",
+        category="newsletters")
+    add(store, account_id, 4, subject="Spam", msg_id="<n3@example.com>", sender="Spam <spam@example.com>")
+    add(store, account_id, 5, subject="Ieri", msg_id="<n4@example.com>", when=time.time() - 7200)
+    logged_in.app.state.features.set_sender("spam@example.com", status="blocked")
+    result = logged_in.get("/api/notifications", params={"after": start["cursor"]}).json()
+    assert [message["subject"] for message in result["messages"]] == ["Cena sabato?"]
+    assert result["cursor"] > start["cursor"]
+    assert logged_in.get("/api/notifications", params={"after": result["cursor"]}).json()["messages"] == []
+
+
+def test_linux_notifier_announces_and_remembers_the_cursor(tmp_path, monkeypatch):
+    import httpx
+
+    from scripts import notifier
+    monkeypatch.setattr(notifier, "STATE", tmp_path / "notifier.json")
+    monkeypatch.setattr(notifier, "milo_focused", lambda server: False)
+    shown = []
+    monkeypatch.setattr(notifier, "banner", lambda title, body: shown.append((title, body)))
+    replies = [{"cursor": 7, "messages": []},
+               {"cursor": 12, "messages": [{"sender": f"Persona {n}", "subject": f"Tema {n}"} for n in range(5)]}]
+    seen = []
+
+    def handler(request):
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json=replies.pop(0))
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        first = notifier.Notifier("https://milo.example.ts.net", client)
+        first.check()
+        first.check()
+    assert seen == [{}, {"after": "7"}]
+    assert shown == [("Persona 0", "Tema 0"), ("Persona 1", "Tema 1"), ("Persona 2", "Tema 2"),
+                     ("Milo", "Altre 2 email nuove")]
+    assert notifier.load_cursor() == 12

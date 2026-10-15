@@ -34,3 +34,25 @@ if shutil.which("update-desktop-database"):
 if shutil.which("xdg-mime"):
     subprocess.run(["xdg-mime", "default", "milo.desktop", "x-scheme-handler/mailto"], check=False)
 print(f"Installed {launcher}\nOpen Milo from your application launcher; mailto: links now open in Milo.")
+
+# Desktop notifications while the window is closed (shared server only).
+if (root / ".data/server.json").exists() and shutil.which("systemctl") and shutil.which("notify-send"):
+    units = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd/user"
+    units.mkdir(parents=True, exist_ok=True)
+    (units / "milo-notifier.service").write_text(f"""[Unit]
+Description=Milo desktop notifications
+After=graphical-session.target network-online.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart={desktop_quote(root / '.venv/bin/python')} {desktop_quote(root / 'scripts/notifier.py')}
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=graphical-session.target
+""")
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
+    subprocess.run(["systemctl", "--user", "enable", "--now", "milo-notifier.service"], check=False)
+    subprocess.run(["systemctl", "--user", "restart", "milo-notifier.service"], check=False)
+    print("Milo notifications run in the background (systemctl --user status milo-notifier).")
