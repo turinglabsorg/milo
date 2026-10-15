@@ -241,7 +241,15 @@ class Store:
             # Serialize schema creation across processes sharing the archive.
             self.db.execute("SELECT pg_advisory_lock(80250)")
             try:
-                self.db.execute(SCHEMA)
+                # Re-running the DDL takes table locks even when nothing changes; that
+                # deadlocks with a concurrent index build, so run it only when it changed.
+                version = hashlib.sha256(SCHEMA.encode()).hexdigest()
+                applied = self.db.execute("SELECT to_regclass('settings') IS NOT NULL AS ready").fetchone()["ready"] and \
+                    self.db.execute("SELECT value FROM settings WHERE key='schema'").fetchone()
+                if not applied or json.loads(applied["value"]) != version:
+                    self.db.execute(SCHEMA)
+                    self.db.execute("INSERT INTO settings VALUES('schema',%s) ON CONFLICT(key) DO UPDATE "
+                                    "SET value=excluded.value", (json.dumps(version),))
             finally:
                 self.db.execute("SELECT pg_advisory_unlock(80250)")
         self.bootstrap = self.setting("bootstrap")
@@ -400,6 +408,9 @@ class Store:
         """
         with self.connect() as connection:
             self._maintenance = connection
+            # One builder at a time across processes; others simply skip.
+            if not connection.execute("SELECT pg_try_advisory_lock(80251) AS locked").fetchone()["locked"]:
+                return
             connection.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
             for column in SEARCH_COLUMNS:
                 if stop():
