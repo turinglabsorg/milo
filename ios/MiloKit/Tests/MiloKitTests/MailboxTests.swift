@@ -140,6 +140,14 @@ final class MailboxTests: XCTestCase {
         XCTAssertEqual(mailbox.conversations.count, DemoTransport.rows.count - 1)
     }
 
+    func testCompletingASelectionClearsThoseTodos() async throws {
+        let (mailbox, _) = make()
+        await mailbox.show(.todo)
+        XCTAssertEqual(Set(mailbox.todos.map(\.id)), ["t1", "t2"])
+        await mailbox.complete(["t1", "t2"])
+        XCTAssertTrue(mailbox.todos.isEmpty)
+    }
+
     func testRecipientEditKeepsEarlierAddresses() {
         XCTAssertEqual(RecipientEdit.token("Anna <anna@example.com>, mar"), "mar")
         XCTAssertEqual(RecipientEdit.token("Anna <anna@example.com>, "), "")

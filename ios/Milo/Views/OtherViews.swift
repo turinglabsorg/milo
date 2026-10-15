@@ -5,9 +5,11 @@ struct TodoListView: View {
     @Binding var selectedKey: String?
     @Environment(Mailbox.self) private var mailbox
     @Environment(Notice.self) private var notice
+    @State private var selection = Set<String>()
+    @State private var selecting = false
 
     var body: some View {
-        List {
+        List(selection: $selection) {
             ForEach(mailbox.todos) { todo in
                 HStack(alignment: .top, spacing: 12) {
                     Button {
@@ -40,9 +42,12 @@ struct TodoListView: View {
                     .buttonStyle(.plain)
                 }
                 .padding(.vertical, 2)
+                .allowsHitTesting(!selecting)
+                .tag(todo.id)
             }
         }
         .listStyle(.plain)
+        .environment(\.editMode, .constant(selecting ? .active : .inactive))
         .overlay {
             if mailbox.todos.isEmpty {
                 ContentUnavailableView("Niente in sospeso.", systemImage: "checklist",
@@ -51,6 +56,39 @@ struct TodoListView: View {
         }
         .navigationTitle("Da fare")
         .refreshable { await mailbox.refresh() }
+        .toolbar {
+            if !mailbox.todos.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(selecting ? "Fine" : "Seleziona") {
+                        selecting.toggle()
+                        if !selecting { selection = [] }
+                    }
+                    .accessibilityIdentifier("select-todos")
+                }
+            }
+            if selecting {
+                ToolbarItem(placement: .bottomBar) {
+                    Button(selection.count == mailbox.todos.count && !mailbox.todos.isEmpty ? "Deseleziona" : "Tutte") {
+                        selection = selection.count == mailbox.todos.count ? [] : Set(mailbox.todos.map(\.id))
+                    }
+                    .accessibilityIdentifier("select-all-todos")
+                }
+                ToolbarItem(placement: .bottomBar) { Spacer() }
+                ToolbarItem(placement: .bottomBar) {
+                    Button("Fatte") {
+                        let ids = selection
+                        selection = []
+                        selecting = false
+                        Task {
+                            await mailbox.complete(ids)
+                            notice.show(ids.count == 1 ? "Fatto." : "\(ids.count) cose da fare segnate come fatte.")
+                        }
+                    }
+                    .disabled(selection.isEmpty)
+                    .accessibilityIdentifier("complete-todos")
+                }
+            }
+        }
     }
 }
 

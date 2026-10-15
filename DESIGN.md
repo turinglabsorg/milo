@@ -99,6 +99,13 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
   **Nuovi mittenti**; both use the standard count badge.
 - To-do rows: 22 px square check (8 px radius family), 14 px task text, 12 px
   muted meta line; follow-ups carry a danger-tinted "Da seguire" tag.
+  **Seleziona tutte** uses the list-header button. Selected rows use the bulk
+  language (`--soft`, 3 px accent edge) and the bar’s **Fatte** marks them done.
+  The check on a single row still completes only that row. The same selection
+  lives on iOS: Seleziona, Tutte, Fatte.
+- Ask Milo’s reply is only the answer text, in a bubble as tight as the
+  question (8 px padding, 14 px, line-height 1.4). Cited mail sits underneath
+  as a 12 px muted line, not inside the bubble.
 - Bulk selection uses the selected-row language: `--soft` background, 3 px
   accent edge, accent avatar outline, and a sticky bar of icon actions.
 - The list header stays title + Recap; Ask (question bubble) and the command

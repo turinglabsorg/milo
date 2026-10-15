@@ -31,7 +31,7 @@ const viewNames = {inbox:'Smart inbox', todo:'Da fare', screener:'Nuovi mittenti
 let toastTimer, searchTimer, autosaveTimer, localDraftTimer;
 S.pendingDrafts=new Map();S.draftWrites=new Map();S.discardedDrafts=new Set();
 S.pendingSettings=new Map();S.queueErrors=new Map();S.remoteTicket=0;
-S.multi=new Set();S.todos=null;S.screening=null;S.suggestions=new Map();
+S.multi=new Set();S.todoMulti=new Set();S.todos=null;S.screening=null;S.suggestions=new Map();
 const UNDO_SECONDS=10;
 try{for(const id of JSON.parse(localStorage.getItem('milo-discarded-drafts')||'[]'))S.discardedDrafts.add(id);}catch{}
 try{for(const draft of JSON.parse(localStorage.getItem('milo-pending-drafts')||'[]'))if(draft.id&&typeof draft.body==='string')S.pendingDrafts.set(draft.id,draft);}catch{}
@@ -149,12 +149,16 @@ function renderList() {
   if (!$('#list-panel')) return;
   const inbox = S.view==='inbox';
   const count = S.messages.length;
-  $('#list-panel').innerHTML=`<div class="list-heading"><div class="title-row"><h1>${viewNames[S.view]}</h1>${inbox?`<button class="list-recap" data-action="recap" aria-label="Apri il recap dell’inbox" title="Recap dell’inbox">${icon('sparkle')}Recap</button>`:''}</div></div>${S.multi.size?`<div class="bulk-bar" role="toolbar" aria-label="Azioni sulle conversazioni selezionate"><strong>${S.multi.size} ${S.multi.size===1?'selezionata':'selezionate'}</strong><button data-bulk="archive" title="Archivia (E)">${icon('archive')}</button><button data-bulk="read" title="Segna come lette">${icon('mail')}</button><button data-bulk="star" title="Aggiungi ai preferiti">${icon('star')}</button><button data-bulk="trash" title="Elimina">${icon('trash')}</button><button data-bulk="clear" class="bulk-clear">Annulla</button></div>`:''}${inbox?`<div class="tabs">${[['','Tutte'],['people','Persone'],['updates','Notifiche'],['newsletters','Newsletter']].map(([category,name])=>`<button class="tab ${S.category===category?'active':''}" data-category="${category}">${name}</button>`).join('')}</div>`:''}${inbox&&S.category==='newsletters'?`<div class="list-tools"><button class="secondary" data-action="newsletter-senders">${icon('filter')}Gestisci i mittenti</button></div>`:''}${!S.online?'<div class="offline-note">Sei offline. Mostro la posta salvata su questo dispositivo.</div>':''}${S.state.accounts.some(a=>a.error)?`<div class="error-banner">${esc(S.state.accounts.find(a=>a.error).error)} <button data-action="settings">Apri account</button></div>`:''}<div id="message-list"></div>`;
+  const openTodos=S.view==='todo'?(S.todos||[]):[];
+  const allTodosSelected=openTodos.length>0&&openTodos.every(todo=>S.todoMulti.has(todo.id));
+  const todoTools=openTodos.length?`<button class="list-recap" data-action="select-todos" aria-pressed="${allTodosSelected}">${allTodosSelected?'Deseleziona':'Seleziona tutte'}</button>`:'';
+  const bulkBar=S.view==='todo'&&S.todoMulti.size?`<div class="bulk-bar" role="toolbar" aria-label="Azioni sulle cose da fare selezionate"><strong>${S.todoMulti.size} ${S.todoMulti.size===1?'selezionata':'selezionate'}</strong><button class="bulk-label" data-action="complete-todos" title="Segna come fatte">${icon('check')}Fatte</button><button data-action="clear-todos" class="bulk-clear">Annulla</button></div>`:S.multi.size?`<div class="bulk-bar" role="toolbar" aria-label="Azioni sulle conversazioni selezionate"><strong>${S.multi.size} ${S.multi.size===1?'selezionata':'selezionate'}</strong><button data-bulk="archive" title="Archivia (E)">${icon('archive')}</button><button data-bulk="read" title="Segna come lette">${icon('mail')}</button><button data-bulk="star" title="Aggiungi ai preferiti">${icon('star')}</button><button data-bulk="trash" title="Elimina">${icon('trash')}</button><button data-bulk="clear" class="bulk-clear">Annulla</button></div>`:'';
+  $('#list-panel').innerHTML=`<div class="list-heading"><div class="title-row"><h1>${viewNames[S.view]}</h1>${inbox?`<button class="list-recap" data-action="recap" aria-label="Apri il recap dell’inbox" title="Recap dell’inbox">${icon('sparkle')}Recap</button>`:''}${todoTools}</div></div>${bulkBar}${inbox?`<div class="tabs">${[['','Tutte'],['people','Persone'],['updates','Notifiche'],['newsletters','Newsletter']].map(([category,name])=>`<button class="tab ${S.category===category?'active':''}" data-category="${category}">${name}</button>`).join('')}</div>`:''}${inbox&&S.category==='newsletters'?`<div class="list-tools"><button class="secondary" data-action="newsletter-senders">${icon('filter')}Gestisci i mittenti</button></div>`:''}${!S.online?'<div class="offline-note">Sei offline. Mostro la posta salvata su questo dispositivo.</div>':''}${S.state.accounts.some(a=>a.error)?`<div class="error-banner">${esc(S.state.accounts.find(a=>a.error).error)} <button data-action="settings">Apri account</button></div>`:''}<div id="message-list"></div>`;
   const container=$('#message-list');
   if (S.loadingList) { container.innerHTML=skeleton(9,'list','Carico le conversazioni…');return; }
   if (S.view==='todo') {
     const items=S.todos||[];
-    container.innerHTML=items.length?items.map(t=>`<div class="todo-row ${t.kind==='followup'?'followup':''}"><button class="todo-check" data-todo-done="${esc(t.id)}" aria-label="Segna come fatto" title="Fatto">${icon('check')}</button><button class="todo-body" data-message="${esc(t.message_id)}"><span class="todo-text">${esc(t.text)}</span><span class="todo-meta">${t.kind==='followup'?'<span class="todo-tag">Da seguire</span>':t.priority==='high'?'<span class="todo-tag">Priorità alta</span>':''}${esc(t.sender||t.sender_email||'')} · ${esc(subjectCore(t.subject))} · ${dateLabel(t.date,true)}</span></button></div>`).join(''):emptyMarkup('todo','Niente in sospeso.','Le cose da fare che Milo trova nelle email, e quelle a cui aspetti una risposta, arrivano qui.');
+    container.innerHTML=items.length?items.map(t=>`<div class="todo-row ${t.kind==='followup'?'followup':''} ${S.todoMulti.has(t.id)?'multi':''}"><button class="todo-check" data-todo-done="${esc(t.id)}" aria-label="Segna come fatto" title="Fatto">${icon('check')}</button><button class="todo-body" data-message="${esc(t.message_id)}"><span class="todo-text">${esc(t.text)}</span><span class="todo-meta">${t.kind==='followup'?'<span class="todo-tag">Da seguire</span>':t.priority==='high'?'<span class="todo-tag">Priorità alta</span>':''}${esc(t.sender||t.sender_email||'')} · ${esc(subjectCore(t.subject))} · ${dateLabel(t.date,true)}</span></button></div>`).join(''):emptyMarkup('todo','Niente in sospeso.','Le cose da fare che Milo trova nelle email, e quelle a cui aspetti una risposta, arrivano qui.');
     return;
   }
   if (S.view==='screener') {
@@ -934,6 +938,23 @@ async function bulkMutate(kind){
   S.listVersion++;paintLocal();renderList();await deviceCache.set('api:/state',S.state);
   toast(`${keys.length} ${keys.length===1?'conversazione aggiornata':'conversazioni aggiornate'}. Milo sincronizza in background.`);flushClientQueue().catch(()=>{});
 }
+function toggleTodo(id,range=false){
+  const items=S.todos||[],index=items.findIndex(todo=>todo.id===id);if(index<0)return;
+  if(range&&S.lastTodo!=null){const [from,to]=[Math.min(S.lastTodo,index),Math.max(S.lastTodo,index)];for(const todo of items.slice(from,to+1))S.todoMulti.add(todo.id);}
+  else if(S.todoMulti.has(id))S.todoMulti.delete(id);else S.todoMulti.add(id);
+  S.lastTodo=index;renderList();
+}
+async function completeTodos(ids){
+  const chosen=[...ids];if(!chosen.length)return;
+  S.todoMulti.clear();
+  S.todos=(S.todos||[]).filter(todo=>!chosen.includes(todo.id));
+  S.state.counts.todo=Math.max(0,(S.state.counts.todo||0)-chosen.length);
+  renderList();renderChrome();
+  try{for(const id of chosen)await api('/todos/'+encodeURIComponent(id),'PATCH',{done:true});}
+  catch(error){revalidateView();throw error;}
+  const label=chosen.length===1?'Fatto.':`${chosen.length} cose da fare segnate come fatte.`;
+  toast(label,{label:'Annulla',run:()=>Promise.all(chosen.map(id=>api('/todos/'+encodeURIComponent(id),'PATCH',{done:false}))).then(()=>revalidateView()).catch(error=>toast(error.message))});
+}
 function toggleMulti(id,range=false){
   const index=S.messages.findIndex(m=>m.id===id);if(index<0)return;
   if(range&&S.lastMulti!=null){const [from,to]=[Math.min(S.lastMulti,index),Math.max(S.lastMulti,index)];for(const m of S.messages.slice(from,to+1))S.multi.add(threadKey(m));}
@@ -1027,17 +1048,18 @@ document.addEventListener('click', async event => {
       if(target.dataset.recipient!=null){acceptRecipient(Number(target.dataset.recipient));return;}
     if(target.dataset.view) {
       if(S.compose)closeCompose().catch(error=>toast(error.message));
-      S.view=target.dataset.view; S.category=''; S.selected=null; S.menu=false;
+      S.view=target.dataset.view; S.category=''; S.selected=null; S.menu=false; S.todoMulti.clear();
       S.loadingList=true;renderShell();await refresh(true,true);renderList();return;
     }
     if('category' in target.dataset) { if(S.compose)closeCompose().catch(error=>toast(error.message));S.category=target.dataset.category; S.selected=null; S.loadingList=true;renderShell();await refresh(true,true);renderList();return; }
     if('account' in target.dataset) { if(S.compose)closeCompose().catch(error=>toast(error.message));S.account=target.dataset.account;S.menu=false;S.readerVersion++;S.readerAnchor=null;S.selected=null;S.thread=[];S.loadingList=true;renderShell();await refresh(true,true);renderList();return; }
+    if((event.ctrlKey||event.metaKey||event.shiftKey)&&target.closest('.todo-row')){const id=target.closest('.todo-row').querySelector('[data-todo-done]')?.dataset.todoDone;if(id){toggleTodo(id,event.shiftKey);return;}}
     if(target.dataset.message&&target.classList.contains('message-row')&&(event.ctrlKey||event.metaKey||event.shiftKey)){toggleMulti(target.dataset.message,event.shiftKey);return;}
     if(target.dataset.message) { if(S.compose)closeCompose().catch(error=>toast(error.message));await selectMessage(target.dataset.message); return; }
     if(target.dataset.bulk){await bulkMutate(target.dataset.bulk);return;}
     if(target.dataset.palette){runPalette(Number(target.dataset.palette));return;}
     if(target.dataset.todoDone){
-      const id=target.dataset.todoDone;S.todos=(S.todos||[]).filter(t=>t.id!==id);S.state.counts.todo=Math.max(0,(S.state.counts.todo||1)-1);renderList();renderChrome();
+      const id=target.dataset.todoDone;S.todoMulti.delete(id);S.todos=(S.todos||[]).filter(t=>t.id!==id);S.state.counts.todo=Math.max(0,(S.state.counts.todo||1)-1);renderList();renderChrome();
       try{await api('/todos/'+encodeURIComponent(id),'PATCH',{done:true});}catch(error){revalidateView();throw error;}
       toast('Fatto.',{label:'Annulla',run:()=>api('/todos/'+encodeURIComponent(id),'PATCH',{done:false}).then(()=>revalidateView()).catch(error=>toast(error.message))});return;
     }
@@ -1094,6 +1116,9 @@ document.addEventListener('click', async event => {
     if(action==='palette'){showPalette();return;}
     if(action==='ask'){showAsk();return;}
     if(action==='close-ask'){showAsk(false);return;}
+    if(action==='select-todos'){const items=S.todos||[];const all=items.length>0&&items.every(todo=>S.todoMulti.has(todo.id));S.todoMulti=all?new Set():new Set(items.map(todo=>todo.id));renderList();return;}
+    if(action==='clear-todos'){S.todoMulti.clear();renderList();return;}
+    if(action==='complete-todos'){await completeTodos(S.todoMulti);return;}
     if(action==='newsletter-senders'){await showNewsletterSenders();return;}
     if(action==='unsubscribe'){
       await unsubscribeFrom(target.dataset.messageId,null);
@@ -1216,7 +1241,8 @@ document.addEventListener('submit', async event => {
       box.append(turn);turn.scrollIntoView({block:'end'});
       const answer=turn.querySelector('.ask-answer');
       try{const result=await api('/ask','POST',{question});
-        answer.innerHTML=`<p>${esc(result.answer)}</p>${result.sources.length?`<div class="recap-priorities">${result.sources.map(source=>`<button class="priority-item" data-recap-message="${esc(source.id)}"><span>${esc(source.sender)} · ${esc(subjectCore(source.subject))}<small>${esc(dateLabel(source.date,true))}</small></span>${icon('arrow')}</button>`).join('')}</div>`:''}`;
+        answer.innerHTML=`<p>${esc(result.answer)}</p>`;
+        if(result.sources.length){const sources=document.createElement('div');sources.className='ask-sources';sources.innerHTML=result.sources.map(source=>`<button data-recap-message="${esc(source.id)}"><strong>${esc(source.sender||source.subject||'Email')}</strong><span>${esc(subjectCore(source.subject))}</span><time>${esc(dateLabel(source.date,true))}</time></button>`).join('');answer.after(sources);}
         turn.scrollIntoView({block:'end'});
       }catch(error){answer.innerHTML=`<p class="form-error">${esc(error.message)}</p>`;}
     }
@@ -1309,7 +1335,7 @@ async function handleKeydown(event) {
   if(event.key==='Escape'&&$('#ask-dock .ask-panel')&&!$('#overlay').children.length){showAsk(false);return;}
   const editing=['INPUT','TEXTAREA','SELECT'].includes(event.target?.tagName)||event.target?.isContentEditable;
   if(event.key==='Escape') {
-    try { if(S.multi.size&&!$('#overlay').children.length&&!$('#compose-form')){S.multi.clear();renderList();}else if($('#compose-form')){closeCompose().catch(error=>toast(error.message));}else closeModal();S.palette=null;S.menu=false;$('.shell')?.classList.remove('menu-open'); }
+    try { if((S.multi.size||S.todoMulti.size)&&!$('#overlay').children.length&&!$('#compose-form')){S.multi.clear();S.todoMulti.clear();renderList();}else if($('#compose-form')){closeCompose().catch(error=>toast(error.message));}else closeModal();S.palette=null;S.menu=false;$('.shell')?.classList.remove('menu-open'); }
     catch(error) { toast(error.message); }
   }
   if(S.status?.authenticated && !editing && !$('#overlay').children.length && !$('#compose-form') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat) {

@@ -417,8 +417,18 @@ public final class Mailbox {
     // MARK: To-dos, senders, AI
 
     public func complete(_ todo: Todo) async {
-        todos.removeAll { $0.id == todo.id }
-        do { try await api.setTodo(todo.id, done: true) } catch { lastError = (error as? APIError)?.message; await refresh() }
+        await complete([todo.id])
+    }
+
+    /// Marks every selected to-do done. The list drops them immediately; a failed write reloads.
+    public func complete(_ ids: Set<String>) async {
+        let pending = todos.filter { ids.contains($0.id) }
+        guard !pending.isEmpty else { return }
+        todos.removeAll { ids.contains($0.id) }
+        for todo in pending {
+            do { try await api.setTodo(todo.id, done: true) }
+            catch { lastError = (error as? APIError)?.message; await refresh(); return }
+        }
     }
 
     public func isVIP(_ email: String?) -> Bool {

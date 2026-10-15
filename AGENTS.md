@@ -43,6 +43,10 @@ external action. That file is the single source of global agent instructions.
   table clients show (`VISIBLE_WRITE` in `store.py`, signalled after commit);
   the web app refreshes on it and polls only every 30 s while connected.
   Uvicorn uses `timeout_graceful_shutdown` so open streams never block restarts.
+- To-dos: the web list and the iOS list can select every open item and mark
+  that selection done (`PATCH /api/todos/{id}`). One row’s check still completes
+  only that row. Ask Milo’s reply bubble is the answer text; citations render
+  under it.
 - Compose recipients: `GET /api/recipients?q=` suggests people you wrote to
   most recently, and searches name or address among correspondents (sent To/Cc
   plus incoming senders). Rows live in `correspondents`, filled as mail arrives
