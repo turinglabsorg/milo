@@ -318,7 +318,7 @@ function listPath(query=currentQuery()){
 }
 function applyState(state){
   const counts=S.optimistic.size?S.state.counts:state.counts;S.state={...state,counts};
-  if(pendingMailto)setTimeout(openPendingMailto);
+  if(pendingMailto||pendingOpen)setTimeout(openPendingMailto);
   for(const operation of S.pendingSettings.values()){
     if(operation.account_id)S.state.accounts=S.state.accounts.map(a=>a.id===operation.account_id?{...a,...operation.body}:a);
     else S.state[operation.setting]=operation.body;
@@ -1266,7 +1266,7 @@ async function handleKeydown(event) {
 }
 document.addEventListener('keydown',handleKeydown);
 
-let pendingMailto=null;
+let pendingMailto=null,pendingOpen=null;
 // mailto: links handed over by the desktop launcher (#compose=mailto:...).
 function parseMailto(value){
   const text=String(value||'');if(!/^mailto:/i.test(text))return null;
@@ -1280,13 +1280,15 @@ function openPendingMailto(){
   // Waits for the accounts list, which may arrive after the first refresh.
   const draft=parseMailto(pendingMailto);
   if(draft&&S.state?.accounts?.length){pendingMailto=null;showCompose(draft);}
+  // A desktop notification click (#open=<message id>) shows that conversation.
+  if(pendingOpen&&S.state?.accounts?.length){const id=pendingOpen;pendingOpen=null;selectMessage(id).catch(()=>toast('Questa email non è più disponibile.'));}
 }
 async function boot() {
   try {
     const oauth=new URLSearchParams(location.hash.slice(1));
     const oauthError=oauth.get('google_error'),connected=oauth.has('google_connected'),ownerToken=oauth.get('setup');
-    pendingMailto=oauth.get('compose');
-    if(ownerToken || oauthError || connected || pendingMailto) history.replaceState(null,'',location.pathname);
+    pendingMailto=oauth.get('compose');pendingOpen=oauth.get('open');
+    if(ownerToken || oauthError || connected || pendingMailto || pendingOpen) history.replaceState(null,'',location.pathname);
     await replica.init();
     const cachedStatus=await deviceCache.get('api:/status'),cachedState=await deviceCache.get('api:/state');
     for(const operation of await deviceCache.get('pending-operations')||[]){if(operation.error)S.queueErrors.set(operation.id,operation);replica.apply(operation);if(operation.kind==='setting')S.pendingSettings.set(operation.key,operation);else if(!operation.kind)S.optimistic.set(operation.key,{patch:{...S.optimistic.get(operation.key)?.patch,...operation.patch},deleted:operation.deleted,operationId:operation.id});}
@@ -1343,14 +1345,15 @@ async function runClientQueue(){
 }
 // Server-sent change notices make the list current at once, even in a hidden
 // window; polling stays as a slower safety net while the stream is connected.
-let events=null,eventsLive=false,eventTimer=null,lastEventRefresh=0;
+let events=null,eventsLive=false,eventTimer=null,lastEventRefresh=0,eventsRetryAt=0;
 function connectEvents(){
   if(!S.status?.authenticated||S.status.demo||typeof EventSource==='undefined'){if(events){events.close();events=null;eventsLive=false;}return;}
-  if(events)return;
+  if(events||Date.now()<eventsRetryAt)return;
   events=new EventSource('/api/events');
   events.addEventListener('hello',()=>{const missed=!eventsLive&&lastEventRefresh;eventsLive=true;if(missed)eventRefresh();});
   events.addEventListener('change',()=>{eventsLive=true;eventRefresh();});
-  events.onerror=()=>{eventsLive=false;if(events?.readyState===EventSource.CLOSED)events=null;};
+  // The browser retries dropped streams itself; a refused one (older server, 5xx) waits a minute.
+  events.onerror=()=>{eventsLive=false;if(events?.readyState===EventSource.CLOSED){events=null;eventsRetryAt=Date.now()+60000;}};
 }
 function eventRefresh(){
   if(eventTimer)return;

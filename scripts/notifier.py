@@ -54,12 +54,13 @@ def milo_focused(server):
     return "Milo" in label or bool(host and host in label)
 
 
-def open_milo():
-    subprocess.Popen([sys.executable, str(ROOT / "scripts/launch.py")], start_new_session=True,
+def open_milo(message_id=None):
+    extra = [f"--open={message_id}"] if message_id else []
+    subprocess.Popen([sys.executable, str(ROOT / "scripts/launch.py"), *extra], start_new_session=True,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def banner(title, body):
+def banner(title, body, message_id=None):
     command = ["notify-send", "--app-name=Milo", "--action=open=Apri Milo", "--wait", title, body]
     if ICON.exists():
         command[1:1] = ["--icon", str(ICON)]
@@ -70,14 +71,14 @@ def banner(title, body):
         except (OSError, subprocess.SubprocessError):
             return
         if result.stdout.strip() == "open":
-            open_milo()
+            open_milo(message_id)
     threading.Thread(target=show, daemon=True).start()
 
 
 def announce(messages):
     for message in messages[:3]:
         subject = (message.get("subject") or "").strip() or "(Senza oggetto)"
-        banner(message.get("sender") or message.get("sender_email") or "Milo", subject)
+        banner(message.get("sender") or message.get("sender_email") or "Milo", subject, message.get("id"))
     if len(messages) > 3:
         banner("Milo", f"Altre {len(messages) - 3} email nuove")
 
@@ -108,6 +109,13 @@ class Notifier:
                     self.check()
 
 
+def owner(server, client):
+    try:
+        return client.get(server + "/api/status").json().get("authenticated") is True
+    except (httpx.HTTPError, ValueError):
+        return True  # unreachable: keep retrying rather than give up
+
+
 def main():
     server = shared_server()
     if not server:
@@ -121,7 +129,8 @@ def main():
                 notifier.follow()
                 delay = 2
             except httpx.HTTPStatusError as exc:
-                if exc.response.status_code in {401, 403, 404}:
+                # Non-owners get 404 everywhere; an older server only lacks the endpoint.
+                if exc.response.status_code in {401, 403, 404} and not owner(server, client):
                     sys.exit("Milo refused the notifier: this device is not the owner's.")
                 delay = min(delay * 2, 300)
             except (httpx.HTTPError, ValueError, KeyError):

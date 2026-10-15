@@ -1,5 +1,5 @@
 import {deviceCache} from '/static/cache.js';
-const CACHE = 'milo-shell-v22';
+const CACHE = 'milo-shell-v23';
 const SHELL = ['/', '/static/style.css', '/static/app.js', '/static/cache.js', '/static/replica.js', '/static/search-worker.js', '/static/icon.svg', '/static/fonts/Geist.woff2'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));

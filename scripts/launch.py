@@ -19,13 +19,20 @@ URL = f"http://127.0.0.1:{PORT}"
 DATA = ROOT / ".data" / ("demo" if DEMO else "live")
 # A mailto: link from the desktop (Exec=... %u) opens straight into a new message.
 MAILTO = next((arg for arg in sys.argv[1:] if arg.lower().startswith("mailto:")), None)
+# A notification click opens its conversation (--open=<message id>).
+OPEN = next((arg.split("=", 1)[1] for arg in sys.argv[1:]
+             if arg.startswith("--open=") and re.fullmatch(r"--open=[A-Za-z0-9_-]{1,80}", arg)), None)
 
 
 def with_mailto(url):
     """The fragment never reaches the server; the web app reads it and clears it."""
-    if not MAILTO or "#" in url:
+    if "#" in url:
         return url
-    return url + "/#compose=" + quote(MAILTO, safe="")
+    if MAILTO:
+        return url + "/#compose=" + quote(MAILTO, safe="")
+    if OPEN:
+        return url + "/#open=" + OPEN
+    return url
 
 
 def running():

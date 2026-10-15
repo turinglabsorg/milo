@@ -370,7 +370,7 @@ def test_linux_notifier_announces_and_remembers_the_cursor(tmp_path, monkeypatch
     monkeypatch.setattr(notifier, "STATE", tmp_path / "notifier.json")
     monkeypatch.setattr(notifier, "milo_focused", lambda server: False)
     shown = []
-    monkeypatch.setattr(notifier, "banner", lambda title, body: shown.append((title, body)))
+    monkeypatch.setattr(notifier, "banner", lambda title, body, message_id=None: shown.append((title, body)))
     replies = [{"cursor": 7, "messages": []},
                {"cursor": 12, "messages": [{"sender": f"Persona {n}", "subject": f"Tema {n}"} for n in range(5)]}]
     seen = []
