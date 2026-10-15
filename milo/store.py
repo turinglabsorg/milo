@@ -3,6 +3,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import threading
 import time
 import uuid
@@ -79,7 +80,14 @@ CREATE TABLE IF NOT EXISTS followups(
 CREATE INDEX IF NOT EXISTS followups_open ON followups(due) WHERE resolved IS NULL;
 CREATE TABLE IF NOT EXISTS devices(
     token TEXT PRIMARY KEY, environment TEXT NOT NULL, created DOUBLE PRECISION, last_seen DOUBLE PRECISION);
+CREATE TABLE IF NOT EXISTS draft_attachments(
+    id TEXT PRIMARY KEY, draft_id TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL,
+    size BIGINT NOT NULL, created DOUBLE PRECISION NOT NULL);
+CREATE INDEX IF NOT EXISTS draft_attachments_draft ON draft_attachments(draft_id, created);
 """
+# Most providers refuse messages above 25 MB once encoded; base64 adds a third.
+ATTACHMENT_LIMIT = 18 * 1024 * 1024
+DRAFT_ID = re.compile(r"[A-Za-z0-9_-]{1,80}")
 
 
 def preview_text(body):
@@ -328,6 +336,60 @@ class Store:
 
     def set_raw(self, message_id, raw):
         self.blobs.put(message_id, raw)
+
+    # Outgoing attachments: files under draft-attachments/<draft>/<id>, rows for metadata.
+
+    def attachment_path(self, draft_id, attachment_id=None):
+        if not DRAFT_ID.fullmatch(draft_id) or (attachment_id is not None and not DRAFT_ID.fullmatch(attachment_id)):
+            raise ValueError("Bozza non valida")
+        folder = self.directory / "draft-attachments" / draft_id
+        return folder / attachment_id if attachment_id else folder
+
+    def draft_attachments(self, draft_id):
+        return self.rows("SELECT id,name,type,size FROM draft_attachments WHERE draft_id=? ORDER BY created",
+                         (draft_id,))
+
+    def add_draft_attachment(self, draft_id, name, content_type, data):
+        name = re.sub(r"[\x00-\x1f/\\]+", " ", name or "").strip()[:200] or "allegato"
+        if not re.fullmatch(r"[\w.+-]+/[\w.+-]+", content_type or ""):
+            content_type = "application/octet-stream"
+        attachment_id = uuid.uuid4().hex
+        path = self.attachment_path(draft_id, attachment_id)
+        with self.lock:
+            used = sum(row["size"] for row in self.draft_attachments(draft_id))
+            if used + len(data) > ATTACHMENT_LIMIT:
+                raise ValueError("Gli allegati superano 18 MB: il messaggio verrebbe rifiutato.")
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(data)
+            self.execute("INSERT INTO draft_attachments VALUES(?,?,?,?,?,?)",
+                         (attachment_id, draft_id, name, content_type, len(data), time.time()))
+        return {"id": attachment_id, "name": name, "type": content_type, "size": len(data)}
+
+    def draft_attachment_files(self, draft_id):
+        return [{**row, "data": self.attachment_path(draft_id, row["id"]).read_bytes()}
+                for row in self.draft_attachments(draft_id)]
+
+    def remove_draft_attachments(self, draft_id, attachment_id=None):
+        folder = self.attachment_path(draft_id)
+        if attachment_id:
+            path = self.attachment_path(draft_id, attachment_id)
+            removed = self.execute("DELETE FROM draft_attachments WHERE draft_id=? AND id=?",
+                                   (draft_id, attachment_id)).rowcount
+            path.unlink(missing_ok=True)
+            return bool(removed)
+        self.execute("DELETE FROM draft_attachments WHERE draft_id=?", (draft_id,))
+        shutil.rmtree(folder, ignore_errors=True)
+        return True
+
+    def sweep_draft_attachments(self, older_than=86400):
+        """Attachments whose draft disappeared (sent elsewhere, account removed)."""
+        orphans = self.rows("SELECT DISTINCT draft_id FROM draft_attachments a WHERE created<? AND NOT EXISTS("
+                            "SELECT 1 FROM drafts d WHERE d.id=a.draft_id)", (time.time() - older_than,))
+        for row in orphans:
+            self.remove_draft_attachments(row["draft_id"])
+        return len(orphans)
 
     def sweep_blobs(self, stop=lambda: False):
         known = {row["id"] for row in self.rows("SELECT id FROM messages")}

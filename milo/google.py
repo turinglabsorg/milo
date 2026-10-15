@@ -363,8 +363,8 @@ class Gmail:
             except RuntimeError as exc:
                 self.store.execute("UPDATE outbox SET error=? WHERE id=?", (str(exc), operation["id"]))
 
-    def send(self, account, draft, original=None):
-        mail = build_message(account, draft, original)
+    def send(self, account, draft, original=None, attachments=()):
+        mail = build_message(account, draft, original, attachments)
         raw = base64.urlsafe_b64encode(mail.as_bytes()).decode()
         payload = {"raw": raw}
         if original and original.get("thread_id") and original.get("account_id") == self.account_id:

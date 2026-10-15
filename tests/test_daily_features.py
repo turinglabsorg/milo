@@ -24,7 +24,7 @@ def prepare(app, received, sent):
 
 def test_daily_features_in_the_client(tmp_path, monkeypatch):
     sent_mail = []
-    monkeypatch.setattr("milo.app.send_mail", lambda account, draft, original=None:
+    monkeypatch.setattr("milo.app.send_mail", lambda account, draft, original=None, attachments=():
                         sent_mail.append(build_message(account, draft, original)) or sent_mail[-1])
     with service(tmp_path, prepare, live=True) as (url, sent), sync_playwright() as p:
         browser = p.chromium.launch()

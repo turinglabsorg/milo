@@ -49,7 +49,7 @@ from .models import (
 from .push import Push
 from .recap import RecapWorker
 from .render import render_html
-from .store import Store
+from .store import ATTACHMENT_LIMIT, DRAFT_ID, Store
 
 EVENT_HEARTBEAT = 25
 EVENT_COALESCE = 1
@@ -128,6 +128,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             features.enforce_blocked()
             if time.time() - (store.setting("blobs_swept") or 0) > 86400:
                 store.sweep_blobs(stop_worker.is_set)
+                store.sweep_draft_attachments()
                 store.set_setting("blobs_swept", time.time())
 
     async def feature_worker():
@@ -612,8 +613,11 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     @app.get("/api/drafts", dependencies=[Depends(auth)])
     def drafts():
         schedules = features.schedules()
+        attachments = {}
+        for row in store.rows("SELECT id,draft_id,name,type,size FROM draft_attachments ORDER BY created"):
+            attachments.setdefault(row.pop("draft_id"), []).append(row)
         return {"drafts": [{**json.loads(row["data"]), "id": row["id"], "updated": row["updated"],
-                            "scheduled": schedules.get(row["id"])}
+                            "scheduled": schedules.get(row["id"]), "attachments": attachments.get(row["id"], [])}
                            for row in store.rows("SELECT * FROM drafts ORDER BY updated DESC")]}
 
     @app.put("/api/drafts", dependencies=[Depends(auth)])
@@ -632,6 +636,45 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     @app.delete("/api/drafts/{draft_id}", dependencies=[Depends(auth)])
     def delete_draft(draft_id: str):
         store.execute("DELETE FROM drafts WHERE id=?", (draft_id,))
+        if DRAFT_ID.fullmatch(draft_id):
+            store.remove_draft_attachments(draft_id)
+        return {"ok": True}
+
+    def valid_draft_id(draft_id):
+        if not DRAFT_ID.fullmatch(draft_id):
+            raise HTTPException(404, "Bozza non trovata")
+        return draft_id
+
+    @app.get("/api/drafts/{draft_id}/attachments", dependencies=[Depends(auth)])
+    def list_attachments(draft_id: str):
+        return {"attachments": store.draft_attachments(valid_draft_id(draft_id))}
+
+    @app.post("/api/drafts/{draft_id}/attachments", dependencies=[Depends(auth)])
+    async def add_attachment(draft_id: str, request: Request, name: str = ""):
+        """Raw file body; the draft itself may be saved before or after."""
+        valid_draft_id(draft_id)
+        if int(request.headers.get("content-length") or 0) > ATTACHMENT_LIMIT:
+            raise HTTPException(413, "Gli allegati superano 18 MB: il messaggio verrebbe rifiutato.")
+        data = bytearray()
+        async for chunk in request.stream():
+            data += chunk
+            if len(data) > ATTACHMENT_LIMIT:
+                raise HTTPException(413, "Gli allegati superano 18 MB: il messaggio verrebbe rifiutato.")
+        if not data:
+            raise HTTPException(422, "Il file è vuoto")
+        content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+        try:
+            return await asyncio.to_thread(store.add_draft_attachment, draft_id, name, content_type, bytes(data))
+        except ValueError as exc:
+            raise HTTPException(413, str(exc)) from exc
+
+    @app.delete("/api/drafts/{draft_id}/attachments/{attachment_id}", dependencies=[Depends(auth)])
+    def remove_attachment(draft_id: str, attachment_id: str):
+        try:
+            if not store.remove_draft_attachments(valid_draft_id(draft_id), attachment_id):
+                raise HTTPException(404, "Allegato non trovato")
+        except ValueError as exc:
+            raise HTTPException(404, "Allegato non trovato") from exc
         return {"ok": True}
 
     def deliver(draft_id):
@@ -652,24 +695,26 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             store.execute("UPDATE scheduled SET error='Invio in corso' WHERE draft_id=?", (draft_id,))
         try:
             original = store.message(draft["reply_to_id"]) if draft.get("reply_to_id") else None
+            attachments = store.draft_attachment_files(draft_id)
             if account["provider"] == "google":
                 client = Gmail(store, account["id"])
                 try:
-                    result = client.send(account, draft, original)
+                    result = client.send(account, draft, original, attachments)
                 finally:
                     client.close()
                 rfc_message_id, thread_id = result.get("rfc_message_id"), result.get("threadId")
             else:
                 with engine.account_lock(account["id"]):
                     account = store.account(account["id"], private=True)
-                    mail = send_mail(account, draft, original)
+                    mail = send_mail(account, draft, original, attachments)
                     parsed = parse_message(mail.as_bytes(), account["id"], "Milo/Sent", "local", time.time_ns(),
                                            b"\\Seen", sent=True)
                     store.upsert_message(parsed)
                 rfc_message_id, thread_id = mail["Message-ID"], parsed["thread_id"]
             # A second device may save a newer version during this explicit
             # send. Delete only the version that was actually submitted.
-            store.execute("DELETE FROM drafts WHERE id=? AND data=?", (draft_id, saved_data))
+            if store.execute("DELETE FROM drafts WHERE id=? AND data=?", (draft_id, saved_data)).rowcount:
+                store.remove_draft_attachments(draft_id)
             features.sent(draft_id, account["id"], draft, rfc_message_id, thread_id)
             return {"ok": True}
         except ValueError as exc:

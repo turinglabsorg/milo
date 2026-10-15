@@ -678,7 +678,39 @@ function showAccountSettings(accountId) {
 
 function composeMarkup(draft,inline=false) {
   return `<form id="compose-form" class="${inline?'inline-compose-form':''}"><div class="compose-heading"><h3>${draft.mode==='forward'?'Inoltra':['reply','reply_all'].includes(draft.mode)?draft.mode==='reply_all'?'Rispondi a tutti':'Rispondi':'Nuovo messaggio'}</h3>${inline?`<button class="icon-button" type="button" data-action="close-compose" aria-label="Chiudi" title="Chiudi bozza">${icon('close')}</button>`:''}</div><label class="field"><span>Da</span><select name="account_id">${S.state.accounts.map(a=>`<option value="${esc(a.id)}" ${draft.account_id===a.id?'selected':''}>${esc(a.name)} · ${esc(a.email)}</option>`).join('')}</select></label><label class="field"><span>A</span><input name="to" value="${esc(draft.to)}" placeholder="nome@example.com" maxlength="2000"></label><label class="field"><span>Cc</span><input name="cc" value="${esc(draft.cc)}" placeholder="Copia conoscenza" maxlength="2000"></label><label class="field"><span>Oggetto</span><input name="subject" value="${esc(draft.subject)}" placeholder="Di cosa parliamo?" maxlength="998"></label><label class="field"><span>Messaggio</span><textarea class="composer-body" name="body" placeholder="Scrivi qui…" maxlength="1000000">
-${esc(draft.body)}</textarea></label><div class="compose-tools">${(S.state.templates||[]).length?`<select class="template-select" aria-label="Inserisci una risposta salvata"><option value="">Risposte salvate…</option>${S.state.templates.map((template,index)=>`<option value="${index}">${esc(template.name)}</option>`).join('')}</select>`:''}<label class="followup-field"><span>Ricordamelo se non risponde</span><select name="followup_days">${[['','mai'],['1','entro 1 giorno'],['3','entro 3 giorni'],['7','entro una settimana']].map(([value,label])=>`<option value="${value}" ${String(draft.followup_days||'')===value?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="delete-draft">Elimina bozza</button><button class="secondary" type="button" data-action="save-draft">Salva bozza</button><button class="secondary" type="button" data-action="schedule-send">${icon('clock')}Programma</button><button class="primary" type="submit">${icon('sent')}Invia messaggio</button></div><div class="draft-save-status" role="status">${S.pendingDrafts.has(draft.id)?'Salvataggio in attesa':'Le modifiche vengono salvate automaticamente.'}</div></form>`;
+${esc(draft.body)}</textarea></label><div class="attachments compose-attachments">${composeAttachments(draft)}</div><div class="compose-tools"><button class="secondary attach-button" type="button" data-action="attach-file">${icon('paperclip')}Allega</button><input class="attach-input" type="file" multiple hidden>${(S.state.templates||[]).length?`<select class="template-select" aria-label="Inserisci una risposta salvata"><option value="">Risposte salvate…</option>${S.state.templates.map((template,index)=>`<option value="${index}">${esc(template.name)}</option>`).join('')}</select>`:''}<label class="followup-field"><span>Ricordamelo se non risponde</span><select name="followup_days">${[['','mai'],['1','entro 1 giorno'],['3','entro 3 giorni'],['7','entro una settimana']].map(([value,label])=>`<option value="${value}" ${String(draft.followup_days||'')===value?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="delete-draft">Elimina bozza</button><button class="secondary" type="button" data-action="save-draft">Salva bozza</button><button class="secondary" type="button" data-action="schedule-send">${icon('clock')}Programma</button><button class="primary" type="submit">${icon('sent')}Invia messaggio</button></div><div class="draft-save-status" role="status">${S.pendingDrafts.has(draft.id)?'Salvataggio in attesa':'Le modifiche vengono salvate automaticamente.'}</div></form>`;
+}
+const ATTACHMENT_LIMIT=18*1024*1024;
+function fileSize(bytes){return bytes<1024?`${bytes} B`:bytes<1048576?`${Math.round(bytes/1024)} KB`:`${(bytes/1048576).toFixed(1).replace('.',',')} MB`;}
+function composeAttachments(draft){
+  return (draft.attachments||[]).map(a=>`<span class="attachment draft-attachment${a.uploading?' uploading':''}">${icon('paperclip')}<span class="attachment-name">${esc(a.name)}</span><small>${a.uploading?'Caricamento…':fileSize(a.size)}</small>${a.uploading?'':`<button type="button" data-action="remove-attachment" data-attachment-id="${esc(a.id)}" aria-label="Rimuovi ${esc(a.name)}" title="Rimuovi">${icon('close')}</button>`}</span>`).join('');
+}
+function paintComposeAttachments(){const slot=$('#compose-form .compose-attachments');if(slot&&S.compose)slot.innerHTML=composeAttachments(S.compose);}
+// Files go straight to the server under the draft id; the draft row may be saved later.
+async function attachFiles(files){
+  const compose=S.compose;if(!compose||!files.length)return;
+  let used=(compose.attachments||[]).reduce((total,a)=>total+(a.size||0),0);
+  for(const file of files){
+    if(used+file.size>ATTACHMENT_LIMIT){toast(`${file.name}: gli allegati superano 18 MB, il messaggio verrebbe rifiutato.`);continue;}
+    used+=file.size;
+    const pending={id:'uploading-'+crypto.randomUUID(),name:file.name,size:file.size,uploading:true};
+    compose.attachments=[...(compose.attachments||[]),pending];paintComposeAttachments();
+    try{
+      const response=await fetch(`/api/drafts/${encodeURIComponent(compose.id)}/attachments?name=${encodeURIComponent(file.name)}`,{method:'POST',credentials:'same-origin',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(data.detail||'Allegato non caricato');
+      compose.attachments=compose.attachments.map(a=>a.id===pending.id?data:a);
+    }catch(error){
+      used-=file.size;compose.attachments=compose.attachments.filter(a=>a.id!==pending.id);
+      toast(error.message==='Failed to fetch'?'Connessione a Milo interrotta: allegato non caricato.':error.message);
+    }
+    if(S.compose===compose)paintComposeAttachments();
+  }
+}
+async function removeAttachment(id){
+  const compose=S.compose;if(!compose)return;
+  await api(`/drafts/${encodeURIComponent(compose.id)}/attachments/${encodeURIComponent(id)}`,'DELETE');
+  compose.attachments=(compose.attachments||[]).filter(a=>a.id!==id);if(S.compose===compose)paintComposeAttachments();
 }
 function renderInlineComposer(existing=null) {
   const slot=$('#inline-composer');if(!slot||!S.compose)return;
@@ -1040,6 +1072,8 @@ document.addEventListener('click', async event => {
     if(action==='reply'||action==='reply-all') {target.disabled=true;target.classList.add('is-loading');try{await startReply(action==='reply-all');}finally{target.disabled=false;target.classList.remove('is-loading');}}
     if(action==='forward') { const m=await ensureBody(S.selected.id);if(!m)return;showCompose({account_id:m.account_id,mode:'forward',context_message_id:m.id,subject:'Fwd: '+subjectCore(m.subject),body:`\n\n---------- Messaggio inoltrato ----------\nDa: ${m.sender} <${m.sender_email}>\nOggetto: ${m.subject}\n\n${m.body}`}); }
     if(action==='save-draft') { if(await saveCompose()) { await refresh();renderList();toast('Bozza salvata nel tuo archivio.'); } }
+    if(action==='attach-file')target.closest('#compose-form')?.querySelector('.attach-input')?.click();
+    if(action==='remove-attachment')await removeAttachment(target.dataset.attachmentId);
     if(action==='delete-draft')await discardCompose();
     if(action==='close-compose')await closeCompose();
     if(action==='close-modal'){if($('#overlay #compose-form'))await closeCompose();else closeModal();await refresh();renderList();}
@@ -1150,7 +1184,12 @@ document.addEventListener('input', event => {
   }
   if(event.target.name==='email' && $('#account-form')) $('#account-form').elements.username.value=event.target.value;
 });
+// Drop files anywhere on the open composer.
+document.addEventListener('dragover',event=>{const form=event.target.closest?.('#compose-form');if(form&&event.dataTransfer?.types.includes('Files')){event.preventDefault();form.classList.add('dropping');}});
+document.addEventListener('dragleave',event=>{const form=event.target.closest?.('#compose-form');if(form&&!form.contains(event.relatedTarget))form.classList.remove('dropping');});
+document.addEventListener('drop',event=>{const form=event.target.closest?.('#compose-form');if(!form||!event.dataTransfer?.files.length)return;event.preventDefault();form.classList.remove('dropping');attachFiles([...event.dataTransfer.files]);});
 document.addEventListener('change', async event => {
+  if(event.target.classList?.contains('attach-input')){const files=[...event.target.files];event.target.value='';await attachFiles(files);return;}
   if(event.target.name==='theme'&&$('#appearance-form'))applyTheme(event.target.value);
   if(event.target.classList?.contains('template-select')&&event.target.value!==''){
     const template=S.state.templates?.[Number(event.target.value)],field=$('#compose-form [name="body"]');event.target.value='';

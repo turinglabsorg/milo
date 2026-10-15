@@ -124,7 +124,7 @@ def test_drafts_can_be_sent_only_once_explicitly(logged_in, account_data, monkey
     assert client.get("/api/drafts").json()["drafts"][0]["id"] == draft_id
     sends = []
 
-    def send(account, saved_draft, original):
+    def send(account, saved_draft, original, attachments=()):
         sends.append(saved_draft)
         result = EmailMessage()
         result["Subject"] = saved_draft["subject"]
@@ -153,7 +153,7 @@ def test_large_forward_saves_sends_intact_and_stale_autosave_is_rejected(logged_
     assert client.get('/api/drafts').json()['drafts'][0]['body'] == body
     sent = []
 
-    def transport(account, saved_draft, original):
+    def transport(account, saved_draft, original, attachments=()):
         assert saved_draft['body'] == body and original is None
         message = EmailMessage()
         message['From'] = account['email']

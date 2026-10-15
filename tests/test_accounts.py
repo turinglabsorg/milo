@@ -212,7 +212,7 @@ def test_google_send_does_not_wait_for_sync_or_delete_a_newer_shared_draft(logge
     newer={**draft, 'id': draft_id, 'body': 'A newer saved version', 'reply_to_id': None}
     calls=[]
 
-    def send(self, account, submitted, original):
+    def send(self, account, submitted, original, attachments=()):
         calls.append(submitted)
         store.execute('UPDATE drafts SET data=? WHERE id=?', (json.dumps(newer), draft_id))
         return {'id': 'sent-1'}

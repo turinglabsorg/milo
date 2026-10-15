@@ -353,7 +353,7 @@ def safe_error(exc):
     return "Operazione non riuscita. Controlla la configurazione del provider."
 
 
-def build_message(account, draft, original=None):
+def build_message(account, draft, original=None, attachments=()):
     recipients = [address for _, address in getaddresses([value for value in (draft["to"], draft.get("cc", "")) if value])]
     if not recipients or any("@" not in address or any(c in address for c in "\r\n") for address in recipients):
         raise ValueError("Inserisci destinatari validi")
@@ -369,6 +369,9 @@ def build_message(account, draft, original=None):
         message["In-Reply-To"] = original["message_id"]
         message["References"] = original["message_id"]
     message.set_content(draft["body"] + reply_quote(draft, original))
+    for attachment in attachments:
+        maintype, _, subtype = attachment["type"].partition("/")
+        message.add_attachment(attachment["data"], maintype=maintype, subtype=subtype, filename=attachment["name"])
     return message
 
 
@@ -393,8 +396,8 @@ def reply_quote(draft, original):
     return f"\n\nIl giorno {stamp} {who} ha scritto:\n{quoted}\n"
 
 
-def send_mail(account, draft, original=None):
-    message = build_message(account, draft, original)
+def send_mail(account, draft, original=None, attachments=()):
+    message = build_message(account, draft, original, attachments)
     recipients = list(dict.fromkeys(address for _, address in getaddresses(
         [value for value in (draft["to"], draft.get("cc", "")) if value])))
     context = ssl.create_default_context()

@@ -211,6 +211,13 @@ body{background:var(--surface-alt);color:var(--text)}
 .compose-tools{display:flex;align-items:center;flex-wrap:wrap;gap:10px 16px;margin:-2px 0 10px}
 .template-select,.followup-field select{font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface-alt);color:var(--text)}
 .followup-field{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.attach-button{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;font-size:13px}.attach-button .icon{width:15px;height:15px}
+.compose-attachments:empty{display:none}.compose-attachments{margin:-4px 0 12px}
+.draft-attachment{gap:7px;padding:6px 6px 6px 9px;max-width:100%;background:var(--surface-alt);color:var(--text)}.draft-attachment .icon{width:14px;height:14px;color:var(--purple)}
+.draft-attachment .attachment-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px}.draft-attachment small{color:var(--muted);font-size:11px;white-space:nowrap}
+.draft-attachment button{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:5px;color:var(--muted)}.draft-attachment button:hover{background:var(--soft);color:var(--danger)}.draft-attachment button .icon{width:12px;height:12px;color:inherit}
+.draft-attachment.uploading{opacity:.65}.draft-attachment.uploading .icon{animation:pulse 1s ease-in-out infinite alternate}@keyframes pulse{to{opacity:.3}}
+#compose-form.dropping{outline:2px dashed var(--purple);outline-offset:6px;border-radius:10px}
 .form-actions .secondary .icon,.form-actions .primary .icon{width:15px;height:15px}.form-actions .secondary{display:inline-flex;align-items:center;gap:6px;text-decoration:none}
 .schedule-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:16px}
 .schedule-options .secondary{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;text-align:left;color:var(--text)}

@@ -39,6 +39,14 @@ external action. That file is the single source of global agent instructions.
 - Linux: `install.py` registers `milo.desktop` as the `mailto:` handler;
   `scripts/launch.py` turns the link into `#compose=<mailto>`, which the web app
   opens once the accounts are known and then clears.
+- Real time: `GET /api/events` (SSE) sends `change` when a write touches a
+  table clients show (`VISIBLE_WRITE` in `store.py`, signalled after commit);
+  the web app refreshes on it and polls only every 30 s while connected.
+  Uvicorn uses `timeout_graceful_shutdown` so open streams never block restarts.
+- Outgoing attachments: `draft_attachments` rows + files in
+  `draft-attachments/<draft_id>/` (raw-body `POST /api/drafts/{id}/attachments?name=`,
+  18 MB total); added by `build_message`, removed when the draft is sent or
+  deleted, orphans swept daily.
 - Heavy archive rewrites saturate Docker Desktop's bind-mount I/O and trip the
   health check. Back up with an APFS clone (`cp -c`, container stopped) and run
   bulk migrations natively on the Mac with the container stopped (the 10 GB

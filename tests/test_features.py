@@ -41,8 +41,8 @@ def setup_account(client, account_data):
 def fake_smtp(monkeypatch, sent):
     from milo.mail import build_message
 
-    def send(account, draft, original=None):
-        message = build_message(account, draft, original)
+    def send(account, draft, original=None, attachments=()):
+        message = build_message(account, draft, original, attachments)
         sent.append(message)
         return message
     monkeypatch.setattr("milo.app.send_mail", send)
@@ -78,7 +78,7 @@ def test_scheduled_failure_is_kept_and_never_retried(logged_in, account_data, mo
     _, account_id = setup_account(logged_in, account_data)
     calls = []
 
-    def broken(account, draft, original=None):
+    def broken(account, draft, original=None, attachments=()):
         calls.append(draft)
         raise OSError("down")
     monkeypatch.setattr("milo.app.send_mail", broken)
@@ -304,3 +304,43 @@ def test_pdf_attachments_preview_inline_only_on_request(logged_in, account_data)
     assert download.headers["content-type"] == "application/octet-stream"
     preview = logged_in.get(f"/api/messages/{message_id}/attachments/{index}?preview=true")
     assert preview.headers["content-type"] == "application/pdf" and preview.headers["content-disposition"].startswith("inline")
+
+
+def test_outgoing_attachments_are_sent_and_cleaned_up(logged_in, account_data, monkeypatch):
+    store, account_id = setup_account(logged_in, account_data)
+    sent = []
+    fake_smtp(monkeypatch, sent)
+    draft_id = "8f1c2d3e-aaaa-bbbb-cccc-1234567890ab"
+    upload = logged_in.post(f"/api/drafts/{draft_id}/attachments?name=Preventivo%20finale.pdf",
+                            content=b"%PDF-1.7 test", headers={"Content-Type": "application/pdf"})
+    assert upload.status_code == 200
+    first = upload.json()
+    assert first["name"] == "Preventivo finale.pdf" and first["size"] == 13
+    second = logged_in.post(f"/api/drafts/{draft_id}/attachments?name=../../nota.txt",
+                            content=b"ciao", headers={"Content-Type": "text/plain"}).json()
+    assert second["name"] == ".. .. nota.txt"
+    assert logged_in.delete(f"/api/drafts/{draft_id}/attachments/{second['id']}").status_code == 200
+    assert logged_in.delete(f"/api/drafts/{draft_id}/attachments/{second['id']}").status_code == 404
+    assert logged_in.post("/api/drafts/..%2F..%2Fetc/attachments?name=x", content=b"x").status_code == 404
+    assert logged_in.post(f"/api/drafts/{draft_id}/attachments?name=vuoto", content=b"").status_code == 422
+    monkeypatch.setattr("milo.store.ATTACHMENT_LIMIT", 20)
+    too_big = logged_in.post(f"/api/drafts/{draft_id}/attachments?name=big.bin", content=b"x" * 10)
+    assert too_big.status_code == 413
+    save_draft(logged_in, account_id, id=draft_id)
+    listed = logged_in.get("/api/drafts").json()["drafts"][0]
+    assert [item["name"] for item in listed["attachments"]] == ["Preventivo finale.pdf"]
+    assert logged_in.post(f"/api/drafts/{draft_id}/send").status_code == 200
+    parts = [part for part in sent[0].iter_attachments()]
+    assert [(part.get_filename(), part.get_content_type(), part.get_content()) for part in parts] == [
+        ("Preventivo finale.pdf", "application/pdf", b"%PDF-1.7 test")]
+    assert store.draft_attachments(draft_id) == []
+    assert not store.attachment_path(draft_id).exists()
+
+
+def test_orphaned_attachments_are_swept(store):
+    store.add_draft_attachment("gone", "a.txt", "text/plain", b"a")
+    store.add_draft_attachment("kept", "b.txt", "text/plain", b"b")
+    store.execute("INSERT INTO drafts VALUES(?,?,?)", ("kept", "{}", time.time()))
+    assert store.sweep_draft_attachments(older_than=-1) == 1
+    assert store.draft_attachments("gone") == [] and len(store.draft_attachments("kept")) == 1
+    assert not store.attachment_path("gone").exists()
