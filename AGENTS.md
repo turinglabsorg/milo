@@ -50,7 +50,9 @@ external action. That file is the single source of global agent instructions.
 - Search keeps `ILIKE '%term%'`; trigram GIN indexes (`pg_trgm`,
   `messages_search_<column>`) make it indexed. They are built CONCURRENTLY on a
   dedicated connection after startup (`ensure_search_indexes`), invalid leftovers
-  are rebuilt, and shutdown cancels a running build.
+  are rebuilt, and shutdown cancels a running build. Only one process builds
+  (advisory try-lock 80251); `SCHEMA` DDL reruns only when its hash changes
+  (setting `schema`), since rerunning it locks tables and deadlocked with CIC.
 - Linux notifications: `scripts/notifier.py` (systemd user unit
   `milo-notifier.service`, written by `install.py` when `.data/server.json`
   exists) follows `/api/events` and asks `GET /api/notifications?after=<seq>`
