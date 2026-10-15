@@ -1,5 +1,7 @@
-"""Install a user-local Linux launcher. No sudo, credentials or desktop settings."""
+"""Install a user-local Linux launcher and make Milo open mailto: links. No sudo or credentials."""
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,10 +22,15 @@ Version=1.0
 Type=Application
 Name=Milo
 Comment=La tua posta, con spazio per pensare
-Exec={desktop_quote(root / '.venv/bin/python')} {desktop_quote(root / 'scripts/launch.py')}
+Exec={desktop_quote(root / '.venv/bin/python')} {desktop_quote(root / 'scripts/launch.py')} %u
 Icon={root / 'web/icon.svg'}
 Terminal=false
 Categories=Network;Email;
+MimeType=x-scheme-handler/mailto;
 StartupWMClass=Milo
 """)
-print(f"Installed {launcher}\nOpen Milo from your application launcher.")
+if shutil.which("update-desktop-database"):
+    subprocess.run(["update-desktop-database", str(applications)], check=False)
+if shutil.which("xdg-mime"):
+    subprocess.run(["xdg-mime", "default", "milo.desktop", "x-scheme-handler/mailto"], check=False)
+print(f"Installed {launcher}\nOpen Milo from your application launcher; mailto: links now open in Milo.")

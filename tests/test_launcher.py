@@ -67,3 +67,17 @@ def test_private_device_access_ignores_old_public_setup_link(tmp_path, monkeypat
     monkeypatch.setattr(launch, 'ROOT', tmp_path)
     url = 'https://owner.example.ts.net:8443'
     assert launch.owner_setup_url(url) == url
+
+
+def test_mailto_links_open_a_new_message_on_the_shared_server(tmp_path, monkeypatch):
+    data = tmp_path / ".data"
+    data.mkdir()
+    (data / "server.json").write_text(json.dumps({"url": "https://milo.example.ts.net"}))
+    monkeypatch.setattr(launch, "ROOT", tmp_path)
+    monkeypatch.setattr(launch, "DEMO", False)
+    monkeypatch.setattr(launch, "MAILTO", "mailto:anna@example.com?subject=Ciao%20Anna&body=A+B")
+    monkeypatch.delenv("MILO_SERVER_URL", raising=False)
+    opened = []
+    monkeypatch.setattr(launch, "open_window", opened.append)
+    launch.main()
+    assert opened == ["https://milo.example.ts.net/#compose=mailto%3Aanna%40example.com%3Fsubject%3DCiao%2520Anna%26body%3DA%2BB"]

@@ -10,13 +10,22 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
 DEMO = "--demo" in sys.argv
 PORT = 8026 if DEMO else 8025
 URL = f"http://127.0.0.1:{PORT}"
 DATA = ROOT / ".data" / ("demo" if DEMO else "live")
+# A mailto: link from the desktop (Exec=... %u) opens straight into a new message.
+MAILTO = next((arg for arg in sys.argv[1:] if arg.lower().startswith("mailto:")), None)
+
+
+def with_mailto(url):
+    """The fragment never reaches the server; the web app reads it and clears it."""
+    if not MAILTO or "#" in url:
+        return url
+    return url + "/#compose=" + quote(MAILTO, safe="")
 
 
 def running():
@@ -79,7 +88,7 @@ def owner_setup_url(server):
 def main():
     server = shared_server()
     if server:
-        open_window(owner_setup_url(server))
+        open_window(with_mailto(owner_setup_url(server)))
         print(f"Milo is connected to {server}")
         return
     python = ROOT / ".venv/bin/python"
@@ -112,7 +121,7 @@ def main():
     url = URL
     if bootstrap and json.loads(bootstrap[0]) and not DEMO:
         url += "#setup=" + json.loads(bootstrap[0])
-    open_window(url)
+    open_window(with_mailto(url))
     print(f"Milo is running at {URL}")
 
 

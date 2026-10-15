@@ -2,11 +2,11 @@ import email
 import hashlib
 import imaplib
 import json
+import os
 import re
 import smtplib
 import ssl
 import threading
-import os
 import time
 from datetime import datetime
 from email import policy

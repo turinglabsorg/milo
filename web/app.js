@@ -318,6 +318,7 @@ function listPath(query=currentQuery()){
 }
 function applyState(state){
   const counts=S.optimistic.size?S.state.counts:state.counts;S.state={...state,counts};
+  if(pendingMailto)setTimeout(openPendingMailto);
   for(const operation of S.pendingSettings.values()){
     if(operation.account_id)S.state.accounts=S.state.accounts.map(a=>a.id===operation.account_id?{...a,...operation.body}:a);
     else S.state[operation.setting]=operation.body;
@@ -1226,16 +1227,32 @@ async function handleKeydown(event) {
 }
 document.addEventListener('keydown',handleKeydown);
 
+let pendingMailto=null;
+// mailto: links handed over by the desktop launcher (#compose=mailto:...).
+function parseMailto(value){
+  const text=String(value||'');if(!/^mailto:/i.test(text))return null;
+  const [target,query='']=text.slice(7).split('?');
+  const params=new URLSearchParams(query.replace(/\+/g,'%2B')),field=name=>[...params].filter(([key])=>key.toLowerCase()===name).map(([,v])=>v);
+  const decode=part=>{try{return decodeURIComponent(part);}catch{return part;}};
+  const to=[decode(target),...field('to')].filter(Boolean).join(', ');
+  return {to,cc:field('cc').join(', '),subject:field('subject')[0]||'',body:(field('body')[0]||'').replace(/\r\n/g,'\n')};
+}
+function openPendingMailto(){
+  // Waits for the accounts list, which may arrive after the first refresh.
+  const draft=parseMailto(pendingMailto);
+  if(draft&&S.state?.accounts?.length){pendingMailto=null;showCompose(draft);}
+}
 async function boot() {
   try {
     const oauth=new URLSearchParams(location.hash.slice(1));
     const oauthError=oauth.get('google_error'),connected=oauth.has('google_connected'),ownerToken=oauth.get('setup');
-    if(ownerToken || oauthError || connected) history.replaceState(null,'',location.pathname);
+    pendingMailto=oauth.get('compose');
+    if(ownerToken || oauthError || connected || pendingMailto) history.replaceState(null,'',location.pathname);
     await replica.init();
     const cachedStatus=await deviceCache.get('api:/status'),cachedState=await deviceCache.get('api:/state');
     for(const operation of await deviceCache.get('pending-operations')||[]){if(operation.error)S.queueErrors.set(operation.id,operation);replica.apply(operation);if(operation.kind==='setting')S.pendingSettings.set(operation.key,operation);else if(!operation.kind)S.optimistic.set(operation.key,{patch:{...S.optimistic.get(operation.key)?.patch,...operation.patch},deleted:operation.deleted,operationId:operation.id});}
     if(cachedStatus?.authenticated&&cachedState){
-      S.status=cachedStatus;S.state=cachedState;S.online=navigator.onLine;applyState(cachedState);renderShell();await refresh();
+      S.status=cachedStatus;S.state=cachedState;S.online=navigator.onLine;applyState(cachedState);renderShell();openPendingMailto();await refresh();
       api('/status').then(status=>{S.status=status;if(!status.authenticated)renderLogin();else{flushClientQueue().catch(()=>{});queueCatalogue();}}).catch(error=>{if(temporarilyUnavailable(error))recordServerError();});
       return;
     }
@@ -1251,7 +1268,7 @@ async function boot() {
     if(oauthError) toast(oauthError);
     if(connected) toast('Casella Google collegata. Sto sincronizzando la tua posta.');
     if(!S.status.authenticated) { renderLogin();return; }
-    S.loadingList=true;renderShell();await refresh(false,true);revalidateView().then(()=>{queueCatalogue();if(S.status.demo&&S.messages.length&&innerWidth>900)selectMessage(S.messages[0].id,false).catch(()=>{});});renderList();
+    S.loadingList=true;renderShell();await refresh(false,true);openPendingMailto();revalidateView().then(()=>{queueCatalogue();if(S.status.demo&&S.messages.length&&innerWidth>900)selectMessage(S.messages[0].id,false).catch(()=>{});});renderList();
 
   } catch(error) { $('#app').innerHTML=`<div class="empty" style="min-height:100vh">${icon('mail')}<h3>Milo non è raggiungibile.</h3><p>${esc(error.message)}</p></div>`; }
 }
