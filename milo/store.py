@@ -206,6 +206,7 @@ class WriterLock:
 
 
 READER_POOL = 12
+SEARCH_COLUMNS = ("sender", "sender_email", "subject", "preview", "body")
 VISIBLE_WRITE = re.compile(r"\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:messages|drafts|scheduled|todos|senders|accounts|settings|rules|followups)\b", re.I)
 
 
@@ -390,6 +391,33 @@ class Store:
         for row in orphans:
             self.remove_draft_attachments(row["draft_id"])
         return len(orphans)
+
+    def ensure_search_indexes(self, stop=lambda: False):
+        """Trigram indexes let the existing ILIKE searches use an index.
+
+        Built CONCURRENTLY on a dedicated connection: mail keeps syncing and
+        startup never waits (the health check would restart a slow container).
+        """
+        with self.connect() as connection:
+            self._maintenance = connection
+            connection.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+            for column in SEARCH_COLUMNS:
+                if stop():
+                    return
+                name = f"messages_search_{column}"
+                state = connection.execute("SELECT i.indisvalid FROM pg_class c JOIN pg_index i ON i.indexrelid=c.oid "
+                                           "WHERE c.relname=%s", (name,)).fetchone()
+                if state and state["indisvalid"]:
+                    continue
+                if state:  # an interrupted concurrent build leaves an invalid index
+                    connection.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
+                connection.execute(f"CREATE INDEX CONCURRENTLY {name} ON messages USING gin ({column} gin_trgm_ops)")
+
+    def cancel_maintenance(self):
+        """Stop a long index build at shutdown; the next start rebuilds it."""
+        connection = getattr(self, "_maintenance", None)
+        if connection and not connection.closed:
+            connection.cancel_safe()
 
     def sweep_blobs(self, stop=lambda: False):
         known = {row["id"] for row in self.rows("SELECT id FROM messages")}

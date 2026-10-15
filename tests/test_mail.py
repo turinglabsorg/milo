@@ -307,3 +307,23 @@ def test_original_mime_lives_compressed_outside_the_database(store, account_data
     assert store.sweep_blobs() == 0 and path.exists()
     os.utime(path, (time.time() - 7200, time.time() - 7200))
     assert store.sweep_blobs() == 1 and not path.exists()
+
+
+def test_search_uses_trigram_indexes(store, account_data):
+    from milo.store import SEARCH_COLUMNS
+    account_id = store.add_account(account_data)
+    store.upsert_message(parse_message(raw_mail("Fattura ottobre", "<fattura@example.com>"), account_id, "INBOX", "1", 1))
+    store.ensure_search_indexes()
+    store.ensure_search_indexes()  # idempotent
+    names = {row["indexname"] for row in store.rows("SELECT indexname FROM pg_indexes WHERE tablename='messages'")}
+    assert {f"messages_search_{column}" for column in SEARCH_COLUMNS} <= names
+    assert [row["subject"] for row in store.conversations("all", search="attura ott")] == ["Fattura ottobre"]
+    with store.reader() as connection:
+        connection.execute("SET enable_seqscan=off")
+        try:
+            plan = "\n".join(row["QUERY PLAN"] for row in connection.execute(
+                "EXPLAIN SELECT id FROM messages WHERE sender ILIKE %(q)s OR sender_email ILIKE %(q)s "
+                "OR subject ILIKE %(q)s OR body ILIKE %(q)s", {"q": "%fattura%"}).fetchall())
+        finally:
+            connection.execute("RESET enable_seqscan")
+    assert "messages_search_body" in plan

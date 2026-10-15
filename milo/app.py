@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 import httpx
+import psycopg
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -157,6 +158,10 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             features.backfill_todos(stop=stop_worker.is_set)
             for account in store.rows("SELECT id FROM accounts WHERE removing=1"):
                 features.purge_account(account["id"], stop=stop_worker.is_set)
+            try:
+                store.ensure_search_indexes(stop_worker.is_set)
+            except psycopg.Error:
+                pass  # search still works, only slower
 
         previews = asyncio.create_task(asyncio.to_thread(background_migrations))
         feature_task = asyncio.create_task(feature_worker()) if not demo else None
@@ -167,6 +172,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         stop_worker.set()
         wake_worker.set()
         recaps.stop()
+        store.cancel_maintenance()
         await task
         if feature_task:
             await feature_task

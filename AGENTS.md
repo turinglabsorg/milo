@@ -47,6 +47,10 @@ external action. That file is the single source of global agent instructions.
   `draft-attachments/<draft_id>/` (raw-body `POST /api/drafts/{id}/attachments?name=`,
   18 MB total); added by `build_message`, removed when the draft is sent or
   deleted, orphans swept daily.
+- Search keeps `ILIKE '%term%'`; trigram GIN indexes (`pg_trgm`,
+  `messages_search_<column>`) make it indexed. They are built CONCURRENTLY on a
+  dedicated connection after startup (`ensure_search_indexes`), invalid leftovers
+  are rebuilt, and shutdown cancels a running build.
 - Heavy archive rewrites saturate Docker Desktop's bind-mount I/O and trip the
   health check. Back up with an APFS clone (`cp -c`, container stopped) and run
   bulk migrations natively on the Mac with the container stopped (the 10 GB
