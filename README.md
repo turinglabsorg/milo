@@ -86,14 +86,15 @@ an Apple app-specific password. Microsoft OAuth/Graph remains unfinished.
 The interface bundles [Geist](https://vercel.com/font), with readable type sizes
 and no external font requests. Its license is included in `web/fonts/OFL.txt`.
 
-## Ollama and Mistral Large 4
+## Ollama and DeepSeek V4.1 Flash
 
 ```sh
-ollama pull mistral-large-4:cloud
+ollama pull deepseek-v4.1-flash:cloud
 ```
 
-Milo defaults to `mistral-large-4:cloud`, the
-[published Ollama tag](https://ollama.com/library/mistral-large-4).
+Milo defaults to `deepseek-v4.1-flash:cloud`, the
+[published Ollama tag](https://ollama.com/library/deepseek-v4.1-flash), chosen for
+its low usage.
 **This tag runs in Ollama Cloud.** Start Ollama and sign in to its cloud service,
 then enable cloud processing in Milo → Settings → Milo AI. Automatic analysis is
 off until enabled. Selected email content is sent to the chosen model. You can

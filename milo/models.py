@@ -90,7 +90,7 @@ class DraftInput(BaseModel):
 
 
 class AISettings(BaseModel):
-    model: str = Field(default="mistral-large-4:cloud", min_length=1, max_length=150)
+    model: str = Field(default="deepseek-v4.1-flash:cloud", min_length=1, max_length=150)
     automatic: bool = False
     cloud_consent: bool = False
 

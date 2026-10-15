@@ -257,7 +257,7 @@ class Store:
             self.bootstrap = secrets.token_urlsafe(24)
             self.set_setting("bootstrap", self.bootstrap)
         if not self.setting("ai"):
-            self.set_setting("ai", {"model": "mistral-large-4:cloud", "automatic": False,
+            self.set_setting("ai", {"model": "deepseek-v4.1-flash:cloud", "automatic": False,
                                     "cloud_consent": False})
 
     def connect(self):

@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix="milo-ai-check-") as directory:
     mail["Subject"] = "Revisione del progetto"
     mail.set_content("Ciao, puoi rivedere il documento entro domani? Mi serve il tuo feedback prima della riunione. Grazie!")
     message_id = store.upsert_message(parse_message(mail.as_bytes(), account, "INBOX", "1", 1))
-    store.set_setting("ai", {"model": "mistral-large-4:cloud", "automatic": False, "cloud_consent": True})
+    store.set_setting("ai", {"model": "deepseek-v4.1-flash:cloud", "automatic": False, "cloud_consent": True})
     ai = AI(store, os.environ.get("MILO_OLLAMA_URL", "http://127.0.0.1:11434"))
     analysis = ai.analyze(message_id)
     print(json.dumps({"check": "analysis", "model": analysis["model"], "category": analysis["category"],
