@@ -1,5 +1,6 @@
 """Install a user-local Linux launcher and make Milo open mailto: links. No sudo or credentials."""
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -8,6 +9,11 @@ from pathlib import Path
 
 def desktop_quote(value):
     return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`") + '"'
+
+
+def desktop_arg(value):
+    """Quote only when needed: xdg-mime cannot resolve a quoted Exec program."""
+    return str(value) if re.fullmatch(r"[\w/.+-]+", str(value)) else desktop_quote(value)
 
 
 root = Path(__file__).resolve().parent
@@ -22,7 +28,7 @@ Version=1.0
 Type=Application
 Name=Milo
 Comment=La tua posta, con spazio per pensare
-Exec={desktop_quote(root / '.venv/bin/python')} {desktop_quote(root / 'scripts/launch.py')} %u
+Exec={desktop_arg(root / '.venv/bin/python')} {desktop_arg(root / 'scripts/launch.py')} %u
 Icon={root / 'web/icon.svg'}
 Terminal=false
 Categories=Network;Email;
