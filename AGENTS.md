@@ -54,7 +54,8 @@ external action. That file is the single source of global agent instructions.
 - Linux notifications: `scripts/notifier.py` (systemd user unit
   `milo-notifier.service`, written by `install.py` when `.data/server.json`
   exists) follows `/api/events` and asks `GET /api/notifications?after=<seq>`
-  (arrival order, push rules from `Push.eligible`); banners are skipped while
+  (arrival order, push rules from `Push.eligible`); clicking opens the thread
+  (`launch.py --open=<id>` → `#open=<id>`); banners are skipped while
   the Milo window is focused (Hyprland). Cursor in `~/.local/state/milo/`.
 - Heavy archive rewrites saturate Docker Desktop's bind-mount I/O and trip the
   health check. Back up with an APFS clone (`cp -c`, container stopped) and run
