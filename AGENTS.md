@@ -18,8 +18,10 @@ external action. That file is the single source of global agent instructions.
   (`service_workers="block"`, route `/static/*.js|css` to local `web/`).
 - Storage is PostgreSQL (`MILO_DATABASE_URL`, password via
   `MILO_DATABASE_PASSWORD_FILE`). Reads must never wait for mailbox sync:
-  `Store.rows()` uses a per-thread connection unless the thread already holds
-  `store.lock`. Queries use `?` placeholders (translated by `store.sql`), integer
+  `Store.rows()` borrows from a bounded reader pool (`READER_POOL`) unless the
+  thread already holds `store.lock`; never keep per-thread connections (worker
+  threads are retired and the connections leaked until Postgres refused
+  clients). Queries use `?` placeholders (translated by `store.sql`), integer
   0/1 flags (cast boolean expressions with `::int` inside aggregates) and
   `ILIKE` for search. Never reintroduce SQLite.
   Parse mail before taking the writer lock and keep write transactions short.
@@ -31,6 +33,12 @@ external action. That file is the single source of global agent instructions.
 - Original MIME lives in compressed files under `blobs/` (`Store.blobs`), read
   via `message(..., raw=True)`/`message_headers`. Write it only through
   `upsert_message`/`set_raw`; never store originals in the database.
+- Replies get the quoted original appended server-side in `build_message`
+  (`reply_quote`, times in `MILO_TIMEZONE`, default Europe/Rome) unless the
+  body already quotes it; composers show only the new text.
+- Linux: `install.py` registers `milo.desktop` as the `mailto:` handler;
+  `scripts/launch.py` turns the link into `#compose=<mailto>`, which the web app
+  opens once the accounts are known and then clears.
 - Heavy archive rewrites saturate Docker Desktop's bind-mount I/O and trip the
   health check. Back up with an APFS clone (`cp -c`, container stopped) and run
   bulk migrations natively on the Mac with the container stopped (the 10 GB

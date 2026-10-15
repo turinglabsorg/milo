@@ -198,6 +198,7 @@ class WriterLock:
 
 
 READER_POOL = 12
+VISIBLE_WRITE = re.compile(r"\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:messages|drafts|scheduled|todos|senders|accounts|settings|rules|followups)\b", re.I)
 
 
 class Store:
@@ -215,6 +216,9 @@ class Store:
         self._pool_lock = threading.Lock()
         self._txn_depth = 0
         self.on_mail_change = lambda: None
+        # Any write clients would see in a list or thread (drives /api/events).
+        self.on_change = lambda: None
+        self._changed_in_txn = False
         self.on_new_message = lambda data: None
         key_path = directory / "vault.key"
         if not key_path.exists():
@@ -283,11 +287,21 @@ class Store:
 
     def execute(self, query, params=()):
         with self.lock:
-            return self.writer().execute(sql(query, params), tuple(clean(value) for value in params) or None)
+            result = self.writer().execute(sql(query, params), tuple(clean(value) for value in params) or None)
+            self._changed(query)
+            return result
 
     def executemany(self, query, params):
         with self.lock, self.writer().cursor() as cursor:
             cursor.executemany(sql(query, True), [tuple(clean(value) for value in row) for row in params])
+            self._changed(query)
+
+    def _changed(self, query):
+        if VISIBLE_WRITE.match(query):
+            if self._txn_depth:
+                self._changed_in_txn = True
+            else:
+                self.on_change()
 
     @contextmanager
     def transaction(self):
@@ -301,11 +315,16 @@ class Store:
                     self._txn_depth -= 1
                 return
             self._txn_depth += 1
+            self._changed_in_txn = False
             try:
                 with self.writer().transaction():
                     yield
             finally:
                 self._txn_depth -= 1
+            # Signal only once the batch is committed and visible to readers.
+            if self._changed_in_txn:
+                self._changed_in_txn = False
+                self.on_change()
 
     def set_raw(self, message_id, raw):
         self.blobs.put(message_id, raw)

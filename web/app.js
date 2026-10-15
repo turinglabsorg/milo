@@ -1302,14 +1302,32 @@ async function runClientQueue(){
   }catch(error){queueRetryAt=Date.now()+3000;if(!temporarilyUnavailable(error)&&S.status?.authenticated)toast(error.message);}
   finally{renderChrome();}
 }
-let lastHiddenRefresh=0;
+// Server-sent change notices make the list current at once, even in a hidden
+// window; polling stays as a slower safety net while the stream is connected.
+let events=null,eventsLive=false,eventTimer=null,lastEventRefresh=0;
+function connectEvents(){
+  if(!S.status?.authenticated||S.status.demo||typeof EventSource==='undefined'){if(events){events.close();events=null;eventsLive=false;}return;}
+  if(events)return;
+  events=new EventSource('/api/events');
+  events.addEventListener('hello',()=>{const missed=!eventsLive&&lastEventRefresh;eventsLive=true;if(missed)eventRefresh();});
+  events.addEventListener('change',()=>{eventsLive=true;eventRefresh();});
+  events.onerror=()=>{eventsLive=false;if(events?.readyState===EventSource.CLOSED)events=null;};
+}
+function eventRefresh(){
+  if(eventTimer)return;
+  eventTimer=setTimeout(()=>{eventTimer=null;lastEventRefresh=Date.now();lastPollRefresh=Date.now();
+    refresh().catch(()=>{});flushClientQueue().catch(()=>{});},Math.max(0,1500-(Date.now()-lastEventRefresh)));
+}
+let lastHiddenRefresh=0,lastPollRefresh=0;
 async function poll(){
+  connectEvents();
   // A hidden window (another workspace, minimized) keeps the list current every 30 seconds.
-  if(S.status?.authenticated&&document.hidden&&Date.now()-lastHiddenRefresh>30000){
+  if(S.status?.authenticated&&document.hidden&&Date.now()-lastHiddenRefresh>(eventsLive?120000:30000)){
     lastHiddenRefresh=Date.now();await refresh().catch(()=>{});flushClientQueue().catch(()=>{});
   }
   if(S.status?.authenticated&&!document.hidden){
-    await refresh();flushClientQueue().catch(()=>{});queueCatalogue();
+    if(!eventsLive||Date.now()-lastPollRefresh>30000){lastPollRefresh=Date.now();await refresh();}
+    flushClientQueue().catch(()=>{});queueCatalogue();
     if(Date.now()-lastWarm>120000)warmRecentBodies();
     maybeMorningRecap();
     if(S.recapOpen&&S.recapSignature!==JSON.stringify(S.state.recap))api('/recap').then(result=>{if(S.recapOpen)showRecap(result);}).catch(()=>{});

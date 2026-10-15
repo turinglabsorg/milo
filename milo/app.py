@@ -15,7 +15,7 @@ from urllib.parse import quote, urlsplit
 
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
@@ -51,6 +51,9 @@ from .recap import RecapWorker
 from .render import render_html
 from .store import Store
 
+EVENT_HEARTBEAT = 25
+EVENT_COALESCE = 1
+
 
 def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434", secure_cookies=False,
                public_url="http://127.0.0.1:8025", google_client=None, private_url=None, tailscale_owners=None,
@@ -75,12 +78,24 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     ai.on_analysis = features.sync_todos
     recaps = RecapWorker(store, ai)
     store.on_mail_change = recaps.wake
+
+    def bump_revision():
+        changes["revision"] += 1
+        event, changes["event"] = changes["event"], asyncio.Event()
+        if event:
+            event.set()
+
+    def mail_changed():
+        if worker_loop and not worker_loop.is_closed():
+            worker_loop.call_soon_threadsafe(bump_revision)
+    store.on_change = mail_changed
     engine = SyncEngine(store, ai)
     google = GoogleOAuth(store, public_url, google_client)
     sync_lock = asyncio.Lock()
     stop_worker = asyncio.Event()
     wake_worker = asyncio.Event()
     worker_loop = None
+    changes = {"revision": 0, "event": None}
     attempts = {}
     sending = set()
     if demo:
@@ -134,6 +149,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     async def lifespan(app):
         nonlocal worker_loop
         worker_loop = asyncio.get_running_loop()
+        changes["event"] = asyncio.Event()
         def background_migrations():
             # Fresh statistics keep conversation queries on indexes after bulk imports.
             store.execute("ANALYZE")
@@ -318,6 +334,26 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             background.add_task(engine.sync_account, account)
         response.delete_cookie("milo_oauth", path="/api/oauth/google")
         return response
+
+    @app.get("/api/events", dependencies=[Depends(auth)])
+    async def events():
+        """Server-sent change notices; clients revalidate what they show."""
+        async def stream():
+            seen = changes["revision"]
+            yield f"retry: 5000\nevent: hello\ndata: {seen}\n\n"
+            while not stop_worker.is_set():
+                if changes["revision"] == seen:
+                    try:
+                        await asyncio.wait_for(changes["event"].wait(), timeout=EVENT_HEARTBEAT)
+                    except TimeoutError:
+                        yield ": ping\n\n"
+                        continue
+                # Coalesce bursts (a sync writes many rows) into one notice.
+                await asyncio.sleep(EVENT_COALESCE)
+                seen = changes["revision"]
+                yield f"event: change\ndata: {seen}\n\n"
+        return StreamingResponse(stream(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
     @app.get("/api/state", dependencies=[Depends(auth)])
     def state():

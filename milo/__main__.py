@@ -55,7 +55,9 @@ def main():
         print("Apri Milo dall'app installata per scegliere la tua password.", flush=True)
     logging = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)
     logging["formatters"]["access"]["()"] = PrivateAccessFormatter
-    uvicorn.run(app, host=args.host, port=args.port, log_config=logging, proxy_headers=not bool(config))
+    # Open event streams must not hold up a restart.
+    uvicorn.run(app, host=args.host, port=args.port, log_config=logging, proxy_headers=not bool(config),
+                timeout_graceful_shutdown=3)
 
 
 if __name__ == "__main__":
