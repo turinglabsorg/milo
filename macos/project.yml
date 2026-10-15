@@ -1,0 +1,54 @@
+name: MiloMac
+options:
+  bundleIdPrefix: io.meaningtech
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  MiloMac:
+    type: application
+    platform: macOS
+    sources: [MiloMac]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.meaningtech.milo.mac
+        PRODUCT_NAME: Milo
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Milo
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        INFOPLIST_KEY_NSHighResolutionCapable: YES
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: MiloMac/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: io.meaningtech.milo.mac.mailto
+            CFBundleURLSchemes: [mailto]
+          - CFBundleURLName: io.meaningtech.milo.mac.open
+            CFBundleURLSchemes: [milo]
+        NSUserNotificationUsageDescription: Milo shows a banner when new mail arrives.
+  MiloMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [MiloMacTests]
+    dependencies:
+      - target: MiloMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.meaningtech.milo.mac.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Milo.app/Contents/MacOS/Milo"
+schemes:
+  MiloMac:
+    build:
+      targets:
+        MiloMac: all
+    test:
+      targets: [MiloMacTests]

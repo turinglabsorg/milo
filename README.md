@@ -24,6 +24,16 @@ export MILO_DATABASE_URL=postgresql://milo@127.0.0.1:5432/milo
 uv run python scripts/launch.py
 ```
 
+## Run on macOS (client)
+
+The native macOS client in [`macos/`](macos/README.md) connects to an
+existing Milo service (for example the permanent Mac Pro deployment); it
+does not run a second archive. With Xcode and XcodeGen installed:
+
+```sh
+uv run python macos/install.py
+```
+
 The Docker deployment (`compose.yaml`) runs PostgreSQL in its own container.
 Tests need a server they can create databases on:
 `MILO_TEST_DATABASE_URL=postgresql://user@127.0.0.1:5432/postgres uv run pytest`.
