@@ -65,6 +65,9 @@ class Features:
         followup = self.store.rows("SELECT followup_days FROM scheduled WHERE draft_id=?", (draft_id,))
         days = (followup[0]["followup_days"] if followup else None) or draft.get("followup_days")
         self.store.execute("DELETE FROM scheduled WHERE draft_id=?", (draft_id,))
+        now = time.time()
+        self.store.note_addresses(draft.get("to"), now)
+        self.store.note_addresses(draft.get("cc"), now)
         if days and rfc_message_id:
             self.store.execute("INSERT INTO followups VALUES(?,?,?,?,?,?,?,?,NULL)",
                                (uuid.uuid4().hex, account_id, rfc_message_id, thread_id, draft.get("subject", ""),

@@ -12,6 +12,11 @@ struct ComposeView: View {
     @State private var scheduling = false
     @State private var customDate = Date().addingTimeInterval(3600)
     @FocusState private var bodyFocused: Bool
+    @FocusState private var recipientSlot: RecipientSlot?
+    @State private var suggestions: [Recipient] = []
+    @State private var suggestTask: Task<Void, Never>?
+
+    private enum RecipientSlot: Hashable { case to, cc }
 
     private var title: String {
         switch draft.mode {
@@ -19,6 +24,49 @@ struct ComposeView: View {
         case .replyAll: "Rispondi a tutti"
         case .forward: "Inoltra"
         case .new: "Nuovo messaggio"
+        }
+    }
+
+    @ViewBuilder
+    private func recipientField(_ title: String, text: Binding<String>, slot: RecipientSlot, identifier: String) -> some View {
+        TextField(title, text: text)
+            .keyboardType(.emailAddress)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .focused($recipientSlot, equals: slot)
+            .accessibilityIdentifier(identifier)
+        if recipientSlot == slot {
+            ForEach(suggestions) { person in
+                Button {
+                    text.wrappedValue = RecipientEdit.inserting(person.email, name: person.name, into: text.wrappedValue)
+                } label: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(person.name.isEmpty ? person.email : person.name)
+                        if !person.name.isEmpty {
+                            Text(person.email).font(.caption).foregroundStyle(Color.milo.muted)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("recipient-\(person.email)")
+            }
+        }
+    }
+
+    private func refreshSuggestions() {
+        guard let slot = recipientSlot else { suggestions = []; return }
+        let value = slot == .to ? draft.to : draft.cc
+        let token = RecipientEdit.token(value)
+        if RecipientEdit.isAddress(token) { suggestions = []; return }
+        suggestTask?.cancel()
+        suggestTask = Task {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            let found = (try? await mailbox.api.recipients(matching: token)) ?? []
+            guard !Task.isCancelled, recipientSlot == slot else { return }
+            let taken = RecipientEdit.addresses(in: value)
+            suggestions = found.filter { !taken.contains($0.email.lowercased()) }
         }
     }
 
@@ -33,11 +81,8 @@ struct ComposeView: View {
                             }
                         }
                     }
-                    TextField("A", text: $draft.to)
-                        .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .accessibilityIdentifier("compose-to")
-                    TextField("Cc", text: $draft.cc)
-                        .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    recipientField("A", text: $draft.to, slot: .to, identifier: "compose-to")
+                    recipientField("Cc", text: $draft.cc, slot: .cc, identifier: "compose-cc")
                     TextField("Oggetto", text: $draft.subject)
                         .accessibilityIdentifier("compose-subject")
                 }
@@ -66,6 +111,9 @@ struct ComposeView: View {
                     Section { Text(error).foregroundStyle(Color.milo.danger) }
                 }
             }
+            .onChange(of: draft.to) { _, _ in if recipientSlot == .to { refreshSuggestions() } }
+            .onChange(of: draft.cc) { _, _ in if recipientSlot == .cc { refreshSuggestions() } }
+            .onChange(of: recipientSlot) { _, _ in refreshSuggestions() }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

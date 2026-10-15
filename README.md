@@ -64,6 +64,8 @@ uv run milo --data .data/live
   move to the provider's trash in the background. IMAP requires a Trash folder
   and MOVE; a failed move stays queued and the local conversation stays hidden.
 - Inline replies, Reply all with deduplicated To/Cc recipients, and forwards.
+  To and Cc suggest people you wrote to recently and search the rest of your
+  contacts by name or address.
   Collapsed quoted history, normalized
   repeated reply prefixes, drafts up to one million characters, automatic saving
   and recovery after a failed save. Shared drafts and explicit SMTP sending over

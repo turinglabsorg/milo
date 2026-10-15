@@ -82,6 +82,48 @@ public struct Address: Codable, Hashable, Sendable {
     public var email: String
 }
 
+/// Someone the composer can offer: a person you wrote to, or a contact you can search for.
+public struct Recipient: Codable, Hashable, Sendable, Identifiable {
+    public var name: String
+    public var email: String
+    public var id: String { email }
+}
+
+public enum RecipientEdit {
+    /// The address being typed, after the last comma.
+    public static func token(_ value: String) -> String {
+        let part = value.split(whereSeparator: { $0 == "," || $0 == ";" }).last.map(String.init) ?? ""
+        return part.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public static func isAddress(_ token: String) -> Bool {
+        guard let at = token.firstIndex(of: "@"), token[token.index(after: at)...].contains("."),
+              !token.contains(where: { " ,;<>".contains($0) }) else { return false }
+        return token.distance(from: token.startIndex, to: at) > 0
+    }
+
+    public static func addresses(in value: String) -> Set<String> {
+        Set(value.lowercased().split { ",;<> \n\t".contains($0) }.filter { $0.contains("@") }.map(String.init))
+    }
+
+    /// Replaces the address being typed and leaves a comma so the next one can follow.
+    public static func inserting(_ email: String, name: String, into value: String) -> String {
+        let label = name.isEmpty ? email : "\(name) <\(email)>"
+        if token(value).isEmpty {
+            let prefix = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if prefix.isEmpty { return label + ", " }
+            let head = prefix.hasSuffix(",") || prefix.hasSuffix(";") ? prefix : prefix + ","
+            return head + " " + label + ", "
+        }
+        var parts = value.split(whereSeparator: { $0 == "," || $0 == ";" }).map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if parts.isEmpty { parts = [""] }
+        parts[parts.count - 1] = label
+        return parts.filter { !$0.isEmpty }.joined(separator: ", ") + ", "
+    }
+}
+
 public struct Attachment: Codable, Hashable, Sendable {
     public var index: Int
     public var name: String?

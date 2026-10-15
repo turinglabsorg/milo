@@ -677,7 +677,7 @@ function showAccountSettings(accountId) {
 }
 
 function composeMarkup(draft,inline=false) {
-  return `<form id="compose-form" class="${inline?'inline-compose-form':''}"><div class="compose-heading"><h3>${draft.mode==='forward'?'Inoltra':['reply','reply_all'].includes(draft.mode)?draft.mode==='reply_all'?'Rispondi a tutti':'Rispondi':'Nuovo messaggio'}</h3>${inline?`<button class="icon-button" type="button" data-action="close-compose" aria-label="Chiudi" title="Chiudi bozza">${icon('close')}</button>`:''}</div><label class="field"><span>Da</span><select name="account_id">${S.state.accounts.map(a=>`<option value="${esc(a.id)}" ${draft.account_id===a.id?'selected':''}>${esc(a.name)} · ${esc(a.email)}</option>`).join('')}</select></label><label class="field"><span>A</span><input name="to" value="${esc(draft.to)}" placeholder="nome@example.com" maxlength="2000"></label><label class="field"><span>Cc</span><input name="cc" value="${esc(draft.cc)}" placeholder="Copia conoscenza" maxlength="2000"></label><label class="field"><span>Oggetto</span><input name="subject" value="${esc(draft.subject)}" placeholder="Di cosa parliamo?" maxlength="998"></label><label class="field"><span>Messaggio</span><textarea class="composer-body" name="body" placeholder="Scrivi qui…" maxlength="1000000">
+  return `<form id="compose-form" class="${inline?'inline-compose-form':''}"><div class="compose-heading"><h3>${draft.mode==='forward'?'Inoltra':['reply','reply_all'].includes(draft.mode)?draft.mode==='reply_all'?'Rispondi a tutti':'Rispondi':'Nuovo messaggio'}</h3>${inline?`<button class="icon-button" type="button" data-action="close-compose" aria-label="Chiudi" title="Chiudi bozza">${icon('close')}</button>`:''}</div><label class="field"><span>Da</span><select name="account_id">${S.state.accounts.map(a=>`<option value="${esc(a.id)}" ${draft.account_id===a.id?'selected':''}>${esc(a.name)} · ${esc(a.email)}</option>`).join('')}</select></label><label class="field recipient-field"><span>A</span><input name="to" value="${esc(draft.to)}" placeholder="nome@example.com" maxlength="2000" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"></label><label class="field recipient-field"><span>Cc</span><input name="cc" value="${esc(draft.cc)}" placeholder="Copia conoscenza" maxlength="2000" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"></label><label class="field"><span>Oggetto</span><input name="subject" value="${esc(draft.subject)}" placeholder="Di cosa parliamo?" maxlength="998"></label><label class="field"><span>Messaggio</span><textarea class="composer-body" name="body" placeholder="Scrivi qui…" maxlength="1000000">
 ${esc(draft.body)}</textarea></label><div class="attachments compose-attachments">${composeAttachments(draft)}</div><div class="compose-tools"><button class="secondary attach-button" type="button" data-action="attach-file">${icon('paperclip')}Allega</button><input class="attach-input" type="file" multiple hidden>${(S.state.templates||[]).length?`<select class="template-select" aria-label="Inserisci una risposta salvata"><option value="">Risposte salvate…</option>${S.state.templates.map((template,index)=>`<option value="${index}">${esc(template.name)}</option>`).join('')}</select>`:''}<label class="followup-field"><span>Ricordamelo se non risponde</span><select name="followup_days">${[['','mai'],['1','entro 1 giorno'],['3','entro 3 giorni'],['7','entro una settimana']].map(([value,label])=>`<option value="${value}" ${String(draft.followup_days||'')===value?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="delete-draft">Elimina bozza</button><button class="secondary" type="button" data-action="save-draft">Salva bozza</button><button class="secondary" type="button" data-action="schedule-send">${icon('clock')}Programma</button><button class="primary" type="submit">${icon('sent')}Invia messaggio</button></div><div class="draft-save-status" role="status">${S.pendingDrafts.has(draft.id)?'Salvataggio in attesa':'Le modifiche vengono salvate automaticamente.'}</div></form>`;
 }
 const ATTACHMENT_LIMIT=18*1024*1024;
@@ -686,6 +686,72 @@ function composeAttachments(draft){
   return (draft.attachments||[]).map(a=>`<span class="attachment draft-attachment${a.uploading?' uploading':''}">${icon('paperclip')}<span class="attachment-name">${esc(a.name)}</span><small>${a.uploading?'Caricamento…':fileSize(a.size)}</small>${a.uploading?'':`<button type="button" data-action="remove-attachment" data-attachment-id="${esc(a.id)}" aria-label="Rimuovi ${esc(a.name)}" title="Rimuovi">${icon('close')}</button>`}</span>`).join('');
 }
 function paintComposeAttachments(){const slot=$('#compose-form .compose-attachments');if(slot&&S.compose)slot.innerHTML=composeAttachments(S.compose);}
+const recipientSuggest={field:null,items:[],active:0,request:0,timer:0};
+function recipientToken(value,cursor){
+  const before=value.slice(0,cursor??value.length);
+  const cut=Math.max(before.lastIndexOf(','),before.lastIndexOf(';'));
+  return before.slice(cut+1).trim();
+}
+function finishedAddress(token){return /^[^\s,;<>@]+@[^\s,;<>@]+\.[^\s,;<>@]+$/.test(token);}
+function chosenRecipients(value){
+  return new Set([...value.matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)].map(match=>match[0].toLowerCase()));
+}
+function hideRecipients(){
+  clearTimeout(recipientSuggest.timer);
+  document.querySelectorAll('.recipient-list').forEach(node=>node.remove());
+  document.querySelectorAll('#compose-form [role="combobox"]').forEach(input=>input.setAttribute('aria-expanded','false'));
+  recipientSuggest.field=null;
+}
+function paintRecipients(field,items){
+  field.parentElement?.querySelector('.recipient-list')?.remove();
+  if(!items.length||document.activeElement!==field){field.setAttribute('aria-expanded','false');return;}
+  recipientSuggest.items=items;
+  recipientSuggest.active=Math.min(recipientSuggest.active,items.length-1);
+  const list=document.createElement('div');
+  list.className='recipient-list';list.id='recipient-list';list.setAttribute('role','listbox');
+  items.forEach((person,index)=>{
+    const button=document.createElement('button');
+    button.type='button';button.className='recipient-option'+(index===recipientSuggest.active?' active':'');
+    button.setAttribute('role','option');button.dataset.recipient=String(index);
+    button.setAttribute('aria-selected',index===recipientSuggest.active?'true':'false');
+    const name=document.createElement('strong');name.textContent=person.name||person.email;
+    button.append(name);
+    if(person.name){const mail=document.createElement('small');mail.textContent=person.email;button.append(mail);}
+    list.append(button);
+  });
+  field.setAttribute('aria-expanded','true');field.setAttribute('aria-controls','recipient-list');
+  field.after(list);
+}
+async function loadRecipients(field){
+  const token=recipientToken(field.value,field.selectionStart);
+  if(token.includes('<')||token.length>80||finishedAddress(token)){hideRecipients();return;}
+  const request=++recipientSuggest.request;
+  recipientSuggest.field=field;
+  try{
+    const data=await api('/recipients'+(token?`?q=${encodeURIComponent(token)}`:''));
+    if(request!==recipientSuggest.request||document.activeElement!==field)return;
+    const taken=chosenRecipients(field.value);
+    paintRecipients(field,(data.recipients||[]).filter(person=>person.email&&!taken.has(person.email.toLowerCase())));
+  }catch{if(request===recipientSuggest.request)hideRecipients();}
+}
+function scheduleRecipients(field){clearTimeout(recipientSuggest.timer);recipientSuggest.timer=setTimeout(()=>loadRecipients(field),120);}
+function acceptRecipient(index){
+  const field=recipientSuggest.field&&document.contains(recipientSuggest.field)?recipientSuggest.field:document.activeElement;
+  const person=recipientSuggest.items[index];
+  if(!field||!person||!field.matches?.('[name="to"],[name="cc"]'))return;
+  const value=field.value,cursor=field.selectionStart??value.length;
+  const before=value.slice(0,cursor),after=value.slice(cursor);
+  const cut=Math.max(before.lastIndexOf(','),before.lastIndexOf(';'));
+  const head=cut<0?'':before.slice(0,cut+1).trimEnd()+' ';
+  const restAt=after.search(/[,;]/);
+  const tail=restAt<0?'':after.slice(restAt).trimStart();
+  const label=person.name?`${person.name} <${person.email}>`:person.email;
+  const sep=tail?'':', ';
+  field.value=head+label+sep+tail;
+  const pos=(head+label+sep).length;
+  field.focus();field.setSelectionRange(pos,pos);
+  field.dispatchEvent(new Event('input',{bubbles:true}));
+}
 // Files go straight to the server under the draft id; the draft row may be saved later.
 async function attachFiles(files){
   const compose=S.compose;if(!compose||!files.length)return;
@@ -958,6 +1024,7 @@ document.addEventListener('toggle',event=>{const details=event.target;if(details
 document.addEventListener('click', async event => {
   const target=event.target.closest('button,a'); if(!target) return;
   try {
+      if(target.dataset.recipient!=null){acceptRecipient(Number(target.dataset.recipient));return;}
     if(target.dataset.view) {
       if(S.compose)closeCompose().catch(error=>toast(error.message));
       S.view=target.dataset.view; S.category=''; S.selected=null; S.menu=false;
@@ -1177,6 +1244,7 @@ document.addEventListener('submit', async event => {
 
 document.addEventListener('input', event => {
   if(event.target.closest('#compose-form')){const draft=captureCompose();rememberDraft(draft,false);clearTimeout(autosaveTimer);autosaveTimer=setTimeout(()=>persistDraft(draft).catch(()=>{if($('.draft-save-status'))$('.draft-save-status').textContent='Salvataggio in attesa. La copia resta nelle bozze.';}),700);}
+  if(event.target.matches?.('#compose-form [name="to"], #compose-form [name="cc"]'))scheduleRecipients(event.target);
   if(event.target.id==='palette-input'&&S.palette){S.palette.active=0;renderPalette();}
   if(event.target.id==='search-input') {
     S.search=event.target.value;clearTimeout(searchTimer);
@@ -1212,8 +1280,26 @@ document.addEventListener('change', async event => {
     else if(provider==='other'){notice.innerHTML='Inserisci i parametri del tuo provider. IMAP usa TLS; SMTP può usare TLS oppure STARTTLS.';}
   }
 });
+document.addEventListener('focusin',event=>{
+  if(event.target?.matches?.('#compose-form [name="to"], #compose-form [name="cc"]'))scheduleRecipients(event.target);
+});
+document.addEventListener('focusout',event=>{
+  if(!event.target?.matches?.('#compose-form [name="to"], #compose-form [name="cc"]'))return;
+  setTimeout(()=>{if(document.activeElement!==event.target&&!document.activeElement?.closest?.('.recipient-list'))hideRecipients();},0);
+});
+document.addEventListener('mousedown',event=>{if(event.target.closest?.('.recipient-option'))event.preventDefault();});
 async function handleKeydown(event) {
   if(event.defaultPrevented||event.isComposing)return;
+  if(document.querySelector('.recipient-list')&&event.target?.closest?.('.recipient-field')){
+    if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+      event.preventDefault();
+      const count=recipientSuggest.items.length;
+      recipientSuggest.active=(recipientSuggest.active+(event.key==='ArrowDown'?1:-1)+count)%count;
+      paintRecipients(event.target,recipientSuggest.items);return;
+    }
+    if(event.key==='Enter'){event.preventDefault();acceptRecipient(recipientSuggest.active);return;}
+    if(event.key==='Escape'){event.preventDefault();hideRecipients();return;}
+  }
   if(event.target?.id==='palette-input'&&S.palette){
     if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();const count=Math.max(1,S.palette.items.length);S.palette.active=(S.palette.active+(event.key==='ArrowDown'?1:-1)+count)%count;renderPalette();return;}
     if(event.key==='Enter'){event.preventDefault();runPalette(S.palette.active);return;}

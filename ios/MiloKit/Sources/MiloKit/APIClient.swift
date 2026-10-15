@@ -214,6 +214,11 @@ public final class APIClient: Sendable {
 
     public func recap() async throws -> Recap { try await get(Recap.self, "/recap") }
 
+    public func recipients(matching query: String) async throws -> [Recipient] {
+        struct List: Decodable { var recipients: [Recipient] }
+        return try await get(List.self, "/recipients", query: query.isEmpty ? [:] : ["q": query]).recipients
+    }
+
     public func suggestions(for messageId: String) async throws -> [String] {
         struct Replies: Decodable { var replies: [String] }
         let data = try await call("POST", "/messages/\(Self.encode(messageId))/suggestions", idempotent: true)

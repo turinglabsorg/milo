@@ -140,6 +140,20 @@ final class MailboxTests: XCTestCase {
         XCTAssertEqual(mailbox.conversations.count, DemoTransport.rows.count - 1)
     }
 
+    func testRecipientEditKeepsEarlierAddresses() {
+        XCTAssertEqual(RecipientEdit.token("Anna <anna@example.com>, mar"), "mar")
+        XCTAssertEqual(RecipientEdit.token("Anna <anna@example.com>, "), "")
+        XCTAssertTrue(RecipientEdit.isAddress("anna@example.com"))
+        XCTAssertFalse(RecipientEdit.isAddress("mar"))
+        XCTAssertEqual(
+            RecipientEdit.inserting("marco@example.com", name: "Marco Bianchi", into: "Anna <anna@example.com>, mar"),
+            "Anna <anna@example.com>, Marco Bianchi <marco@example.com>, ")
+        XCTAssertEqual(RecipientEdit.inserting("anna@example.com", name: "", into: ""), "anna@example.com, ")
+        XCTAssertEqual(
+            RecipientEdit.inserting("bob@example.com", name: "Bob", into: "Anna <anna@example.com>, "),
+            "Anna <anna@example.com>, Bob <bob@example.com>, ")
+    }
+
     func testMailtoLinksBecomeDrafts() throws {
         let url = try XCTUnwrap(URL(string: "mailto:anna@example.com?subject=Ciao%20Anna&body=Ci%20vediamo&cc=marco@example.com"))
         let draft = try XCTUnwrap(Draft.mailto(url, accountId: "demo", signature: "\n\n-- \nSam"))

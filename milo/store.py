@@ -9,6 +9,7 @@ import time
 import uuid
 import zlib
 from contextlib import contextmanager
+from email.utils import getaddresses
 from pathlib import Path
 
 import psycopg
@@ -78,6 +79,12 @@ CREATE TABLE IF NOT EXISTS followups(
     id TEXT PRIMARY KEY, account_id TEXT NOT NULL, rfc_message_id TEXT, thread_id TEXT, subject TEXT,
     recipients TEXT, created DOUBLE PRECISION, due DOUBLE PRECISION, resolved DOUBLE PRECISION);
 CREATE INDEX IF NOT EXISTS followups_open ON followups(due) WHERE resolved IS NULL;
+-- People you wrote to, and people who wrote to you. Autocomplete reads this
+-- instead of scanning message headers on every keystroke.
+CREATE TABLE IF NOT EXISTS correspondents(
+    email TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
+    last_sent DOUBLE PRECISION, last_seen DOUBLE PRECISION NOT NULL);
+CREATE INDEX IF NOT EXISTS correspondents_recent ON correspondents(last_sent DESC) WHERE last_sent IS NOT NULL;
 CREATE TABLE IF NOT EXISTS devices(
     token TEXT PRIMARY KEY, environment TEXT NOT NULL, created DOUBLE PRECISION, last_seen DOUBLE PRECISION);
 CREATE TABLE IF NOT EXISTS draft_attachments(
@@ -88,6 +95,26 @@ CREATE INDEX IF NOT EXISTS draft_attachments_draft ON draft_attachments(draft_id
 # Most providers refuse messages above 25 MB once encoded; base64 adds a third.
 ATTACHMENT_LIMIT = 18 * 1024 * 1024
 DRAFT_ID = re.compile(r"[A-Za-z0-9_-]{1,80}")
+
+
+def address_pairs(header):
+    """Display name and lowercase address from a To/Cc header. Skips junk."""
+    pairs = []
+    for name, email in getaddresses([header or ""]):
+        email = email.strip().lower()
+        if "@" not in email or any(character in email for character in " \t\r\n,;<>"):
+            continue
+        name = name.strip().strip('"')[:200]
+        if name.lower() == email:
+            name = ""
+        pairs.append((name, email[:320]))
+    return pairs
+
+
+def like_contains(text):
+    """A contains-pattern whose % and _ are literal."""
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 def preview_text(body):
@@ -503,6 +530,130 @@ class Store:
         self.execute("INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                      (key, json.dumps(value)))
 
+    def set_progress(self, key, value):
+        """Like set_setting, but clients are not told: a backfill cursor is not a visible change."""
+        with self.lock:
+            self.writer().execute(
+                "INSERT INTO settings VALUES(%s,%s) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, json.dumps(value)))
+
+    def own_addresses(self):
+        return {row["email"].strip().lower() for row in self.rows("SELECT email FROM accounts") if row.get("email")}
+
+    def remember_correspondent(self, email, name, when, sent_to):
+        email = (email or "").strip().lower()
+        if "@" not in email or any(character in email for character in " \t\r\n,;<>"):
+            return
+        name = (name or "").strip().strip('"')[:200]
+        if name.lower() == email:
+            name = ""
+        when = float(when or time.time())
+        self.execute(
+            "INSERT INTO correspondents(email,name,last_sent,last_seen) VALUES(?,?,?,?) "
+            "ON CONFLICT(email) DO UPDATE SET "
+            "last_sent=GREATEST(correspondents.last_sent, excluded.last_sent), "
+            "last_seen=GREATEST(correspondents.last_seen, excluded.last_seen), "
+            "name=CASE WHEN excluded.last_seen>=correspondents.last_seen AND excluded.name<>'' THEN excluded.name "
+            "WHEN correspondents.name='' THEN excluded.name ELSE correspondents.name END",
+            (email[:320], name, when if sent_to else None, when))
+
+    def note_addresses(self, header, when, sent_to=True, own=None):
+        own = self.own_addresses() if own is None else own
+        for name, email in address_pairs(header):
+            if email not in own:
+                self.remember_correspondent(email, name, when, sent_to)
+
+    def note_message_correspondents(self, data, own=None):
+        """Sent mail records who you wrote to. Received mail records who wrote to you."""
+        own = self.own_addresses() if own is None else own
+        when = data.get("date") or time.time()
+        if data.get("sent"):
+            self.note_addresses(data.get("recipients"), when, True, own)
+        else:
+            email = (data.get("sender_email") or "").strip().lower()
+            if email and email not in own:
+                self.remember_correspondent(email, data.get("sender") or "", when, False)
+
+    def backfill_correspondents(self, stop=lambda: False):
+        """One pass over mail already in the archive. New mail is recorded as it arrives."""
+        if self.setting("correspondents_done"):
+            return
+        cursor = self.setting("correspondents_seq") or 0
+        while not stop():
+            batch = self.rows(
+                "SELECT seq,sent,sender,sender_email,recipients,date FROM messages WHERE seq>? ORDER BY seq LIMIT 400",
+                (cursor,))
+            if not batch:
+                self.set_progress("correspondents_done", True)
+                return
+            own = self.own_addresses()
+            with self.transaction():
+                for row in batch:
+                    self.note_message_correspondents(row, own)
+                cursor = batch[-1]["seq"]
+                self.set_progress("correspondents_seq", cursor)
+
+    def _recent_sent_recipients(self, limit=400):
+        found = {}
+        rows = self.rows(
+            "SELECT recipients,date FROM messages WHERE sent=1 AND hidden=0 AND recipients<>'' "
+            "ORDER BY date DESC LIMIT ?", (limit,))
+        for row in rows:
+            when = row["date"] or 0
+            for name, email in address_pairs(row["recipients"]):
+                previous = found.get(email)
+                if previous is None or when >= previous[1]:
+                    found[email] = (name or (previous[0] if previous else ""), when)
+        return found
+
+    def recipient_suggestions(self, query="", limit=8):
+        """Empty query: people you wrote to most recently. Otherwise name or address search."""
+        query = " ".join((query or "").split())[:80]
+        own = self.own_addresses()
+        ranked = {}
+
+        def add(email, name, last_sent, last_seen):
+            if not email or email in own:
+                return
+            current = ranked.get(email)
+            if current and (current["last_sent"] or 0, current["last_seen"] or 0) >= (last_sent or 0, last_seen or 0):
+                if name and not current["name"]:
+                    current["name"] = name
+                return
+            ranked[email] = {"name": name or (current["name"] if current else ""), "email": email,
+                             "last_sent": last_sent, "last_seen": last_seen or last_sent}
+
+        if query:
+            pattern = like_contains(query)
+            for row in self.rows(
+                    "SELECT email,name,last_sent,last_seen FROM correspondents "
+                    "WHERE email ILIKE ? OR name ILIKE ? "
+                    "ORDER BY (last_sent IS NOT NULL) DESC, COALESCE(last_sent, last_seen) DESC LIMIT 24",
+                    (pattern, pattern)):
+                add(row["email"], row["name"], row["last_sent"], row["last_seen"])
+        else:
+            for row in self.rows(
+                    "SELECT email,name,last_sent,last_seen FROM correspondents WHERE last_sent IS NOT NULL "
+                    "ORDER BY last_sent DESC LIMIT 24"):
+                add(row["email"], row["name"], row["last_sent"], row["last_seen"])
+        # Until the archive has been walked, recent sent mail and incoming senders fill the gap.
+        if not self.setting("correspondents_done"):
+            needle = query.casefold()
+            for email, (name, when) in self._recent_sent_recipients().items():
+                if not needle or needle in email.casefold() or needle in (name or "").casefold():
+                    add(email, name, when, when)
+            if needle:
+                for row in self.rows(
+                        "SELECT DISTINCT ON (lower(sender_email)) sender,sender_email,date FROM messages "
+                        "WHERE hidden=0 AND sent=0 AND sender_email<>'' AND (sender_email ILIKE ? OR sender ILIKE ?) "
+                        "ORDER BY lower(sender_email), date DESC LIMIT 24", (like_contains(query), like_contains(query))):
+                    add((row["sender_email"] or "").lower(), row["sender"] or "", None, row["date"])
+        ordered = sorted(ranked.values(), key=lambda row: (row["last_sent"] is not None, row["last_sent"] or 0,
+                                                           row["last_seen"] or 0), reverse=True)
+        if not query:
+            ordered = [row for row in ordered if row["last_sent"] is not None]
+        return [{"name": row["name"] or "", "email": row["email"]} for row in ordered[:limit]]
+
     def setup_allowed(self, token):
         with self.lock:
             return bool(token and self.bootstrap and not self.setting("password")
@@ -663,6 +814,7 @@ class Store:
             columns = list(data)
             self.execute(f"INSERT INTO messages({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
                          tuple(data.values()))
+            self.note_message_correspondents(data)
             self.on_mail_change()
             self.on_new_message(data)
             return data["id"]

@@ -103,6 +103,11 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
   accent edge, accent avatar outline, and a sticky bar of icon actions.
 - The list header stays title + Recap; Ask (question bubble) and the command
   palette (keyboard) live in the topbar as icon buttons.
+- Compose To and Cc fields suggest people under the input: a surface list with
+  an 8 px radius, `--line` border and a quiet shadow. Each row is the name at
+  14 px and the address at 12 px in `--muted`. The active row uses `--soft`
+  and the accent on the name. Arrow keys move, Enter accepts, Escape closes
+  the list without closing the draft.
 - Compose tools sit between body and actions: saved replies select and the
   "Ricordamelo se non risponde" follow-up select, both 13 px on `--surface-alt`.
   Scheduling opens a dialog of preset cards (label + muted date) plus a

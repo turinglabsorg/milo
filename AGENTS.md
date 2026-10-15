@@ -43,6 +43,11 @@ external action. That file is the single source of global agent instructions.
   table clients show (`VISIBLE_WRITE` in `store.py`, signalled after commit);
   the web app refreshes on it and polls only every 30 s while connected.
   Uvicorn uses `timeout_graceful_shutdown` so open streams never block restarts.
+- Compose recipients: `GET /api/recipients?q=` suggests people you wrote to
+  most recently, and searches name or address among correspondents (sent To/Cc
+  plus incoming senders). Rows live in `correspondents`, filled as mail arrives
+  and by `backfill_correspondents` for mail already archived. The web composer
+  and the iOS composer both use it; a finished address does not open the list.
 - Outgoing attachments: `draft_attachments` rows + files in
   `draft-attachments/<draft_id>/` (raw-body `POST /api/drafts/{id}/attachments?name=`,
   18 MB total); added by `build_message`, removed when the draft is sent or

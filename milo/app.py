@@ -156,6 +156,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         def background_migrations():
             # Fresh statistics keep conversation queries on indexes after bulk imports.
             store.execute("ANALYZE")
+            store.backfill_correspondents(stop=stop_worker.is_set)
             features.backfill_todos(stop=stop_worker.is_set)
             for account in store.rows("SELECT id FROM accounts WHERE removing=1"):
                 features.purge_account(account["id"], stop=stop_worker.is_set)
@@ -445,6 +446,10 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         if not sync_lock.locked():
             background.add_task(sync)
         return {"accepted": True}
+
+    @app.get("/api/recipients", dependencies=[Depends(auth)])
+    def recipients(q: str = ""):
+        return {"recipients": store.recipient_suggestions(q)}
 
     @app.get("/api/messages", dependencies=[Depends(auth)])
     def messages(view="inbox", category: str | None = None, account: str | None = None, search=""):

@@ -106,6 +106,17 @@ public final class DemoTransport: Transport, @unchecked Sendable {
                  "sender": "Marco Bianchi", "subject": "Il design è pronto per il tuo feedback", "date": Self.now - 5400],
                 ["id": "t2", "message_id": "m1", "text": "Nessuna risposta: Proposta", "priority": "high", "kind": "followup",
                  "sender": "Giulia Rossi", "subject": "Proposta", "date": Self.now - 600]]])
+        case ("GET", "/api/recipients"):
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "q" }?.value?.lowercased() ?? ""
+            let people: [[String: String]] = [
+                ["name": "Giulia Rossi", "email": "giulia@example.com"],
+                ["name": "Marco Bianchi", "email": "marco@example.com"],
+            ]
+            let matched = query.isEmpty ? people : people.filter {
+                $0["name"]!.lowercased().contains(query) || $0["email"]!.contains(query)
+            }
+            return (200, ["recipients": matched])
         case ("GET", "/api/drafts"):
             lock.lock(); defer { lock.unlock() }
             return (200, ["drafts": Array(drafts.values)])
