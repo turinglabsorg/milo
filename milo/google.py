@@ -318,6 +318,8 @@ class Gmail:
                     hidden=int(bool(labels & HIDDEN_LABELS)))
         if remote.get("internalDate"):
             data["date"] = int(remote["internalDate"]) / 1000
+        if labels & {"CATEGORY_UPDATES", "CATEGORY_SOCIAL"}:
+            data["category"] = "updates"
         return data
 
     def store_message(self, remote, data=None):

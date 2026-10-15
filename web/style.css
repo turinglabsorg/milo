@@ -153,6 +153,19 @@ body{background:var(--surface-alt);color:var(--text)}
 .reading-toolbar{padding:10px 20px;height:50px}.reading-toolbar .separator{margin:0 5px}.mail-content{padding:22px clamp(18px,2vw,32px);max-width:1080px}
 .mail-content h2{font-size:clamp(21px,1.8vw,26px);margin:12px 0 18px}.sender-detail{margin-bottom:16px;gap:10px}.sender-detail .avatar{width:32px;height:32px}
 .ai-summary{padding:10px 12px;margin-bottom:16px;border-radius:8px}.ai-summary p{margin-top:6px;line-height:1.55}
+.action-proposals{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.action-proposals h3{margin:0 0 4px;font-size:12px;font-weight:600;color:var(--muted)}
+.ai-summary .action-proposals ul{list-style:none;margin:0;padding:0;color:var(--text)}
+.action-proposals li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 14px;align-items:center;padding:9px 0;line-height:1.5}
+.action-proposals li+li{border-top:1px solid var(--line)}
+.action-proposals li>span:first-child{overflow-wrap:anywhere}
+.accept-todo,.proposal-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap}
+.accept-todo{min-height:34px;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--purple)}
+.accept-todo:hover{border-color:var(--purple);background:var(--soft)}
+.accept-todo:disabled{opacity:.6;cursor:wait}
+.accept-todo .icon,.proposal-status .icon{width:14px;height:14px}
+.proposal-status{color:var(--muted)}
+@media(max-width:600px){.action-proposals li{grid-template-columns:1fr;gap:6px}.accept-todo,.proposal-status{justify-self:start}.accept-todo{min-height:38px}}
 .thread-messages{margin-bottom:14px}.thread-message{border-radius:9px;margin-bottom:9px}.thread-message summary{padding:12px 14px}.thread-message-body{padding:0 14px 12px}
 .thread-message:not([open]) summary{padding:8px 12px}.mail-body{line-height:1.65;padding-bottom:18px}.reply-actions{padding-top:14px;gap:8px}.reply-actions button{padding:8px 12px}
 .inline-compose-form{padding:14px;margin-top:16px;border-radius:9px}.compose-heading{margin-bottom:12px}.attachments{gap:6px;margin-bottom:16px}

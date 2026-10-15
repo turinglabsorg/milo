@@ -45,6 +45,7 @@ from .models import (
     SetupGrant,
     Signatures,
     Templates,
+    TodoAccept,
     TodoPatch,
 )
 from .push import Push
@@ -490,6 +491,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     @app.get("/api/messages/{message_id}", dependencies=[Depends(auth)])
     def get_message(message_id: str, load_images: bool = False):
         message = message_or_404(message_id, raw=True)
+        message["todos"] = features.message_todos([message_id])[message_id]
         raw = message.pop("raw")
         mail = email.message_from_bytes(raw, policy=policy.default)
         if not message.get("content_version"):
@@ -524,6 +526,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     def get_thread(message_id: str, load_images: bool = False, lazy: bool = False):
         message_or_404(message_id, metadata=True)
         messages = store.conversation(message_id, raw=not lazy, metadata=lazy)
+        actions = features.message_todos([message["id"] for message in messages])
         if lazy and messages:
             source = next((message for message in reversed(messages) if not message["sent"]), messages[-1])
             try:
@@ -531,6 +534,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             except HTTPException:
                 pass
         for message in messages:
+            message["todos"] = actions[message["id"]]
             if lazy:
                 message["body_loaded"] = False
                 continue
@@ -794,6 +798,15 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     @app.get("/api/todos", dependencies=[Depends(auth)])
     def todos():
         return {"todos": features.todos()}
+
+    @app.post("/api/messages/{message_id}/todos", dependencies=[Depends(auth)])
+    def accept_todo(message_id: str, data: TodoAccept):
+        try:
+            return features.accept_todo(message_id, data.text)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @app.patch("/api/todos/{todo_id}", dependencies=[Depends(auth)])
     def patch_todo(todo_id: str, data: TodoPatch):

@@ -212,6 +212,10 @@ public final class APIClient: Sendable {
         try await call("PATCH", "/todos/\(Self.encode(id))", body: ["done": done])
     }
 
+    public func acceptTodo(messageId: String, text: String) async throws -> TodoProposal {
+        try await send(TodoProposal.self, "POST", "/messages/\(Self.encode(messageId))/todos", body: ["text": text])
+    }
+
     public func recap() async throws -> Recap { try await get(Recap.self, "/recap") }
 
     public func recipients(matching query: String) async throws -> [Recipient] {

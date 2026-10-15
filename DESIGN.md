@@ -103,6 +103,12 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
   language (`--soft`, 3 px accent edge) and the bar’s **Fatte** marks them done.
   The check on a single row still completes only that row. The same selection
   lives on iOS: Seleziona, Tutte, Fatte.
+- AI action items stay in the reader under **Da fare proposti** until explicitly
+  accepted. Each row pairs the action text with **Accetta da fare**, a compact
+  surface button with an accent label and 8 px radius. Accepted rows show a
+  quiet check and **Nei da fare**; completed rows show **Fatto**. On narrow
+  screens the control sits below the text. Only accepted actions enter the
+  **Da fare** navigation list and its count.
 - Ask Milo’s reply is only the answer text, in a bubble as tight as the
   question (8 px padding, 14 px, line-height 1.4). Cited mail sits underneath
   as a 12 px muted line, not inside the bubble.

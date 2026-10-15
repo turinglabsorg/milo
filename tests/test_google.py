@@ -27,6 +27,13 @@ def gmail(store):
     return Gmail(store, account_id)
 
 
+@pytest.mark.parametrize("label", ["CATEGORY_UPDATES", "CATEGORY_SOCIAL"])
+def test_gmail_notification_labels_are_classified_without_ai(store, label):
+    client = gmail(store)
+    client.store_message(remote(labels=["INBOX", label]))
+    assert store.messages()[0]["category"] == "updates"
+
+
 def test_authorization_uses_pkce_and_encrypted_one_time_browser_state(store):
     oauth = GoogleOAuth(store, "https://milo.example.com")
     oauth.configure(CLIENT)

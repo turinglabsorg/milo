@@ -141,6 +141,24 @@ public struct Analysis: Codable, Hashable, Sendable {
     public var priority: String?
     public var actionItems: [String]?
     public var category: String?
+
+    public var proposedActions: [String] {
+        let excluded = ["nessuna azione", "nessun'azione", "no action", "non è richiesta alcuna azione", "non serve alcuna azione"]
+        var seen = Set<String>()
+        return (actionItems ?? []).compactMap { item in
+            let text = String(item.trimmingCharacters(in: .whitespacesAndNewlines).prefix(500))
+            guard !text.isEmpty, !excluded.contains(where: { text.lowercased().hasPrefix($0) }),
+                  seen.insert(text).inserted else { return nil }
+            return text
+        }
+    }
+}
+
+public struct TodoProposal: Codable, Hashable, Identifiable, Sendable {
+    public var id: String
+    public var text: String
+    public var accepted: Double?
+    public var done: Double?
 }
 
 /// A message in a thread. Bodies (`body`, `html`, attachments) are present only once downloaded.
@@ -162,6 +180,7 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     public var category: String?
     public var snoozedUntil: Double?
     public var analysis: Analysis?
+    public var todos: [TodoProposal]?
     public var pinned: Flag
     public var contentVersion: String?
     public var toAddresses: [Address]?

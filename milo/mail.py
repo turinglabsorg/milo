@@ -58,6 +58,12 @@ def parse_message(raw, account_id, folder, uidvalidity, uid, flags=b"", sent=Fal
     except (TypeError, ValueError, OverflowError):
         date = time.time()
     category = "newsletters" if mail.get("List-Unsubscribe") or mail.get("List-Id") else "people"
+    automatic = str(mail.get("Auto-Submitted", "no")).strip().lower().split(";", 1)[0]
+    local_part = address.partition("@")[0].lower()
+    service_alert = re.fullmatch(r"(?:notifications?|alerts?|mailer-daemon|postmaster)(?:[+._-].*)?", local_part)
+    no_reply = re.fullmatch(r"(?:no[-_.]?reply|do[-_.]?not[-_.]?reply)(?:[+._-].*)?", local_part)
+    if service_alert or (category == "people" and (automatic not in {"", "no"} or no_reply)):
+        category = "updates"
     references = re.findall(r"<[^>]+>", str(mail.get("References", "")) or str(mail.get("In-Reply-To", "")))
     root = references[0] if references else str(mail.get("Message-ID", ""))
     return {"account_id": account_id, "folder": folder, "uidvalidity": str(uidvalidity), "uid": int(uid),
@@ -127,6 +133,12 @@ class SyncEngine:
         self._guard = threading.Lock()
         self._progress = {}
         self._rate_limited_until = {}
+        with self.store.transaction():
+            if self.store.setting("ai_automatic_boundary") is None:
+                self.reset_automatic_analysis()
+
+    def reset_automatic_analysis(self):
+        self.store.reset_automatic_analysis()
 
     def report(self, account_id, phase, downloaded=None):
         with self._guard:
@@ -191,8 +203,13 @@ class SyncEngine:
 
     def analyze_pending(self, account_id):
         if self.ai and self.store.setting("ai").get("automatic"):
+            boundary = self.store.setting("ai_automatic_boundary")
             for row in self.store.rows("SELECT id FROM messages WHERE account_id=? AND hidden=0 AND analysis IS NULL AND sent=0 "
-                                       "ORDER BY date DESC LIMIT 10", (account_id,)):
+                                       "AND trashed=0 AND category<>'updates' AND date>? AND seq>? ORDER BY date DESC LIMIT 10",
+                                       (account_id, boundary["since"], boundary["after_seq"])):
+                if (not self.store.setting("ai").get("automatic")
+                        or self.store.setting("ai_automatic_boundary") != boundary):
+                    break
                 account = self.store.account(account_id)
                 if not account or not account["enabled"]:
                     break

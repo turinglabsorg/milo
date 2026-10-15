@@ -22,8 +22,8 @@ struct ThreadView: View {
                 Text(Mailbox.subjectCore(mailbox.thread.last?.subject ?? conversation?.subject))
                     .font(.title2.weight(.semibold))
                     .padding(.top, 4)
-                if let analysis = mailbox.thread.last(where: { $0.analysis != nil })?.analysis {
-                    AnalysisCard(analysis: analysis)
+                if let message = mailbox.thread.last(where: { $0.analysis != nil }) {
+                    AnalysisCard(message: message)
                 }
                 if mailbox.thread.isEmpty && mailbox.loadingThread {
                     ProgressView("Carico la conversazione…").frame(maxWidth: .infinity).padding(.top, 40)
@@ -185,16 +185,45 @@ struct ThreadView: View {
 }
 
 struct AnalysisCard: View {
-    var analysis: Analysis
+    var message: Message
+    @Environment(Mailbox.self) private var mailbox
+    @Environment(Notice.self) private var notice
+    @State private var accepting: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Il punto, secondo Milo", systemImage: "sparkles")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color.milo.accent)
-            if let summary = analysis.summary { Text(summary).font(.subheadline) }
-            ForEach(analysis.actionItems ?? [], id: \.self) { item in
-                Label(item, systemImage: "circle").font(.footnote).foregroundStyle(Color.milo.muted)
+            if let summary = message.analysis?.summary { Text(summary).font(.subheadline) }
+            if let items = message.analysis?.proposedActions, !items.isEmpty {
+                Divider().padding(.top, 4)
+                Text("Da fare proposti").font(.caption.weight(.semibold)).foregroundStyle(Color.milo.muted)
+                ForEach(items, id: \.self) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(item).font(.footnote)
+                        let todo = message.todos?.first { $0.text == item }
+                        if todo?.accepted != nil || todo?.done != nil {
+                            Label(todo?.done != nil ? "Fatto" : "Nei da fare", systemImage: "checkmark")
+                                .font(.caption).foregroundStyle(Color.milo.muted)
+                        } else {
+                            Button {
+                                accepting.insert(item)
+                                Task {
+                                    defer { accepting.remove(item) }
+                                    do {
+                                        try await mailbox.acceptAction(messageId: message.id, text: item)
+                                        notice.show("Aggiunto ai da fare.")
+                                    } catch { notice.show((error as? APIError)?.message ?? error.localizedDescription) }
+                                }
+                            } label: { Label("Accetta da fare", systemImage: "plus") }
+                            .font(.caption).buttonStyle(.bordered)
+                            .disabled(accepting.contains(item))
+                            .accessibilityIdentifier("accept-todo")
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
             }
         }
         .padding(12)

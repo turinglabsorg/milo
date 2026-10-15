@@ -148,6 +148,24 @@ final class MailboxTests: XCTestCase {
         XCTAssertTrue(mailbox.todos.isEmpty)
     }
 
+    func testAcceptingAnActionPersistsItsStateInTheThreadCache() async throws {
+        let (mailbox, transport) = make()
+        await mailbox.start()
+        await mailbox.open(try XCTUnwrap(mailbox.conversations.first { $0.id == "m2" }))
+        XCTAssertEqual(mailbox.thread.first?.analysis?.proposedActions, ["Rivedere il design", "Rispondere a Marco"])
+        try await mailbox.acceptAction(messageId: "m2", text: "Rispondere a Marco")
+        let accepted = try XCTUnwrap(mailbox.thread.first?.todos?.first { $0.text == "Rispondere a Marco" })
+        XCTAssertNotNil(accepted.accepted)
+        XCTAssertTrue(transport.requests.contains("POST /api/messages/m2/todos"))
+        let todos = try await mailbox.api.todos()
+        XCTAssertTrue(todos.contains { $0.text == "Rispondere a Marco" })
+        XCTAssertEqual(mailbox.state?.counts.todo, 3)
+        try await mailbox.loadBody("m2")
+        XCTAssertNotNil(mailbox.thread.first?.todos?.first { $0.text == "Rispondere a Marco" }?.accepted)
+        let cached = await mailbox.cache.thread("demo:t-m2")
+        XCTAssertNotNil(cached?.first?.todos?.first { $0.text == "Rispondere a Marco" }?.accepted)
+    }
+
     func testRecipientEditKeepsEarlierAddresses() {
         XCTAssertEqual(RecipientEdit.token("Anna <anna@example.com>, mar"), "mar")
         XCTAssertEqual(RecipientEdit.token("Anna <anna@example.com>, "), "")

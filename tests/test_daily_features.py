@@ -14,6 +14,7 @@ def prepare(app, received, sent):
     account_id = store.accounts()[0]["id"]
     unanswered = store.rows("SELECT id FROM messages WHERE thread_id='other'")[0]["id"]
     features.sync_todos(unanswered, {"priority": "high", "action_items": ["Confermare la riunione"]})
+    store.execute("UPDATE todos SET accepted=? WHERE message_id=?", (time.time(), unanswered))
     store.set_setting("signatures", {account_id: "Sam Taylor"})
     store.set_setting("templates", [{"name": "Grazie", "body": "Grazie mille, ti aggiorno a breve."}])
     features.set_screener(True)

@@ -1,4 +1,5 @@
 """Selecting every to-do marks them done, and Milo's reply bubble stays as short as the question."""
+import time
 
 from playwright.sync_api import expect, sync_playwright
 from test_responsive_inbox import service
@@ -10,6 +11,7 @@ def test_select_all_todos_marks_them_done_and_the_reply_bubble_hugs_the_text(tmp
     def prepare(app, _received, _sent):
         unanswered = app.state.store.rows("SELECT id FROM messages WHERE thread_id='other'")[0]["id"]
         app.state.features.sync_todos(unanswered, {"action_items": ["Chiamare Anna", "Inviare il file"]})
+        app.state.store.execute("UPDATE todos SET accepted=? WHERE message_id=?", (time.time(), unanswered))
         holder["bootstrap"] = app.state.store.bootstrap
 
     with service(tmp_path, prepare, live=True) as (url, _sent), sync_playwright() as playwright:

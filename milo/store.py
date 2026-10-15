@@ -72,9 +72,12 @@ CREATE TABLE IF NOT EXISTS senders(
     updated DOUBLE PRECISION);
 CREATE TABLE IF NOT EXISTS todos(
     seq BIGSERIAL, id TEXT PRIMARY KEY, message_id TEXT NOT NULL, text TEXT NOT NULL, priority TEXT,
-    kind TEXT NOT NULL DEFAULT 'action', created DOUBLE PRECISION, done DOUBLE PRECISION);
+    kind TEXT NOT NULL DEFAULT 'action', created DOUBLE PRECISION, done DOUBLE PRECISION, accepted DOUBLE PRECISION);
+ALTER TABLE todos ADD COLUMN IF NOT EXISTS accepted DOUBLE PRECISION;
 CREATE INDEX IF NOT EXISTS todos_open ON todos(message_id) WHERE done IS NULL;
 CREATE INDEX IF NOT EXISTS todos_message ON todos(message_id);
+CREATE INDEX IF NOT EXISTS todos_accepted_open ON todos(message_id)
+    WHERE done IS NULL AND (kind<>'action' OR accepted IS NOT NULL);
 CREATE TABLE IF NOT EXISTS followups(
     id TEXT PRIMARY KEY, account_id TEXT NOT NULL, rfc_message_id TEXT, thread_id TEXT, subject TEXT,
     recipients TEXT, created DOUBLE PRECISION, due DOUBLE PRECISION, resolved DOUBLE PRECISION);
@@ -527,8 +530,20 @@ class Store:
         return json.loads(rows[0]["value"]) if rows else None
 
     def set_setting(self, key, value):
+        if key == "ai":
+            with self.transaction():
+                if value.get("automatic") and not (self.setting("ai") or {}).get("automatic"):
+                    self.reset_automatic_analysis()
+                self.set_progress(key, value)
+                self._changed("UPDATE settings")
+            return
         self.execute("INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                      (key, json.dumps(value)))
+
+    def reset_automatic_analysis(self):
+        sequence = self.rows(
+            "SELECT CASE WHEN is_called THEN last_value ELSE 0 END AS seq FROM messages_seq_seq")[0]["seq"]
+        self.set_progress("ai_automatic_boundary", {"since": time.time(), "after_seq": sequence})
 
     def set_progress(self, key, value):
         """Like set_setting, but clients are not told: a backfill cursor is not a visible change."""
@@ -882,7 +897,7 @@ class Store:
             return bool(messages)
 
     def conversations(self, view="inbox", category=None, account=None, search="", limit=100,
-                      before=None, chronological=False, thread=None):
+                      before=None, chronological=False, thread=None, exclude_category=None):
         # Fetch only list metadata. Bodies and MIME blobs belong to the reader.
         clauses, params = ["hidden=0", "trashed=0"], []
         views = {"inbox": "archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?)",
@@ -895,6 +910,9 @@ class Store:
         if category:
             clauses.append("category=?")
             params.append(category)
+        if exclude_category:
+            clauses.append("category<>?")
+            params.append(exclude_category)
         if account:
             clauses.append("account_id=?")
             params.append(account)

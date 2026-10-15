@@ -11,10 +11,8 @@ import httpx
 
 TODO_WINDOW = 30 * 86400
 NO_ACTION = ("nessuna azione", "nessun'azione", "no action", "non è richiesta alcuna azione", "non serve alcuna azione")
-# An action item stays open while its mail is in the inbox and the owner has not replied since.
-OPEN_TODO = ("t.done IS NULL AND m.trashed=0 AND m.hidden=0 AND (t.kind<>'action' OR (m.archived=0 AND NOT EXISTS ("
-             "SELECT 1 FROM messages r WHERE r.account_id=m.account_id AND r.thread_id=m.thread_id AND r.sent=1 "
-             "AND r.date>m.date)))")
+OPEN_TODO = ("t.done IS NULL AND m.trashed=0 AND m.hidden=0 "
+             "AND (t.kind<>'action' OR t.accepted IS NOT NULL)")
 PRIORITY = {"high": 0, "normal": 1, "low": 2}
 
 
@@ -98,17 +96,49 @@ class Features:
     # To-do list from AI action items
 
     def sync_todos(self, message_id, analysis):
-        items = [item.strip() for item in (analysis or {}).get("action_items", []) if isinstance(item, str) and item.strip()
-                 and not item.strip().casefold().startswith(NO_ACTION)]
+        items = self.action_items(analysis)
         priority = (analysis or {}).get("priority", "normal")
         with self.store.transaction():
-            done = {row["text"] for row in self.store.rows(
-                "SELECT text FROM todos WHERE message_id=? AND kind='action' AND done IS NOT NULL", (message_id,))}
-            self.store.execute("DELETE FROM todos WHERE message_id=? AND kind='action' AND done IS NULL", (message_id,))
+            existing = self.store.rows(
+                "SELECT id,text,accepted,done FROM todos WHERE message_id=? AND kind='action'", (message_id,))
+            for row in existing:
+                if row["accepted"] is None and row["done"] is None and row["text"] not in items:
+                    self.store.execute("DELETE FROM todos WHERE id=?", (row["id"],))
+            known = {row["text"] for row in existing}
             for item in items:
-                if item not in done:
+                if item not in known:
                     self.store.execute("INSERT INTO todos(id,message_id,text,priority,kind,created,done) VALUES(?,?,?,?,'action',?,NULL)",
-                                       (uuid.uuid4().hex, message_id, item[:500], priority, time.time()))
+                                       (uuid.uuid4().hex, message_id, item, priority, time.time()))
+
+    @staticmethod
+    def action_items(analysis):
+        return list(dict.fromkeys(item.strip()[:500] for item in (analysis or {}).get("action_items", [])
+                                  if isinstance(item, str) and item.strip()
+                                  and not item.strip().casefold().startswith(NO_ACTION)))
+
+    def message_todos(self, message_ids):
+        result = {message_id: [] for message_id in message_ids}
+        if message_ids:
+            placeholders = ",".join("?" for _ in message_ids)
+            for row in self.store.rows(
+                    "SELECT id,message_id,text,accepted,done FROM todos WHERE kind='action' "
+                    f"AND message_id IN ({placeholders}) ORDER BY seq", tuple(message_ids)):
+                result[row["message_id"]].append(row)
+        return result
+
+    def accept_todo(self, message_id, text):
+        with self.store.transaction():
+            message = self.store.message(message_id, metadata=True)
+            if not message or message["hidden"] or message["trashed"]:
+                raise LookupError("Email non trovata")
+            text = text.strip()
+            if message["sent"] or text not in self.action_items(message["analysis"]):
+                raise ValueError("Scegli una delle attività proposte da Milo per questa email")
+            self.sync_todos(message_id, message["analysis"])
+            row = self.store.rows("SELECT id FROM todos WHERE message_id=? AND kind='action' AND text=? ORDER BY seq LIMIT 1",
+                                  (message_id, text))[0]
+            self.store.execute("UPDATE todos SET accepted=COALESCE(accepted,?) WHERE id=?", (time.time(), row["id"]))
+            return self.store.rows("SELECT id,message_id,text,accepted,done FROM todos WHERE id=?", (row["id"],))[0]
 
     def backfill_todos(self, stop=lambda: False):
         if self.store.setting("todos_backfilled"):
@@ -137,7 +167,7 @@ class Features:
         return self.store.rows(f"SELECT COUNT(*) AS count FROM todos t JOIN messages m ON m.id=t.message_id WHERE {OPEN_TODO}")[0]["count"]
 
     def set_todo(self, todo_id, done):
-        return bool(self.store.execute("UPDATE todos SET done=? WHERE id=?",
+        return bool(self.store.execute("UPDATE todos SET done=? WHERE id=? AND (kind<>'action' OR accepted IS NOT NULL)",
                                        (time.time() if done else None, todo_id)).rowcount)
 
     # Senders: VIP, screener, block, newsletters
@@ -293,7 +323,8 @@ class Features:
                         "WHERE message_id IS NOT NULL AND message_id!='' AND (analysis IS NOT NULL OR pinned=1 "
                         "OR snoozed_until IS NOT NULL)")]
         todos = [{"account": email_of(row["account_id"]), "message_id": row["rfc"], "text": row["text"],
-                  "priority": row["priority"], "kind": row["kind"], "created": row["created"], "done": row["done"]}
+                  "priority": row["priority"], "kind": row["kind"], "created": row["created"], "done": row["done"],
+                  "accepted": row["accepted"]}
                  for row in self.store.rows(
                      "SELECT t.*,m.account_id,m.message_id AS rfc FROM todos t JOIN messages m ON m.id=t.message_id")]
         drafts = []
@@ -355,9 +386,10 @@ class Features:
         for entry in data.get("todos") or []:
             message_id = local(entry)
             if message_id and not self.store.rows("SELECT 1 FROM todos WHERE message_id=? AND text=?", (message_id, entry["text"])):
-                self.store.execute("INSERT INTO todos(id,message_id,text,priority,kind,created,done) VALUES(?,?,?,?,?,?,?)",
+                self.store.execute("INSERT INTO todos(id,message_id,text,priority,kind,created,done,accepted) VALUES(?,?,?,?,?,?,?,?)",
                                    (uuid.uuid4().hex, message_id, entry["text"], entry.get("priority"),
-                                    entry.get("kind") or "action", entry.get("created") or time.time(), entry.get("done")))
+                                    entry.get("kind") or "action", entry.get("created") or time.time(), entry.get("done"),
+                                    entry.get("accepted")))
                 counts["todos"] += 1
         self._screening = (0, [])
         return counts

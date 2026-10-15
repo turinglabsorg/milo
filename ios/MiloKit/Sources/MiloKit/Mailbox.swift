@@ -216,6 +216,7 @@ public final class Mailbox {
                 merged.read = message.read
                 merged.starred = message.starred
                 merged.analysis = message.analysis ?? body.analysis
+                merged.todos = message.todos ?? body.todos
                 merged.toAddresses = message.toAddresses ?? body.toAddresses
                 result.append(merged)
             } else {
@@ -238,7 +239,11 @@ public final class Mailbox {
     }
 
     private func replace(_ message: Message) {
-        if let index = thread.firstIndex(where: { $0.id == message.id }) { thread[index] = message }
+        if let index = thread.firstIndex(where: { $0.id == message.id }) {
+            var merged = message
+            merged.todos = thread[index].todos ?? message.todos
+            thread[index] = merged
+        }
     }
 
     /// Open a thread from a message id (to-dos, recap priorities), using the catalogue row when known.
@@ -415,6 +420,15 @@ public final class Mailbox {
     }
 
     // MARK: To-dos, senders, AI
+
+    public func acceptAction(messageId: String, text: String) async throws {
+        let accepted = try await api.acceptTodo(messageId: messageId, text: text)
+        if let index = thread.firstIndex(where: { $0.id == messageId }) {
+            thread[index].todos = (thread[index].todos ?? []).filter { $0.text != text } + [accepted]
+            if let selectedKey { try? await cache.storeThread(selectedKey, thread) }
+        }
+        await refresh()
+    }
 
     public func complete(_ todo: Todo) async {
         await complete([todo.id])

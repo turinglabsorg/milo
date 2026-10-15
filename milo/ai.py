@@ -105,13 +105,14 @@ class AI:
         return [{"message_id": thread["id"], "subject": thread["subject"],
                  "messages": [{key: message[key] for key in
                                ("id", "sender", "sender_email", "recipients", "date", "sent", "body")}
-                              for message in self.store.conversation(thread["id"], limit=3, body_limit=1500)]}
-                for thread in self.store.conversations(limit=30)]
+                              for message in self.store.conversation(thread["id"], limit=3, body_limit=1500)
+                              if message["category"] != "updates"]}
+                for thread in self.store.conversations(limit=30, exclude_category="updates")]
 
     def recap(self, source=None):
         source = self.recap_source() if source is None else source
         if not source:
-            return {"overview": "La tua inbox è vuota.", "priorities": [], "message_ids": []}
+            return {"overview": "Non ci sono email da riepilogare.", "priorities": [], "message_ids": []}
         schema = {"type": "object", "properties": {"overview": {"type": "string"},
                   "priorities": {"type": "array", "items": {"type": "object", "properties": {
                       "message_id": {"type": "string"}, "action": {"type": "string"}},

@@ -121,20 +121,36 @@ def test_a_reply_resolves_the_follow_up(logged_in, account_data, monkeypatch):
     assert not logged_in.get("/api/todos").json()["todos"]
 
 
-def test_analysis_action_items_become_todos_and_can_be_completed(logged_in, account_data):
+def test_analysis_action_items_need_acceptance_before_entering_todos(logged_in, account_data):
     store, account_id = setup_account(logged_in, account_data)
     message_id = add(store, account_id, 1)
     features = logged_in.app.state.features
-    features.sync_todos(message_id, {"priority": "high", "action_items": ["Inviare il preventivo", "Fissare call"]})
+
+    def analyze(items):
+        analysis = {"summary": "Reply needed", "priority": "high", "action_items": items}
+        store.execute("UPDATE messages SET analysis=? WHERE id=?", (json.dumps(analysis), message_id))
+        features.sync_todos(message_id, analysis)
+
+    analyze(["Inviare il preventivo", "Fissare call"])
+    assert logged_in.get("/api/todos").json()["todos"] == []
+    assert logged_in.get("/api/state").json()["counts"]["todo"] == 0
+    proposed = logged_in.get(f"/api/messages/{message_id}/thread?lazy=true").json()["messages"][0]["todos"]
+    assert len(proposed) == 2 and all(item["accepted"] is None for item in proposed)
+    accepted = logged_in.post(f"/api/messages/{message_id}/todos", json={"text": "Inviare il preventivo"})
+    assert accepted.status_code == 200
+    assert logged_in.post(f"/api/messages/{message_id}/todos", json={"text": "Inviare il preventivo"}).json()["id"] == accepted.json()["id"]
     todos = logged_in.get("/api/todos").json()["todos"]
-    assert [todo["text"] for todo in todos] == ["Inviare il preventivo", "Fissare call"]
+    assert [todo["text"] for todo in todos] == ["Inviare il preventivo"]
+    assert logged_in.get("/api/state").json()["counts"]["todo"] == 1
     assert logged_in.patch(f"/api/todos/{todos[0]['id']}", json={"done": True}).status_code == 200
-    features.sync_todos(message_id, {"priority": "high", "action_items": ["Inviare il preventivo", "Rispondere"]})
-    assert [todo["text"] for todo in logged_in.get("/api/todos").json()["todos"]] == ["Rispondere"]
-    assert logged_in.patch("/api/todos/missing", json={"done": True}).status_code == 404
-    features.sync_todos(message_id, {"priority": "low", "action_items": ["Nessuna azione richiesta", "Rispondere"]})
+    analyze(["Inviare il preventivo", "Rispondere"])
+    assert logged_in.get("/api/todos").json()["todos"] == []
+    assert logged_in.post(f"/api/messages/{message_id}/todos", json={"text": "Rispondere"}).status_code == 200
+    analyze(["Nessuna azione richiesta", "Rispondere"])
     assert [todo["text"] for todo in logged_in.get("/api/todos").json()["todos"]] == ["Rispondere"]
     store.execute("UPDATE messages SET archived=1 WHERE id=?", (message_id,))
+    assert [todo["text"] for todo in logged_in.get("/api/todos").json()["todos"]] == ["Rispondere"]
+    store.execute("UPDATE messages SET trashed=1 WHERE id=?", (message_id,))
     assert logged_in.get("/api/todos").json()["todos"] == [] and logged_in.get("/api/state").json()["counts"]["todo"] == 0
 
 
@@ -266,8 +282,9 @@ def test_configuration_backup_restores_into_a_fresh_archive(logged_in, account_d
     store, account_id = setup_account(logged_in, account_data)
     message_id = add(store, account_id, 1)
     store.execute("UPDATE messages SET analysis=?,category='updates',pinned=1 WHERE id=?",
-                  (json.dumps({"summary": "S", "action_items": []}), message_id))
+                  (json.dumps({"summary": "S", "action_items": ["Chiamare"]}), message_id))
     logged_in.app.state.features.sync_todos(message_id, {"priority": "normal", "action_items": ["Chiamare"]})
+    assert logged_in.post(f"/api/messages/{message_id}/todos", json={"text": "Chiamare"}).status_code == 200
     logged_in.put("/api/settings/templates", json={"templates": [{"name": "Ok", "body": "Va bene"}]})
     logged_in.patch("/api/senders/boss@example.com", json={"vip": True})
     save_draft(logged_in, account_id)
@@ -285,6 +302,7 @@ def test_configuration_backup_restores_into_a_fresh_archive(logged_in, account_d
         assert counts["messages"] == 1 and counts["todos"] == 1 and counts["drafts"] == 1
         restored = other.message(restored_message)
         assert restored["category"] == "updates" and restored["pinned"] and restored["analysis"]["summary"] == "S"
+        assert fresh.get("/api/todos").json()["todos"][0]["text"] == "Chiamare"
         state = fresh.get("/api/state").json()
         assert state["templates"] == [{"name": "Ok", "body": "Va bene"}] and state["vips"] == ["boss@example.com"]
         assert fresh.post("/api/backup/restore", content=b'{"format":"other"}').status_code == 422

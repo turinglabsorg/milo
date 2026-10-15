@@ -8,8 +8,14 @@ public final class DemoTransport: Transport, @unchecked Sendable {
     private let lock = NSLock()
     private var drafts: [String: [String: Any]] = [:]
     private var scheduled: [String: Double] = [:]
+    private var acceptedActions: [String: [[String: Any]]] = [:]
     public private(set) var requests: [String] = []
     private var removed: Set<String> = []
+
+    private var approvedActions: [[String: Any]] {
+        lock.lock(); defer { lock.unlock() }
+        return acceptedActions.values.flatMap { $0 }
+    }
 
     /// Simulate a conversation deleted on another device.
     public func remove(_ id: String) {
@@ -75,6 +81,7 @@ public final class DemoTransport: Transport, @unchecked Sendable {
         if row["id"] as? String == "m2" {
             message["analysis"] = ["summary": "Marco chiede un feedback sul primo design entro giovedì.",
                                    "priority": "high", "action_items": ["Rivedere il design", "Rispondere a Marco"]]
+            message["todos"] = [["id": "t1", "text": "Rivedere il design", "accepted": now]]
         }
         return message
     }
@@ -87,7 +94,7 @@ public final class DemoTransport: Transport, @unchecked Sendable {
         case ("GET", "/api/status"):
             return (200, ["service": "milo", "authenticated": true, "access": "tailscale", "demo": true])
         case ("GET", "/api/state"):
-            return (200, ["accounts": [Self.account], "counts": ["inbox": 5, "unread": 2, "starred": 1, "todo": 2],
+            return (200, ["accounts": [Self.account], "counts": ["inbox": 5, "unread": 2, "starred": 1, "todo": 2 + approvedActions.count],
                           "identity": ["name": "Sam Taylor"], "signatures": ["demo": "Sam Taylor"],
                           "templates": [["name": "Grazie", "body": "Grazie mille, ti aggiorno a breve."]],
                           "vips": ["marco@example.com"]])
@@ -101,11 +108,12 @@ public final class DemoTransport: Transport, @unchecked Sendable {
             }
             return (200, ["message": row])
         case ("GET", "/api/todos"):
-            return (200, ["todos": [
+            let todos: [[String: Any]] = [
                 ["id": "t1", "message_id": "m2", "text": "Rivedere il design", "priority": "high", "kind": "action",
                  "sender": "Marco Bianchi", "subject": "Il design è pronto per il tuo feedback", "date": Self.now - 5400],
                 ["id": "t2", "message_id": "m1", "text": "Nessuna risposta: Proposta", "priority": "high", "kind": "followup",
-                 "sender": "Giulia Rossi", "subject": "Proposta", "date": Self.now - 600]]])
+                 "sender": "Giulia Rossi", "subject": "Proposta", "date": Self.now - 600]]
+            return (200, ["todos": todos + approvedActions])
         case ("GET", "/api/recipients"):
             let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
                 .queryItems?.first { $0.name == "q" }?.value?.lowercased() ?? ""
@@ -136,14 +144,27 @@ public final class DemoTransport: Transport, @unchecked Sendable {
         if parts.count >= 3, parts[1] == "messages" {
             let id = parts[2]
             guard let row = Self.rows.first(where: { $0["id"] as? String == id }) else { return (404, ["detail": "Email non trovata"]) }
+            if parts.count == 4, parts[3] == "todos", method == "POST" {
+                let body = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: String] ?? [:]
+                let text = body["text"] ?? ""
+                lock.lock(); defer { lock.unlock() }
+                if let existing = acceptedActions[id]?.first(where: { $0["text"] as? String == text }) { return (200, existing) }
+                let todo: [String: Any] = ["id": UUID().uuidString, "message_id": id, "text": text,
+                                         "accepted": Self.now, "kind": "action"]
+                acceptedActions[id, default: []].append(todo)
+                return (200, todo)
+            }
+            var message = Self.message(row, body: parts.count == 3)
+            lock.lock(); let accepted = acceptedActions[id] ?? []; lock.unlock()
+            message["todos"] = (message["todos"] as? [[String: Any]] ?? []) + accepted
             if parts.count == 4, parts[3] == "thread" {
-                if method == "GET" { return (200, ["messages": [Self.message(row, body: false)], "sync": [String: Any]()]) }
+                if method == "GET" { return (200, ["messages": [message], "sync": [String: Any]()]) }
                 return (200, ["ok": true])
             }
             if parts.count == 4, parts[3] == "suggestions" {
                 return (200, ["replies": ["Perfetto, ci vediamo lunedì.", "Mi serve un giorno in più.", "Ne parliamo a voce?"]])
             }
-            return (200, Self.message(row, body: true))
+            return (200, message)
         }
         if parts.count == 4, parts[1] == "drafts", parts[3] == "schedule" {
             lock.lock(); defer { lock.unlock() }
