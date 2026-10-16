@@ -42,6 +42,7 @@ public struct Conversation: Codable, Hashable, Identifiable, Sendable {
     public var hasSent: Flag?
     public var receivedCount: Int?
     public var unreadCount: Int?
+    public var inboxUnreadCount: Int?
     public var pinned: Flag
     public var messageCount: Int?
     public var analyzedCount: Int?
@@ -337,7 +338,7 @@ public struct Answer: Codable, Sendable {
 }
 
 public enum MailView: String, CaseIterable, Codable, Sendable, Identifiable {
-    case inbox, todo, starred, drafts, sent, snoozed, archive
+    case inbox, unread, todo, starred, drafts, sent, snoozed, archive
     public var id: String { rawValue }
 }
 

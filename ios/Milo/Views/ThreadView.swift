@@ -1,5 +1,6 @@
 import MiloKit
 import SwiftUI
+import UIKit
 import WebKit
 
 struct ThreadView: View {
@@ -12,6 +13,7 @@ struct ThreadView: View {
     @State private var expanded: Set<String> = []
     @State private var replies: [String]?
     @State private var loadingReplies = false
+    @State private var copiedCode: String?
 
     private var conversation: Conversation? { mailbox.conversation(key) }
     private var peer: Message? { mailbox.thread.last { !$0.sent.value } }
@@ -22,6 +24,19 @@ struct ThreadView: View {
                 Text(Mailbox.subjectCore(mailbox.thread.last?.subject ?? conversation?.subject))
                     .font(.title2.weight(.semibold))
                     .padding(.top, 4)
+                if let copiedCode {
+                    HStack(spacing: 8) {
+                        Image(systemName: "shield")
+                        Text("Codice di conferma").font(.subheadline)
+                        Text(copiedCode).font(.subheadline.weight(.bold)).monospacedDigit()
+                        Spacer()
+                        Button("Copia") { UIPasteboard.general.string = copiedCode }
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .padding(10)
+                    .background(Color.milo.soft, in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityElement(children: .combine)
+                }
                 if let message = mailbox.thread.last(where: { $0.analysis != nil }) {
                     AnalysisCard(message: message)
                 }
@@ -53,6 +68,13 @@ struct ThreadView: View {
         .toolbar { toolbar }
         .task(id: key) {
             if let conversation { await mailbox.open(conversation) }
+        }
+        .onChange(of: key) { _, _ in copiedCode = nil }
+        .onChange(of: mailbox.thread) { _, thread in
+            guard copiedCode == nil, let code = ConfirmationCode.detect(in: thread) else { return }
+            copiedCode = code
+            UIPasteboard.general.string = code
+            notice.show("Codice di conferma \(code) copiato.")
         }
     }
 

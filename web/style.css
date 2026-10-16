@@ -100,6 +100,10 @@ body{background:var(--surface-alt);color:var(--text)}
 .sync-status .icon{width:15px;height:15px}.sync-status.working{color:var(--purple)}
 .sync-status.working .icon{animation:spin 1.5s linear infinite}
 .download-status{display:flex;gap:9px;align-items:center;color:var(--purple);font-size:13px;padding:12px 0 22px}
+.confirmation-code{display:flex;gap:9px;align-items:center;background:#eaf2ff;border-bottom:1px solid #cbdfff;color:#1d4ed8;font-size:12px;padding:10px 30px}
+.confirmation-code .icon{width:15px}
+.confirmation-code strong{font-size:14px;letter-spacing:1.5px}
+.confirmation-code button{margin-left:auto;font-size:11px;font-weight:600;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;background:#fff}
 .download-status .icon.spinner{animation:spin 1.5s linear infinite}
 .thread-message{border:1px solid var(--line);border-radius:12px;margin-bottom:14px;overflow:hidden;background:var(--surface)}
 .thread-message summary{cursor:pointer;list-style:none;padding:18px}.thread-message summary::-webkit-details-marker{display:none}

@@ -65,6 +65,21 @@ final class MailboxTests: XCTestCase {
         XCTAssertEqual(mailbox.conversations.map(\.id), ["m2"])
     }
 
+    func testUnreadViewListsOnlyUnreadInboxConversations() async throws {
+        let (mailbox, _) = make()
+        await mailbox.start()
+        mailbox.view = .unread
+        mailbox.applyFilter()
+        XCTAssertEqual(mailbox.conversations.map(\.id), ["m1", "m2"])
+    }
+
+    func testConfirmationCodeDetection() {
+        XCTAssertEqual(ConfirmationCode.detect(in: "Il tuo codice di conferma è 482916. Non condividerlo."), "482916")
+        XCTAssertEqual(ConfirmationCode.detect(in: "Your verification code is 731 204, valid for 10 minutes."), "731204")
+        XCTAssertNil(ConfirmationCode.detect(in: "Parliamone domani, il pacco arriva nel 2026."))
+        XCTAssertNil(ConfirmationCode.detect(in: "Totale ordine 482916 euro, grazie."))
+    }
+
     func testOpeningDownloadsTheBodyOnceAndMarksRead() async throws {
         let (mailbox, transport) = make()
         await mailbox.start()

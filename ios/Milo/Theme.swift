@@ -66,6 +66,7 @@ extension MailView {
     var title: String {
         switch self {
         case .inbox: "Smart inbox"
+        case .unread: "Da leggere"
         case .todo: "Da fare"
         case .starred: "Preferiti"
         case .drafts: "Bozze"
@@ -78,6 +79,7 @@ extension MailView {
     var symbol: String {
         switch self {
         case .inbox: "tray"
+        case .unread: "envelope.badge"
         case .todo: "checklist"
         case .starred: "star"
         case .drafts: "square.and.pencil"

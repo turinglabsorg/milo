@@ -302,6 +302,11 @@ function actionProposals(message){
     return `<li><span>${esc(item)}</span>${accepted||done?`<span class="proposal-status">${icon('check')}${done?'Fatto':'Nei da fare'}</span>`:`<button class="accept-todo" data-accept-todo="${esc(message.id)}" data-todo-text="${esc(item)}">${icon('plus')}Accetta da fare</button>`}</li>`;
   }).join('')}</ul></div>`;
 }
+function confirmationChip(m){
+  const found=S.confirmation;
+  if(!found||found.key!==threadKey(m))return '';
+  return `<div class="confirmation-code">${icon('shield')}Codice di conferma <strong>${esc(found.code)}</strong><button data-copy-code="${esc(found.code)}">Copia</button></div>`;
+}
 function renderReading() {
   const panel=$('#reading-panel');if(!panel)return;
   const editor=$('#inline-composer #compose-form'),active=document.activeElement;
@@ -316,7 +321,7 @@ function renderReading() {
   const downloading=S.loadingMessage||S.threadSync.phase==='downloading';
   const peer=S.thread.findLast(message=>!message.sent)||m,peerEmail=(peer.sender_email||'').toLowerCase(),vip=(S.state.vips||[]).includes(peerEmail);
   const suggestions=S.suggestions.get(peer.id);
-  morphChildren(panel,`<div class="reading-toolbar"><button class="icon-button back-button" data-action="back" aria-label="Torna alla lista">${icon('back')}</button><button class="icon-button ${m.pinned?'is-active':''}" data-action="pin" aria-label="${m.pinned?'Rimuovi pin':'Fissa in alto'}" title="${m.pinned?'Rimuovi pin':'Fissa in alto'}">${icon('pin')}</button><button class="icon-button" data-action="archive" aria-label="${m.archived?'Sposta in inbox':'Archivia'}" title="Archivia">${icon('archive')}</button><button class="icon-button" data-action="trash" aria-label="Elimina conversazione" title="Sposta nel cestino (Backspace / Canc)" aria-keyshortcuts="Backspace Delete">${icon('trash')}</button><button class="icon-button" data-action="snooze" aria-label="Posticipa" title="Posticipa">${icon('clock')}</button><button class="icon-button" data-action="read" aria-label="${m.read?'Segna da leggere':'Segna come letta'}">${icon('mail')}</button><button class="icon-button ${m.starred?'is-active':''}" data-action="star" aria-label="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'}" title="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'} (P)" aria-keyshortcuts="P">${icon('star')}</button>${peerEmail&&!peer.sent?`<span class="separator"></span><button class="icon-button ${vip?'is-active':''}" data-action="vip" data-sender="${esc(peerEmail)}" aria-label="${vip?'Rimuovi il mittente dai VIP':'Segna il mittente come VIP'}" title="${vip?'Rimuovi dai VIP':'Mittente VIP: notifiche sempre'}">${icon('crown')}</button><button class="icon-button" data-action="block-sender" data-sender="${esc(peerEmail)}" aria-label="Blocca il mittente" title="Blocca il mittente">${icon('ban')}</button>`:''}<div class="right"><span class="dot" style="background:${accountColor(m.account_id)}"></span>${esc(S.state.accounts.find(a=>a.id===m.account_id)?.name||'Account')}</div></div><article class="mail-content"><select class="category-select" id="message-category" aria-label="Categoria della email">${Object.entries(categoryNames).map(([key,name])=>`<option value="${key}" ${key===m.category?'selected':''}>${name}</option>`).join('')}</select>${peer.unsubscribe?`<button class="unsubscribe-button" data-action="unsubscribe" data-message-id="${esc(peer.id)}">${icon('ban')}Disiscriviti</button>`:''}<h2>${esc(subjectCore(m.subject))}</h2>${downloading?`<div class="download-status" role="status">${icon('refresh','spinner')}Scarico la conversazione e le tue risposte…</div>`:''}${S.threadSync.error?`<div class="error-banner">${esc(S.threadSync.error)}</div>`:''}${S.loadingMessage?skeleton(7,'reader','Carico il messaggio…'):`<section class="ai-summary"><div class="ai-summary-title">${icon('sparkle')}${analysis?'Il punto, secondo Milo':'Milo AI'}<button data-action="analyze">${analysis?'Rianalizza':'Analizza'}${icon('arrow')}</button></div><div id="analysis-content">${S.analyzing?skeleton(3,'block','Analisi in corso…'):`<p>${analysis?esc(analysis.summary):'Sintesi, cose da fare e priorità della conversazione.'}</p>${actionProposals(analyzed)}`}</div></section><div class="thread-messages">${messages.map((item,index)=>`<details class="thread-message ${item.sent?'sent-message':''}" data-thread-message="${esc(item.id)}" ${index===messages.length-1||open.has(item.id)?'open':''}><summary><span class="sender-detail">${avatar(item)}<span><strong>${item.sent?'Tu':esc(item.sender)}</strong><span class="address">${esc(item.sender_email)}</span><small>${item.sent?'Risposta inviata':esc(item.preview.slice(0,90))}</small></span><time>${dateLabel(item.date,true)}</time></span></summary><div class="thread-message-body" data-body-for="${esc(item.id)}">${index===messages.length-1||open.has(item.id)?bodyMarkup(item):''}</div></details>`).join('')}</div><div class="reply-actions"><button data-action="reply">${icon('reply')}Rispondi</button><button data-action="reply-all">${icon('reply')}Rispondi a tutti</button><button data-action="forward">${icon('forward')}Inoltra</button><button data-action="ai-reply">${icon('sparkle')}Aiutami a rispondere</button></div>${peer.sent?'':`<div class="quick-replies">${S.suggesting===peer.id?skeleton(1,'block','Milo prepara le risposte…'):suggestions?suggestions.map((reply,index)=>`<button class="quick-reply" data-quick-reply="${index}">${esc(reply)}</button>`).join(''):`<button class="quick-reply ghost" data-action="suggest">${icon('sparkle')}Suggerisci risposte rapide</button>`}</div>`}<div id="inline-composer"></div>`}</article>`);
+  morphChildren(panel,`<div class="reading-toolbar"><button class="icon-button back-button" data-action="back" aria-label="Torna alla lista">${icon('back')}</button><button class="icon-button ${m.pinned?'is-active':''}" data-action="pin" aria-label="${m.pinned?'Rimuovi pin':'Fissa in alto'}" title="${m.pinned?'Rimuovi pin':'Fissa in alto'}">${icon('pin')}</button><button class="icon-button" data-action="archive" aria-label="${m.archived?'Sposta in inbox':'Archivia'}" title="Archivia">${icon('archive')}</button><button class="icon-button" data-action="trash" aria-label="Elimina conversazione" title="Sposta nel cestino (Backspace / Canc)" aria-keyshortcuts="Backspace Delete">${icon('trash')}</button><button class="icon-button" data-action="snooze" aria-label="Posticipa" title="Posticipa">${icon('clock')}</button><button class="icon-button" data-action="read" aria-label="${m.read?'Segna da leggere':'Segna come letta'}">${icon('mail')}</button><button class="icon-button ${m.starred?'is-active':''}" data-action="star" aria-label="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'}" title="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'} (P)" aria-keyshortcuts="P">${icon('star')}</button>${peerEmail&&!peer.sent?`<span class="separator"></span><button class="icon-button ${vip?'is-active':''}" data-action="vip" data-sender="${esc(peerEmail)}" aria-label="${vip?'Rimuovi il mittente dai VIP':'Segna il mittente come VIP'}" title="${vip?'Rimuovi dai VIP':'Mittente VIP: notifiche sempre'}">${icon('crown')}</button><button class="icon-button" data-action="block-sender" data-sender="${esc(peerEmail)}" aria-label="Blocca il mittente" title="Blocca il mittente">${icon('ban')}</button>`:''}<div class="right"><span class="dot" style="background:${accountColor(m.account_id)}"></span>${esc(S.state.accounts.find(a=>a.id===m.account_id)?.name||'Account')}</div></div>${confirmationChip(m)}<article class="mail-content"><select class="category-select" id="message-category" aria-label="Categoria della email">${Object.entries(categoryNames).map(([key,name])=>`<option value="${key}" ${key===m.category?'selected':''}>${name}</option>`).join('')}</select>${peer.unsubscribe?`<button class="unsubscribe-button" data-action="unsubscribe" data-message-id="${esc(peer.id)}">${icon('ban')}Disiscriviti</button>`:''}<h2>${esc(subjectCore(m.subject))}</h2>${downloading?`<div class="download-status" role="status">${icon('refresh','spinner')}Scarico la conversazione e le tue risposte…</div>`:''}${S.threadSync.error?`<div class="error-banner">${esc(S.threadSync.error)}</div>`:''}${S.loadingMessage?skeleton(7,'reader','Carico il messaggio…'):`<section class="ai-summary"><div class="ai-summary-title">${icon('sparkle')}${analysis?'Il punto, secondo Milo':'Milo AI'}<button data-action="analyze">${analysis?'Rianalizza':'Analizza'}${icon('arrow')}</button></div><div id="analysis-content">${S.analyzing?skeleton(3,'block','Analisi in corso…'):`<p>${analysis?esc(analysis.summary):'Sintesi, cose da fare e priorità della conversazione.'}</p>${actionProposals(analyzed)}`}</div></section><div class="thread-messages">${messages.map((item,index)=>`<details class="thread-message ${item.sent?'sent-message':''}" data-thread-message="${esc(item.id)}" ${index===messages.length-1||open.has(item.id)?'open':''}><summary><span class="sender-detail">${avatar(item)}<span><strong>${item.sent?'Tu':esc(item.sender)}</strong><span class="address">${esc(item.sender_email)}</span><small>${item.sent?'Risposta inviata':esc(item.preview.slice(0,90))}</small></span><time>${dateLabel(item.date,true)}</time></span></summary><div class="thread-message-body" data-body-for="${esc(item.id)}">${index===messages.length-1||open.has(item.id)?bodyMarkup(item):''}</div></details>`).join('')}</div><div class="reply-actions"><button data-action="reply">${icon('reply')}Rispondi</button><button data-action="reply-all">${icon('reply')}Rispondi a tutti</button><button data-action="forward">${icon('forward')}Inoltra</button><button data-action="ai-reply">${icon('sparkle')}Aiutami a rispondere</button></div>${peer.sent?'':`<div class="quick-replies">${S.suggesting===peer.id?skeleton(1,'block','Milo prepara le risposte…'):suggestions?suggestions.map((reply,index)=>`<button class="quick-reply" data-quick-reply="${index}">${esc(reply)}</button>`).join(''):`<button class="quick-reply ghost" data-action="suggest">${icon('sparkle')}Suggerisci risposte rapide</button>`}</div>`}<div id="inline-composer"></div>`}</article>`);
   fitFrames(panel);
   for(const item of messages)if((item.id===messages.at(-1)?.id||open.has(item.id))&&!item.body_loaded)ensureBody(item.id).catch(()=>{});
   if(S.compose?.inline&&S.selected&&S.compose.thread_key===threadKey(S.selected)){renderInlineComposer(editor);if(editor&&editor.contains(active)){active.focus({preventScroll:true});if(caret)active.setSelectionRange(...caret);}}
@@ -487,6 +492,23 @@ async function warmRecentBodies(){
   }finally{warmingRecent=false;lastWarm=Date.now();}
 }
 const bodyRequests=new Map();
+S.codesOffered=new Set();
+function confirmationCode(text){
+  if(!text||!/(codice|code|otp|verific|conferma|one[-\s]?time|authentication|security|temporaneo|monouso)/i.test(text))return null;
+  const anchored=/(?:codice|code|otp|verifica(?:zione)?|conferma|verification|authentication|security|one[-\s]?time(?:\s(?:password|code))?|temporaneo|monouso)[^0-9]{0,48}(\d[\d\s-]{3,10}\d)/i.exec(text);
+  const cleaned=anchored?.[1].replace(/[\s-]/g,'');
+  if(cleaned&&cleaned.length>=4&&cleaned.length<=8)return cleaned;
+  return /\b(\d{6})\b/.exec(text)?.[1]||null;
+}
+function offerConfirmation(message){
+  if(!message||message.sent||!S.selected||threadKey(message)!==threadKey(S.selected)||S.codesOffered.has(message.id))return;
+  const code=confirmationCode([message.subject,message.body].filter(Boolean).join('\n'));
+  if(!code)return;
+  S.codesOffered.add(message.id);
+  S.confirmation={key:threadKey(message),id:message.id,code};
+  navigator.clipboard?.writeText(code).then(()=>toast(`Codice di conferma ${code} copiato negli appunti.`)).catch(()=>{});
+  renderReading();
+}
 function bodyPath(id){return '/messages/'+encodeURIComponent(id)+(S.images?'?load_images=true':'');}
 function bodyMarkup(item){
   if(!item.body_loaded)return item.body_error?`<div class="offline-note">${esc(item.body_error)}</div><button class="secondary" data-download-body="${esc(item.id)}">Riprova</button>`:skeleton(3,'message-body','Scarico il messaggio…');
@@ -512,10 +534,10 @@ async function ensureBody(id,background=false){
       throw error;
     }
   }
-  replica.body(message);if(background)return message;
+  replica.body(message);if(background){offerConfirmation(message);return message;}
   if(version!==S.readerVersion)return message;
   const latest=S.thread.find(m=>m.id===id)||metadata,item={...message,...latest,body_loaded:true,body_error:null};
-  S.thread=S.thread.map(m=>m.id===id?item:m);if(S.selected?.id===id)S.selected=item;displayBody(item);return item;
+  S.thread=S.thread.map(m=>m.id===id?item:m);if(S.selected?.id===id)S.selected=item;displayBody(item);offerConfirmation(item);return item;
 }
 let warmingVersion=0;
 function warmThread(){
@@ -550,6 +572,7 @@ async function applyThread(result,id,version,cached=false){
   const changed=S.loadingMessage||S.threadSignature!==signature;S.threadSignature=signature;
   S.thread=messages;S.threadSync=result.sync||{};if(S.thread.length)S.selected=S.thread.at(-1);
   S.loadingMessage=false;if(changed){renderReading();warmThread();}
+  for(const message of messages)offerConfirmation(message);
 }
 const threadRequests=new Map();
 async function loadThread(id,version=S.readerVersion){
@@ -1056,7 +1079,8 @@ document.addEventListener('toggle',event=>{const details=event.target;if(details
 document.addEventListener('click', async event => {
   const target=event.target.closest('button,a'); if(!target) return;
   try {
-      if(target.dataset.recipient!=null){acceptRecipient(Number(target.dataset.recipient));return;}
+      if(target.dataset.copyCode){navigator.clipboard?.writeText(target.dataset.copyCode).then(()=>toast('Codice copiato negli appunti.')).catch(()=>toast('Copia non riuscita: seleziona il codice e copialo a mano.'));return;}
+    if(target.dataset.recipient!=null){acceptRecipient(Number(target.dataset.recipient));return;}
     if(target.dataset.view) {
       if(S.compose)closeCompose().catch(error=>toast(error.message));
       S.view=target.dataset.view; S.category=''; S.selected=null; S.menu=false; S.todoMulti.clear();
@@ -1496,24 +1520,30 @@ function eventRefresh(){
 }
 let lastHiddenRefresh=0,lastPollRefresh=0;
 async function poll(){
-  connectEvents();
-  // A hidden window (another workspace, minimized) keeps the list current every 30 seconds.
-  if(S.status?.authenticated&&document.hidden&&Date.now()-lastHiddenRefresh>(eventsLive?120000:30000)){
-    lastHiddenRefresh=Date.now();await refresh().catch(()=>{});flushClientQueue().catch(()=>{});
+  try{
+    connectEvents();
+    // A hidden window (another workspace, minimized) keeps the list current every 30 seconds.
+    if(S.status?.authenticated&&document.hidden&&Date.now()-lastHiddenRefresh>(eventsLive?120000:30000)){
+      lastHiddenRefresh=Date.now();await refresh().catch(()=>{});flushClientQueue().catch(()=>{});
+    }
+    if(S.status?.authenticated&&!document.hidden){
+      if(!eventsLive||Date.now()-lastPollRefresh>30000){lastPollRefresh=Date.now();await refresh().catch(()=>{});}
+      flushClientQueue().catch(()=>{});queueCatalogue();
+      if(Date.now()-lastWarm>120000)warmRecentBodies();
+      maybeMorningRecap();
+      if(S.recapOpen&&S.recapSignature!==JSON.stringify(S.state.recap))api('/recap').then(result=>{if(S.recapOpen)showRecap(result);}).catch(()=>{});
+      for(const draft of S.pendingDrafts.values())if(!S.draftWrites.has(draft.id)&&S.compose?.id!==draft.id)persistDraft(draft).catch(()=>{});
+      if(S.readerAnchor&&S.threadSync.phase==='downloading'&&!S.loadingMessage)loadThread(S.readerAnchor).catch(()=>{});
+    }
+  }finally{
+    // The next tick is unconditional: one failed pass must not stop the
+    // safety-net refresh for the rest of a long-lived window session.
+    setTimeout(poll,3000);
   }
-  if(S.status?.authenticated&&!document.hidden){
-    if(!eventsLive||Date.now()-lastPollRefresh>30000){lastPollRefresh=Date.now();await refresh();}
-    flushClientQueue().catch(()=>{});queueCatalogue();
-    if(Date.now()-lastWarm>120000)warmRecentBodies();
-    maybeMorningRecap();
-    if(S.recapOpen&&S.recapSignature!==JSON.stringify(S.state.recap))api('/recap').then(result=>{if(S.recapOpen)showRecap(result);}).catch(()=>{});
-    for(const draft of S.pendingDrafts.values())if(!S.draftWrites.has(draft.id)&&S.compose?.id!==draft.id)persistDraft(draft).catch(()=>{});
-    if(S.readerAnchor&&S.threadSync.phase==='downloading'&&!S.loadingMessage)loadThread(S.readerAnchor).catch(()=>{});
-  }
-  setTimeout(poll,3000);
 }
 setTimeout(poll,1500);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&S.status?.authenticated){revalidateView();flushClientQueue().catch(()=>{});}});
+addEventListener('focus',()=>{if(S.status?.authenticated){revalidateView();flushClientQueue().catch(()=>{});}});
 addEventListener('online',()=>{updateOnlineState();queueRetryAt=0;flushClientQueue().catch(()=>{});revalidateView();queueCatalogue();});
 addEventListener('offline',()=>{S.online=false;renderChrome();});
 addEventListener('pagehide',()=>{const draft=captureCompose();if(draft)rememberDraft(draft);else storePendingDrafts();});

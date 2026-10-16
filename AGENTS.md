@@ -89,7 +89,7 @@ external action. That file is the single source of global agent instructions.
   survive reanalysis, replies and archiving; existing unaccepted rows remain
   proposals. Backup/restore and the iOS thread/body caches preserve acceptance.
   Web and iOS show **Accetta da fare**, then **Nei da fare** or **Fatto**.
-- The offline web shell cache is `milo-shell-v27` (`web/sw.js`); bump its version
+- The offline web shell cache is `milo-shell-v28` (`web/sw.js`); bump its version
   when changing shell assets so installed clients fetch the new controls, and
   update the expected current cache in `tests/test_offline_first.py`.
 

@@ -144,6 +144,9 @@ public final class Mailbox {
                 let snoozed = (row.snoozedUntil ?? 0) > now
                 if !(row.hasInbox?.value ?? false) || snoozed { return false }
                 if let category, row.category != category { return false }
+            case .unread:
+                if !(row.hasInbox?.value ?? false)
+                    || (row.inboxUnreadCount ?? row.unreadCount ?? (row.read.value ? 0 : 1)) <= 0 { return false }
             case .starred: if !row.starred.value { return false }
             case .sent: if !(row.hasSent?.value ?? row.sent.value) { return false }
             case .archive: if !(row.hasArchive?.value ?? false) { return false }

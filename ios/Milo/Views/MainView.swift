@@ -129,6 +129,7 @@ struct Sidebar: View {
         let counts = mailbox.state?.counts
         switch view {
         case .inbox: return counts?.inbox ?? 0
+        case .unread: return counts?.unread ?? 0
         case .todo: return counts?.todo ?? 0
         case .starred: return counts?.starred ?? 0
         case .drafts: return counts?.drafts ?? 0
