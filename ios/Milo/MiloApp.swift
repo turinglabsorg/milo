@@ -30,8 +30,8 @@ struct MiloApp: App {
         }
         .onChange(of: phase) { _, phase in
             if phase == .active {
+                Task { await mailbox?.downloadMail() }
                 Task {
-                    await mailbox?.refresh()
                     await mailbox?.retryOpenThread()
                 }
             }

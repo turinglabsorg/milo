@@ -10,6 +10,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var configurationError: String?
     /// Incremented to ask the web view to (re)load `pending`.
     @Published private(set) var loadToken = 0
+    @Published private(set) var mailRequestToken = 0
     private(set) var pending: PendingAction?
 
     init() {
@@ -57,5 +58,9 @@ final class AppModel: ObservableObject {
     /// Ask the web view to reload its current page (error banner retry).
     func reload() {
         loadToken += 1
+    }
+
+    func downloadMail() {
+        mailRequestToken += 1
     }
 }

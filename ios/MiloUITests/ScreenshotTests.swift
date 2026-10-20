@@ -30,6 +30,13 @@ final class ScreenshotTests: XCTestCase {
             app.staticTexts["Smart inbox"].firstMatch.tap()
         }
         XCTAssertTrue(row.waitForExistence(timeout: 10))
+        let download = app.buttons["download-mail"]
+        XCTAssertTrue(download.waitForExistence(timeout: 5))
+        XCTAssertEqual(download.label, "Scarica posta ora")
+        let enabled = NSPredicate(format: "enabled == true")
+        expectation(for: enabled, evaluatedWith: download)
+        waitForExpectations(timeout: 10)
+        download.tap()
         save("01-inbox")
 
         row.tap()

@@ -49,6 +49,56 @@ final class MailboxTests: XCTestCase {
         XCTAssertFalse(offline.online)
     }
 
+    func testDownloadMailChecksProvidersAndShowsNewMailBeforePeriodicRefresh() async throws {
+        let transport = DownloadTransport()
+        let mailbox = Mailbox(api: APIClient(baseURL: URL(string: "https://milo.example")!, transport: transport,
+                                             retryDelays: []), cache: MailCache(root: directory))
+        await mailbox.start()
+        let initialRequests = await transport.syncRequests
+        XCTAssertEqual(initialRequests, 1)
+        XCTAssertFalse(mailbox.conversations.contains { $0.id == "new-mail" })
+        await mailbox.show(.inbox)
+        await mailbox.refresh()
+        let afterNavigation = await transport.syncRequests
+        XCTAssertEqual(afterNavigation, 1, "Navigation and background reads do not check providers")
+        await mailbox.downloadMail()
+        let afterDownload = await transport.syncRequests
+        XCTAssertEqual(afterDownload, 2)
+        XCTAssertTrue(mailbox.conversations.contains { $0.id == "new-mail" })
+        XCTAssertFalse(mailbox.downloadingMail)
+    }
+
+    func testSlowDownloadKeepsCachedMailVisibleAndCoalescesRequests() async throws {
+        let (initial, _) = make()
+        await initial.start()
+        let transport = DownloadTransport(hold: true)
+        let mailbox = Mailbox(api: APIClient(baseURL: URL(string: "https://milo.example")!, transport: transport),
+                              cache: MailCache(root: directory))
+        let starting = Task { await mailbox.start() }
+        for _ in 0..<100 {
+            if await transport.syncRequests > 0 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(mailbox.conversations.count, DemoTransport.rows.count)
+        XCTAssertTrue(mailbox.downloadingMail)
+        await mailbox.downloadMail()
+        let requests = await transport.syncRequests
+        XCTAssertEqual(requests, 1)
+        await transport.release()
+        await starting.value
+        XCTAssertFalse(mailbox.downloadingMail)
+    }
+
+    func testFailedDownloadStillRefreshesArchivedMail() async throws {
+        let transport = DownloadTransport(fail: true)
+        let mailbox = Mailbox(api: APIClient(baseURL: URL(string: "https://milo.example")!, transport: transport,
+                                             retryDelays: []), cache: MailCache(root: directory))
+        await mailbox.downloadMail()
+        XCTAssertEqual(mailbox.conversations.count, DemoTransport.rows.count)
+        XCTAssertNotNil(mailbox.lastError)
+        XCTAssertFalse(mailbox.downloadingMail)
+    }
+
     func testViewsAndSearchFilterTheLocalCatalogue() async throws {
         let (mailbox, _) = make()
         await mailbox.start()
@@ -285,5 +335,46 @@ final class RestartingTransport: Transport, @unchecked Sendable {
 struct FailingTransport: Transport {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         throw URLError(.notConnectedToInternet)
+    }
+}
+
+actor DownloadTransport: Transport {
+    let demo = DemoTransport()
+    private(set) var syncRequests = 0
+    private var busyReads = 0
+    private var arrived = false
+    private var hold: Bool
+    private let fail: Bool
+
+    init(hold: Bool = false, fail: Bool = false) {
+        self.hold = hold
+        self.fail = fail
+    }
+
+    func release() { hold = false }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let path = request.url!.path
+        if path == "/api/sync" {
+            syncRequests += 1
+            while hold { try await Task.sleep(nanoseconds: 10_000_000) }
+            if fail {
+                return (Data(), HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!)
+            }
+            busyReads = 1
+        }
+        let (data, response) = try await demo.send(request)
+        var payload = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        if path == "/api/state" {
+            payload["sync"] = [["account_id": "demo", "phase": busyReads > 0 ? "downloading" : "ready"]]
+            if busyReads == 0 && syncRequests >= 2 { arrived = true }
+            busyReads = max(0, busyReads - 1)
+        }
+        if path == "/api/messages" && arrived {
+            var rows = payload["messages"] as! [[String: Any]]
+            rows.append(DemoTransport.row("new-mail", "Anna", "anna@example.com", "Just arrived", "New mail", 0))
+            payload["messages"] = rows
+        }
+        return (try JSONSerialization.data(withJSONObject: payload), response)
     }
 }

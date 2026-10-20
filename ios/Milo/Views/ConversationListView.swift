@@ -80,7 +80,7 @@ struct ConversationListView: View {
                 if !Task.isCancelled { await mailbox.refresh() }
             }
         }
-        .refreshable { await mailbox.refresh() }
+        .refreshable { await mailbox.downloadMail() }
         .toolbar {
             if mailbox.view == .inbox {
                 ToolbarItem(placement: .topBarLeading) {

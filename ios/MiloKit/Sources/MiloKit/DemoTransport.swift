@@ -91,6 +91,8 @@ public final class DemoTransport: Transport, @unchecked Sendable {
         let method = request.httpMethod ?? "GET"
         lock.lock(); requests.append(method + " " + path); lock.unlock()
         switch (method, path) {
+        case ("POST", "/api/sync"):
+            return (202, ["accepted": true, "demo": true])
         case ("GET", "/api/status"):
             return (200, ["service": "milo", "authenticated": true, "access": "tailscale", "demo": true])
         case ("GET", "/api/state"):

@@ -136,6 +136,8 @@ public final class APIClient: Sendable {
     public func status() async throws -> ServiceStatus { try await get(ServiceStatus.self, "/status") }
     public func state() async throws -> ServiceState { try await get(ServiceState.self, "/state") }
 
+    public func downloadMail() async throws { _ = try await data("POST", "/sync", idempotent: true) }
+
     public func conversations(view: MailView, account: String? = nil, search: String = "") async throws -> [Conversation] {
         struct List: Decodable { var messages: [Conversation] }
         var query = ["view": view.rawValue, "search": search]

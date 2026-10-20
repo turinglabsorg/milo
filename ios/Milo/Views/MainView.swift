@@ -28,6 +28,15 @@ struct MainView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await mailbox.downloadMail() }
+                    } label: {
+                        Label("Scarica posta ora", systemImage: "arrow.down.circle")
+                    }
+                    .disabled(mailbox.downloadingMail)
+                    .accessibilityIdentifier("download-mail")
+                }
+                ToolbarItem(placement: .primaryAction) {
                     Button { compose = mailbox.newDraft() } label: { Image(systemName: "square.and.pencil") }
                         .accessibilityLabel("Nuovo messaggio")
                         .accessibilityIdentifier("compose")
@@ -144,7 +153,7 @@ struct SyncStatus: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: mailbox.online ? (mailbox.syncing ? "arrow.triangle.2.circlepath" : "checkmark") : "wifi.slash")
+            Image(systemName: mailbox.online ? (mailbox.syncing || mailbox.downloadingMail ? "arrow.triangle.2.circlepath" : "checkmark") : "wifi.slash")
             Text(text)
         }
         .font(.caption)
@@ -154,6 +163,7 @@ struct SyncStatus: View {
 
     private var text: String {
         if !mailbox.online { return "Offline · mostro la posta salvata" }
+        if mailbox.downloadingMail { return "Controllo la posta…" }
         if mailbox.pendingCount > 0 { return "\(mailbox.pendingCount) modifiche in sincronizzazione" }
         return mailbox.syncing ? "Aggiorno…" : "Posta aggiornata"
     }

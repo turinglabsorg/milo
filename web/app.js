@@ -141,7 +141,7 @@ function renderChrome() {
 function renderShell() {
   const counts=S.state.counts;
   const folders=[['inbox','inbox'],['unread','mail'],['todo','todo'],...(S.state.screener?.enabled?[['screener','screener']]:[]),['starred','star'],['drafts','edit'],['sent','sent'],['snoozed','clock'],['archive','archive']];
-  $('#app').innerHTML=`<main class="shell ${S.selected?'has-selection':''} ${S.menu?'menu-open':''}"><aside class="sidebar">${logo()}<button class="primary compose-button" data-action="compose">${icon('plus')}Nuovo messaggio</button><div class="nav-label">La tua posta</div><nav class="nav">${folders.map(([view,name])=>`<button class="nav-button ${S.view===view?'active':''}" data-view="${view}">${icon(name)}${viewNames[view]}${counts[view]?`<span class="count">${counts[view]}</span>`:''}</button>`).join('')}</nav><div class="account-section">${accountMarkup()}</div><div class="sidebar-bottom"><div class="sidebar-footer"><div class="user-avatar">${esc(initials(S.state.identity?.name || S.state.accounts[0]?.name || 'Tu'))}</div><span>${esc(S.state.identity?.name||'Il tuo spazio')}</span><button data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div>${S.status.demo?'<div class="demo-label">DEMO · messaggi fittizi</div>':''}</div></aside><header class="topbar"><button class="icon-button mobile-menu" data-action="menu" aria-label="Apri menu">${icon('menu')}</button><div class="breadcrumbs">Il tuo spazio ${icon('arrow')}<strong>${viewNames[S.view]}</strong></div><div class="top-tools"><div id="sync-status">${syncMarkup()}</div><label class="search">${icon('search')}<input id="search-input" placeholder="Cerca nella tua posta" value="${esc(S.search)}" aria-label="Cerca nella tua posta"><kbd>/</kbd></label><button class="icon-button sync-button ${syncWorking()?'spinning':''}" data-action="sync" aria-label="Sincronizza ora" title="Sincronizza ora">${icon('sync')}</button><span class="sync-indicator ${!S.online||S.state.accounts.some(a=>a.error)?'offline':''}" title="${S.online?'Servizio connesso':'Servizio non raggiungibile'}"></span></div></header><section class="list-panel" id="list-panel"></section><section class="reading-panel" id="reading-panel"></section><div id="ask-dock"></div><button class="ask-fab" data-action="ask" aria-label="Chiedi a Milo sulla tua posta" aria-expanded="false" title="Chiedi a Milo">${icon('chat')}</button></main>`;
+  $('#app').innerHTML=`<main class="shell ${S.selected?'has-selection':''} ${S.menu?'menu-open':''}"><aside class="sidebar">${logo()}<button class="primary compose-button" data-action="compose">${icon('plus')}Nuovo messaggio</button><div class="nav-label">La tua posta</div><nav class="nav">${folders.map(([view,name])=>`<button class="nav-button ${S.view===view?'active':''}" data-view="${view}">${icon(name)}${viewNames[view]}${counts[view]?`<span class="count">${counts[view]}</span>`:''}</button>`).join('')}</nav><div class="account-section">${accountMarkup()}</div><div class="sidebar-bottom"><div class="sidebar-footer"><div class="user-avatar">${esc(initials(S.state.identity?.name || S.state.accounts[0]?.name || 'Tu'))}</div><span>${esc(S.state.identity?.name||'Il tuo spazio')}</span><button data-action="settings" aria-label="Impostazioni">${icon('settings')}</button></div>${S.status.demo?'<div class="demo-label">DEMO · messaggi fittizi</div>':''}</div></aside><header class="topbar"><button class="icon-button mobile-menu" data-action="menu" aria-label="Apri menu">${icon('menu')}</button><div class="breadcrumbs">Il tuo spazio ${icon('arrow')}<strong>${viewNames[S.view]}</strong></div><div class="top-tools"><div id="sync-status">${syncMarkup()}</div><label class="search">${icon('search')}<input id="search-input" placeholder="Cerca nella tua posta" value="${esc(S.search)}" aria-label="Cerca nella tua posta"><kbd>/</kbd></label><button class="icon-button sync-button ${syncWorking()?'spinning':''}" data-action="sync" aria-label="Scarica posta ora" title="Scarica posta ora">${icon('sync')}</button><span class="sync-indicator ${!S.online||S.state.accounts.some(a=>a.error)?'offline':''}" title="${S.online?'Servizio connesso':'Servizio non raggiungibile'}"></span></div></header><section class="list-panel" id="list-panel"></section><section class="reading-panel" id="reading-panel"></section><div id="ask-dock"></div><button class="ask-fab" data-action="ask" aria-label="Chiedi a Milo sulla tua posta" aria-expanded="false" title="Chiedi a Milo">${icon('chat')}</button></main>`;
   renderList(); renderReading();
 }
 
@@ -437,6 +437,17 @@ async function refresh(resetSelection=false,showLoading=false){
   if(resetSelection){S.selected=null;S.thread=[];S.readerAnchor=null;S.readerVersion++;renderReading();}
   const cached=await deviceCache.get('api:/drafts');if(cached)S.cachedDrafts=cached.drafts;
   paintLocal();revalidateView();
+}
+let lastMailRequest=0;
+async function downloadMail({automatic=false}={}){
+  if(S.syncing||!S.status?.authenticated||!navigator.onLine)return;
+  if(automatic&&Date.now()-lastMailRequest<1500)return;
+  lastMailRequest=Date.now();S.syncing=true;renderChrome();
+  try{
+    await api('/sync','POST');
+    flushClientQueue().catch(()=>{});
+    if(!automatic)toast('Controllo della posta avviato.');
+  }finally{S.syncing=false;await refresh();renderChrome();}
 }
 let feeding=false,lastFeed=0,feedTimer;
 function queueCatalogue(){
@@ -1016,7 +1027,7 @@ function showPalette(){
   const commands=[['Nuovo messaggio','C',()=>showCompose()],['Smart inbox','',go('inbox')],['Da leggere','',go('unread')],['Da fare','',go('todo')],
     ...(S.state.screener?.enabled?[['Nuovi mittenti','',go('screener')]]:[]),['Preferiti','',go('starred')],['Bozze','',go('drafts')],['Posta inviata','',go('sent')],['Per dopo','',go('snoozed')],['Archivio','',go('archive')],
     ['Chiedi a Milo','',()=>showAsk()],['Recap dell’inbox','',()=>openRecap()],['Gestisci i mittenti di newsletter','',()=>showNewsletterSenders()],
-    ['Sincronizza ora','',()=>document.querySelector('[data-action="sync"]')?.click()],['Impostazioni','',()=>showSettings('accounts')],['Firme e risposte salvate','',()=>showSettings('compose')],
+    ['Scarica posta ora','',()=>document.querySelector('[data-action="sync"]')?.click()],['Impostazioni','',()=>showSettings('accounts')],['Firme e risposte salvate','',()=>showSettings('compose')],
     ['Notifiche','',()=>showSettings('notifications')],['Scorciatoie da tastiera','?',()=>showShortcuts()],
     ['Tema chiaro','',()=>{applyTheme('light');savePreference('appearance',{theme:'light'}).catch(()=>{});}],['Tema scuro','',()=>{applyTheme('dark');savePreference('appearance',{theme:'dark'}).catch(()=>{});}],
     ...S.state.accounts.map(a=>[`Mostra solo ${a.name}`,'',()=>document.querySelector(`[data-account="${CSS.escape(a.id)}"]`)?.click()]),['Mostra tutti gli account','',()=>document.querySelector('[data-account=""]')?.click()]];
@@ -1216,9 +1227,8 @@ document.addEventListener('click', async event => {
     if(action==='close-compose')await closeCompose();
     if(action==='close-modal'){if($('#overlay #compose-form'))await closeCompose();else closeModal();await refresh();renderList();}
     if(action==='sync') {
-      if(S.syncing)return;S.syncing=true;renderChrome();
-      try{await deviceCache.retryOperations();S.queueErrors.clear();queueRetryAt=0;flushClientQueue().catch(()=>{});await api('/sync','POST');toast('Sincronizzazione avviata in background.');}
-      finally{S.syncing=false;await refresh();renderChrome();renderList();}
+      downloadMail().catch(error=>toast(error.message));
+      await deviceCache.retryOperations();S.queueErrors.clear();queueRetryAt=0;flushClientQueue().catch(()=>{});
     }
     if(action==='retry-login') { await boot(); }
     if(action==='logout') { await api('/logout','POST');replica.clear();S.optimistic.clear();S.pendingSettings.clear();S.queueErrors.clear();await deviceCache.clear();S.status.authenticated=false;S.selected=null;S.messages=[];renderLogin(); }
@@ -1451,7 +1461,7 @@ async function boot() {
     const cachedStatus=await deviceCache.get('api:/status'),cachedState=await deviceCache.get('api:/state');
     for(const operation of await deviceCache.get('pending-operations')||[]){if(operation.error)S.queueErrors.set(operation.id,operation);replica.apply(operation);if(operation.kind==='setting')S.pendingSettings.set(operation.key,operation);else if(!operation.kind)S.optimistic.set(operation.key,{patch:{...S.optimistic.get(operation.key)?.patch,...operation.patch},deleted:operation.deleted,operationId:operation.id});}
     if(cachedStatus?.authenticated&&cachedState){
-      S.status=cachedStatus;S.state=cachedState;S.online=navigator.onLine;applyState(cachedState);renderShell();openPendingMailto();await refresh();
+      S.status=cachedStatus;S.state=cachedState;S.online=navigator.onLine;applyState(cachedState);renderShell();downloadMail({automatic:true}).catch(()=>{});openPendingMailto();await refresh();
       api('/status').then(status=>{S.status=status;if(!status.authenticated)renderLogin();else{flushClientQueue().catch(()=>{});queueCatalogue();}}).catch(error=>{if(temporarilyUnavailable(error))recordServerError();});
       return;
     }
@@ -1467,7 +1477,7 @@ async function boot() {
     if(oauthError) toast(oauthError);
     if(connected) toast('Casella Google collegata. Sto sincronizzando la tua posta.');
     if(!S.status.authenticated) { renderLogin();return; }
-    S.loadingList=true;renderShell();await refresh(false,true);openPendingMailto();revalidateView().then(()=>{queueCatalogue();if(S.status.demo&&S.messages.length&&innerWidth>900)selectMessage(S.messages[0].id,false).catch(()=>{});});renderList();
+    S.loadingList=true;renderShell();downloadMail({automatic:true}).catch(()=>{});await refresh(false,true);openPendingMailto();revalidateView().then(()=>{queueCatalogue();if(S.status.demo&&S.messages.length&&innerWidth>900)selectMessage(S.messages[0].id,false).catch(()=>{});});renderList();
 
   } catch(error) { $('#app').innerHTML=`<div class="empty" style="min-height:100vh">${icon('mail')}<h3>Milo non è raggiungibile.</h3><p>${esc(error.message)}</p></div>`; }
 }
@@ -1542,9 +1552,11 @@ async function poll(){
   }
 }
 setTimeout(poll,1500);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&S.status?.authenticated){revalidateView();flushClientQueue().catch(()=>{});}});
-addEventListener('focus',()=>{if(S.status?.authenticated){revalidateView();flushClientQueue().catch(()=>{});}});
-addEventListener('online',()=>{updateOnlineState();queueRetryAt=0;flushClientQueue().catch(()=>{});revalidateView();queueCatalogue();});
+function downloadMailOnEntry(){downloadMail({automatic:true}).catch(()=>{});}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&S.status?.authenticated){downloadMailOnEntry();revalidateView();flushClientQueue().catch(()=>{});}});
+addEventListener('focus',()=>{if(S.status?.authenticated){downloadMailOnEntry();revalidateView();flushClientQueue().catch(()=>{});}});
+addEventListener('milo-download-mail',downloadMailOnEntry);
+addEventListener('online',()=>{updateOnlineState();queueRetryAt=0;downloadMailOnEntry();flushClientQueue().catch(()=>{});revalidateView();queueCatalogue();});
 addEventListener('offline',()=>{S.online=false;renderChrome();});
 addEventListener('pagehide',()=>{const draft=captureCompose();if(draft)rememberDraft(draft);else storePendingDrafts();});
 if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js',{type:'module'}).catch(()=>{});

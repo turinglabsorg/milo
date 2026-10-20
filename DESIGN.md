@@ -63,6 +63,10 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
   border and translucent blue focus halo. Motion stops for reduced-motion users.
 - Cached content renders immediately; refresh and missing offline content get
   explicit status text. Keep technical setup details out of ordinary mail flows.
+- **Scarica posta ora** in the toolbar checks connected mail providers immediately,
+  as do app entry and foreground activation. iOS pull-to-refresh uses the same
+  action. Cached mail remains readable while the check runs; iOS shows
+  **Controllo la posta…** and disables its download button until the check finishes.
 - List headers show only the folder title and, for the inbox, a compact Recap
   action. Keep mailbox counts in navigation; never present the loaded list limit
   as the mailbox total. No date eyebrow, introductory copy or separate recap card.

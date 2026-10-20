@@ -12,6 +12,7 @@ public final class Mailbox {
     public var authenticated = true
     public var online = true
     public var syncing = false
+    public private(set) var downloadingMail = false
     public var lastError: String?
     public var state: ServiceState?
     public var view: MailView = .inbox
@@ -49,7 +50,28 @@ public final class Mailbox {
         state = await cache.state()
         await reloadCatalogue()
         pendingCount = await cache.pending().count
-        await refresh()
+        await downloadMail()
+    }
+
+    public func downloadMail() async {
+        guard !downloadingMail else { return }
+        downloadingMail = true
+        defer { downloadingMail = false }
+        do {
+            try await api.downloadMail()
+        } catch {
+            await refresh()
+            lastError = error.localizedDescription
+            return
+        }
+        for attempt in 0..<60 {
+            guard !Task.isCancelled else { return }
+            await refresh()
+            guard authenticated, online else { return }
+            if attempt > 0 && !(state?.sync?.contains(where: \.working) ?? false) { return }
+            do { try await Task.sleep(nanoseconds: 1_000_000_000) }
+            catch { return }
+        }
     }
 
     public func refresh() async {

@@ -55,7 +55,7 @@ struct TodoListView: View {
             }
         }
         .navigationTitle("Da fare")
-        .refreshable { await mailbox.refresh() }
+        .refreshable { await mailbox.downloadMail() }
         .toolbar {
             if !mailbox.todos.isEmpty {
                 ToolbarItem(placement: .primaryAction) {
@@ -132,7 +132,7 @@ struct DraftListView: View {
             }
         }
         .navigationTitle("Bozze")
-        .refreshable { await mailbox.refresh() }
+        .refreshable { await mailbox.downloadMail() }
     }
 }
 

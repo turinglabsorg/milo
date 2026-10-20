@@ -31,10 +31,15 @@ struct WebView: NSViewRepresentable {
         context.coordinator.webView = webView
         webView.load(URLRequest(url: initialURL))
         context.coordinator.loadedToken = model.loadToken
+        context.coordinator.mailRequestToken = model.mailRequestToken
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
+        if context.coordinator.mailRequestToken != model.mailRequestToken {
+            context.coordinator.mailRequestToken = model.mailRequestToken
+            webView.evaluateJavaScript("window.dispatchEvent(new Event('milo-download-mail'));")
+        }
         guard context.coordinator.loadedToken != model.loadToken else { return }
         context.coordinator.loadedToken = model.loadToken
         guard let action = model.consumePending() else {
@@ -49,6 +54,7 @@ struct WebView: NSViewRepresentable {
         let onLoadError: (String) -> Void
         weak var webView: WKWebView?
         var loadedToken = -1
+        var mailRequestToken = -1
 
         init(serverURL: URL, onLoadError: @escaping (String) -> Void) {
             self.serverURL = serverURL

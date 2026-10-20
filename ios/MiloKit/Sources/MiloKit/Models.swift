@@ -236,6 +236,14 @@ public struct ServiceState: Codable, Sendable {
     public var signatures: [String: String]?
     public var templates: [Template]?
     public var vips: [String]?
+    public var sync: [SyncProgress]?
+}
+
+public struct SyncProgress: Codable, Sendable {
+    public var accountId: String
+    public var phase: String
+
+    public var working: Bool { ["connecting", "downloading", "applying"].contains(phase) }
 }
 
 public struct ServiceStatus: Codable, Sendable {

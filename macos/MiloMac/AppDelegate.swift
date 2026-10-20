@@ -85,6 +85,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         badge?.stop()
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        AppModel.shared.downloadMail()
+    }
+
     private func startBadge() {
         guard let config = try? ServerConfig.load() else { return }
         let badge = DockBadge(config: config)

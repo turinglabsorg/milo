@@ -1,0 +1,34 @@
+name: macOS
+on:
+  push:
+    paths: ["macos/**", ".github/workflows/macos.yml"]
+  workflow_dispatch:
+jobs:
+  client:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd macos && xcodegen generate
+      - name: Test the desktop client
+        run: |
+          set -o pipefail
+          xcodebuild test -project macos/MiloMac.xcodeproj -scheme MiloMac \
+            -destination 'platform=macOS' -derivedDataPath build/mac-tests \
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO 2>&1 | tail -80
+      - name: Build the universal app
+        run: |
+          set -o pipefail
+          xcodebuild build -project macos/MiloMac.xcodeproj -scheme MiloMac \
+            -configuration Release -derivedDataPath build/mac-release \
+            ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO 2>&1 | tail -60
+          ditto -c -k --sequesterRsrc --keepParent build/mac-release/Build/Products/Release/Milo.app build/Milo-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-client
+          path: build/Milo-macOS.zip
+          if-no-files-found: error
