@@ -92,6 +92,13 @@ external action. That file is the single source of global agent instructions.
 - The offline web shell cache is `milo-shell-v29` (`web/sw.js`); bump its version
   when changing shell assets so installed clients fetch the new controls, and
   update the expected current cache in `tests/test_offline_first.py`.
+- **Scarica posta ora**, app entry and foreground activation request the existing
+  `POST /api/sync` immediately; periodic reads and folder navigation only refresh
+  the archive. iOS pull-to-refresh uses `Mailbox.downloadMail()`, coalesces active
+  requests and polls `ServiceState.sync` while providers work, preserving cached
+  mail. macOS forwards activation through the `milo-download-mail` web event.
+- The `macOS` workflow tests the desktop client and uploads `macos-client`, a
+  `Milo-macOS.zip` containing a universal arm64/x86_64 app with ad-hoc signing.
 
 ## iOS app (`ios/`)
 
