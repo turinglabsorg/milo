@@ -27,6 +27,38 @@ def gmail(store):
     return Gmail(store, account_id)
 
 
+def test_scheduled_forward_to_autocompleted_recipients_sends_once(logged_in, monkeypatch):
+    import email
+    from email import policy
+    from email.utils import getaddresses
+
+    store = logged_in.app.state.store
+    account_id = store.google_account("mail@example.com", dict(CREDS))
+    submitted = []
+
+    def request(self, method, path, **kwargs):
+        assert (method, path) == ("POST", "messages/send")
+        submitted.append(kwargs["json"])
+        return {"id": "forwarded-1", "threadId": "forwarded-thread"}
+
+    monkeypatch.setattr(Gmail, "request", request)
+    draft_id = logged_in.put("/api/drafts", json={
+        "account_id": account_id, "to": "Recipient <recipient@example.com>, ",
+        "cc": "Copy <copy@example.com>, ", "subject": "Fwd: Project",
+        "body": "---------- Messaggio inoltrato ----------\nOriginal text", "mode": "forward",
+    }).json()["id"]
+    assert logged_in.put(f"/api/drafts/{draft_id}/schedule", json={"send_at": time.time() - 1}).status_code == 200
+    logged_in.app.state.feature_tick(False)
+    logged_in.app.state.feature_tick(False)
+    assert len(submitted) == 1
+    message = email.message_from_bytes(base64.urlsafe_b64decode(submitted[0]["raw"]), policy=policy.default)
+    assert getaddresses([str(message["To"])]) == [("Recipient", "recipient@example.com")]
+    assert getaddresses([str(message["Cc"])]) == [("Copy", "copy@example.com")]
+    assert "Original text" in message.get_content()
+    assert logged_in.get("/api/drafts").json()["drafts"] == []
+    assert store.messages(view="sent")[0]["subject"] == "Fwd: Project"
+
+
 @pytest.mark.parametrize("label", ["CATEGORY_UPDATES", "CATEGORY_SOCIAL"])
 def test_gmail_notification_labels_are_classified_without_ai(store, label):
     client = gmail(store)

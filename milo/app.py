@@ -24,7 +24,7 @@ from .ai import AI
 from .demo import seed_demo
 from .features import Features
 from .google import Gmail, GoogleOAuth
-from .mail import SyncEngine, parse_message, safe_error, send_mail
+from .mail import SyncEngine, parse_message, recipient_headers, safe_error, send_mail
 from .models import (
     AccountInput,
     AccountUpdate,
@@ -769,6 +769,10 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     def schedule_draft(draft_id: str, data: ScheduleInput):
         live()
         try:
+            rows = store.rows("SELECT data FROM drafts WHERE id=?", (draft_id,))
+            if not rows:
+                raise LookupError("Bozza non trovata")
+            recipient_headers(json.loads(rows[0]["data"]))
             return features.schedule(draft_id, data.send_at, data.followup_days)
         except LookupError as exc:
             raise HTTPException(404, str(exc)) from exc

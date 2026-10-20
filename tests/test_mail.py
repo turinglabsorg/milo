@@ -217,7 +217,7 @@ def test_smtp_requires_tls_and_preserves_reply_headers(account_data, monkeypatch
 
     monkeypatch.setattr("milo.mail.smtplib.SMTP_SSL", SMTP)
     monkeypatch.setattr("milo.mail.smtplib.SMTP", SMTP)
-    draft = {"to": "Giulia <giulia@example.com>", "subject": "Re: Hello", "body": "Ci sono!"}
+    draft = {"to": "Giulia <giulia@example.com>, ", "subject": "Re: Hello", "body": "Ci sono!"}
     original = {"message_id": "<thread@example.com>"}
     mail = send_mail(account_data, draft, original)
     assert calls[0][2] is True
@@ -225,11 +225,34 @@ def test_smtp_requires_tls_and_preserves_reply_headers(account_data, monkeypatch
     calls.clear()
     send_mail({**account_data, "smtp_port": 587, "smtp_security": "starttls"}, draft)
     assert calls.index("starttls") < calls.index("login")
-    message = send_mail(account_data, {**draft, 'cc': 'Marco <marco@example.com>, giulia@example.com'})
+    message = send_mail(account_data, {**draft, 'cc': 'Marco <marco@example.com>, giulia@example.com, '})
     assert 'marco@example.com' in message['Cc']
     assert envelopes[-1] == ['giulia@example.com', 'marco@example.com']
     with pytest.raises(ValueError):
         send_mail(account_data, {**draft, "to": "invalid"})
+
+
+@pytest.mark.parametrize("to,cc", [
+    ("recipient@example.com,", ""),
+    ("Recipient <recipient@example.com>, ", "Other <other@example.com>, "),
+    ('"Last, First" <recipient@example.com>, ', ""),
+    ("", "other@example.com, "),
+])
+def test_recipient_completion_separators_are_not_empty_recipients(account_data, to, cc):
+    from email.utils import getaddresses
+
+    message = build_message(account_data, {"to": to, "cc": cc, "subject": "Forward", "body": "Original"})
+    addresses = getaddresses([str(message[header]) for header in ("To", "Cc") if message[header]])
+    assert addresses and all(address for _, address in addresses)
+    assert {address for _, address in addresses} == ({"recipient@example.com"} if to else set()) | (
+        {"other@example.com"} if cc else set())
+
+
+@pytest.mark.parametrize("to", ["", ", ", "invalid", "recipient@example.com, invalid, ",
+                                "recipient@example.com, broken@, ", "recipient@example.com\r\nBcc: hidden@example.com"])
+def test_recipient_normalization_still_rejects_invalid_addresses(account_data, to):
+    with pytest.raises(ValueError, match="destinatari validi"):
+        build_message(account_data, {"to": to, "subject": "Forward", "body": "Original"})
 
 
 def test_replies_quote_the_original_below_the_answer():

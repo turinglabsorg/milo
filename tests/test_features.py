@@ -91,6 +91,15 @@ def test_scheduled_failure_is_kept_and_never_retried(logged_in, account_data, mo
     assert "non viene ripetuto" in draft["scheduled"]["error"]
 
 
+def test_invalid_recipients_are_rejected_before_scheduling(logged_in, account_data):
+    store, account_id = setup_account(logged_in, account_data)
+    draft_id = save_draft(logged_in, account_id, to="recipient@example.com, invalid, ")
+    response = logged_in.put(f"/api/drafts/{draft_id}/schedule", json={"send_at": time.time() + 10})
+    assert response.status_code == 422 and "destinatari validi" in response.json()["detail"]
+    assert not store.rows("SELECT * FROM scheduled")
+    assert logged_in.get("/api/drafts").json()["drafts"][0]["id"] == draft_id
+
+
 def test_unanswered_mail_becomes_a_follow_up_todo(logged_in, account_data, monkeypatch):
     store, account_id = setup_account(logged_in, account_data)
     sent = []

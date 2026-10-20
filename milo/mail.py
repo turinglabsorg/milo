@@ -370,15 +370,24 @@ def safe_error(exc):
     return "Operazione non riuscita. Controlla la configurazione del provider."
 
 
-def build_message(account, draft, original=None, attachments=()):
-    recipients = [address for _, address in getaddresses([value for value in (draft["to"], draft.get("cc", "")) if value])]
-    if not recipients or any("@" not in address or any(c in address for c in "\r\n") for address in recipients):
+def recipient_headers(draft):
+    # Completion leaves a comma ready for the next person; it is not a recipient.
+    headers = [(draft.get(field) or "").rstrip(" ,\t") for field in ("to", "cc")]
+    if any(c in value for value in headers for c in "\r\n\0"):
         raise ValueError("Inserisci destinatari validi")
+    recipients = getaddresses([value for value in headers if value])
+    if not recipients or any("@" not in address for _, address in recipients):
+        raise ValueError("Inserisci destinatari validi")
+    return headers
+
+
+def build_message(account, draft, original=None, attachments=()):
+    to, cc = recipient_headers(draft)
     message = EmailMessage()
     message["From"] = account["email"]
-    message["To"] = draft["to"]
-    if draft.get("cc"):
-        message["Cc"] = draft["cc"]
+    message["To"] = to
+    if cc:
+        message["Cc"] = cc
     message["Subject"] = draft["subject"]
     message["Message-ID"] = make_msgid()
     message["Date"] = email.utils.formatdate(localtime=True)
@@ -416,7 +425,7 @@ def reply_quote(draft, original):
 def send_mail(account, draft, original=None, attachments=()):
     message = build_message(account, draft, original, attachments)
     recipients = list(dict.fromkeys(address for _, address in getaddresses(
-        [value for value in (draft["to"], draft.get("cc", "")) if value])))
+        [str(message[header]) for header in ("To", "Cc") if message[header]])))
     context = ssl.create_default_context()
     if account["smtp_security"] == "tls":
         client = smtplib.SMTP_SSL(account["smtp_host"], account["smtp_port"], timeout=20, context=context)

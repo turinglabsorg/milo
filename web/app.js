@@ -1367,7 +1367,13 @@ document.addEventListener('focusin',event=>{
 });
 document.addEventListener('focusout',event=>{
   if(!event.target?.matches?.('#compose-form [name="to"], #compose-form [name="cc"]'))return;
-  setTimeout(()=>{if(document.activeElement!==event.target&&!document.activeElement?.closest?.('.recipient-list'))hideRecipients();},0);
+  setTimeout(()=>{
+    const active=document.activeElement;
+    if(active===event.target||active?.closest?.('.recipient-list'))return;
+    event.target.parentElement?.querySelector('.recipient-list')?.remove();
+    event.target.setAttribute('aria-expanded','false');
+    if(!active?.matches?.('#compose-form [name="to"], #compose-form [name="cc"]'))hideRecipients();
+  },0);
 });
 document.addEventListener('mousedown',event=>{if(event.target.closest?.('.recipient-option'))event.preventDefault();});
 async function handleKeydown(event) {

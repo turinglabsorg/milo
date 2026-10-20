@@ -54,6 +54,11 @@ external action. That file is the single source of global agent instructions.
   plus incoming senders). Rows live in `correspondents`, filled as mail arrives
   and by `backfill_correspondents` for mail already archived. The web composer
   and the iOS composer both use it; a finished address does not open the list.
+- Outgoing To/Cc headers pass through `recipient_headers` before MIME creation
+  and scheduling: autocomplete's trailing comma is removed, malformed addresses
+  are rejected before the composer closes, and SMTP uses the same normalized
+  headers as Gmail. Moving between To and Cc must preserve the new field's
+  pending suggestion lookup when the previous field loses focus.
 - Outgoing attachments: `draft_attachments` rows + files in
   `draft-attachments/<draft_id>/` (raw-body `POST /api/drafts/{id}/attachments?name=`,
   18 MB total); added by `build_message`, removed when the draft is sent or
@@ -91,7 +96,7 @@ external action. That file is the single source of global agent instructions.
   survive reanalysis, replies and archiving; existing unaccepted rows remain
   proposals. Backup/restore and the iOS thread/body caches preserve acceptance.
   Web and iOS show **Accetta da fare**, then **Nei da fare** or **Fatto**.
-- The offline web shell cache is `milo-shell-v29` (`web/sw.js`); bump its version
+- The offline web shell cache is `milo-shell-v30` (`web/sw.js`); bump its version
   when changing shell assets so installed clients fetch the new controls, and
   update the expected current cache in `tests/test_offline_first.py`.
 - **Scarica posta ora**, app entry and foreground activation request the existing

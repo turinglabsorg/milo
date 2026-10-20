@@ -1,8 +1,10 @@
+import sys
 import threading
 import time
 from email.message import EmailMessage
 from socket import socket
 
+import pytest
 import uvicorn
 from playwright.sync_api import expect, sync_playwright
 
@@ -112,3 +114,55 @@ def test_composer_offers_recent_people_and_inserts_a_contact(tmp_path):
         server.should_exit = True
         thread.join(timeout=10)
         assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("engine", ["chromium", pytest.param(
+    "webkit", marks=pytest.mark.skipif(sys.platform != "darwin", reason="macOS WebKit coverage"))])
+def test_forward_from_recipient_suggestions_reaches_transport(tmp_path, monkeypatch, engine):
+    from test_responsive_inbox import service
+
+    from milo.mail import build_message
+
+    context, submitted = {}, []
+
+    def prepare(app, received, sent):
+        store = app.state.store
+        context["bootstrap"] = store.bootstrap
+        store.note_addresses("Recipient <recipient@example.com>", time.time())
+        store.note_addresses("Copy <copy@example.com>", time.time())
+
+    def deliver(account, draft, original=None, attachments=()):
+        message = build_message(account, draft, original, attachments)
+        submitted.append(message)
+        return message
+
+    monkeypatch.setattr("milo.app.send_mail", deliver)
+    with service(tmp_path, prepare, live=True) as (url, sent), sync_playwright() as playwright:
+        browser = getattr(playwright, engine).launch(headless=True)
+        page = browser.new_page(viewport={"width": 1440, "height": 1000}, service_workers="block")
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        assert page.request.post(url + "/api/setup", data={
+            "password": "isolated test password", "bootstrap": context["bootstrap"],
+        }).status == 200
+        page.goto(url)
+        page.locator(f'[data-message="{sent}"]').click()
+        page.get_by_role("button", name="Inoltra", exact=True).click()
+        form = page.locator("#compose-form")
+        for field, label in [("to", "Recipient"), ("cc", "Copy")]:
+            form.locator(f'[name="{field}"]').fill(label)
+            page.locator(".recipient-option").filter(has_text=label).click()
+        expect(form.locator('[name="to"]')).to_have_value("Recipient <recipient@example.com>, ")
+        expect(form.locator('[name="cc"]')).to_have_value("Copy <copy@example.com>, ")
+        form.get_by_role("button", name="Invia messaggio").click()
+        expect(page.locator("#toast")).to_contain_text("Messaggio in partenza")
+        deadline = time.time() + 25
+        while time.time() < deadline and page.request.get(url + "/api/drafts").json()["drafts"]:
+            page.wait_for_timeout(250)
+        assert page.request.get(url + "/api/drafts").json()["drafts"] == []
+        assert len(submitted) == 1
+        assert str(submitted[0]["To"]) == "Recipient <recipient@example.com>"
+        assert str(submitted[0]["Cc"]) == "Copy <copy@example.com>"
+        assert "Messaggio inoltrato" in submitted[0].get_content()
+        assert not errors
+        browser.close()
