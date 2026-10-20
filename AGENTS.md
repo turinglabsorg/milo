@@ -28,8 +28,10 @@ external action. That file is the single source of global agent instructions.
 - Never scan the archive at startup: the Docker health check restarts a slow
   container. One-time rewrites run in background batches.
 - Deploy: push `main`, fast-forward `~/Sites/milo` on the Mac, `docker compose
-  build`, then bootout `system/space.grooooog.milo.server`, `compose up -d
-  --no-build --wait`, bootstrap the plist again (docs/DEPLOYMENT.md).
+  build`, verify image asset hashes, then SIGSTOP only the supervisor PID while
+  replacing `server` (`compose up -d --no-deps --no-build`). SIGCONT it in an
+  exit trap. Keep its launchd job loaded: bootout can kill its Docker backend
+  child and restart the shared engine (docs/DEPLOYMENT.md).
 - Original MIME lives in compressed files under `blobs/` (`Store.blobs`), read
   via `message(..., raw=True)`/`message_headers`. Write it only through
   `upsert_message`/`set_raw`; never store originals in the database.

@@ -99,13 +99,22 @@ surfaces exclude OAuth query parameters from access logs.
 
 ## Updating a running Docker deployment
 
-Build the tested image before replacing the container. During replacement, stop
-only `space.grooooog.milo.server` in the system launchd domain, leave the shared
-Grog service and Docker engine alone, run Compose, then bootstrap that same boot
-job from its saved plist. This prevents the availability supervisor from trying
-to restart a container while Compose is replacing it. Restore the job even if an
-update fails. The client retains downloaded content during temporary gateway
-failures; authorization denials remain distinct from server unavailability.
+Build the tested image before replacing the container. Compare the image's
+`/app/scripts/serve.py` and `/app/web/app.js` hashes with the checkout before
+activation, using a container without network access or archive mounts. A
+Docker interruption can leave newly copied files empty in an otherwise valid
+image; rebuild without cached layers if the hashes differ.
+
+During replacement, find the PID of `space.grooooog.milo.server` in the system
+launchd domain and suspend only that process with `SIGSTOP`. Keep its launchd
+job loaded: unloading it can kill the Docker backend it started as a child.
+Leave the shared Grog service and Docker engine running. Replace only `server`
+with `compose up -d --no-deps --no-build`, verify that it becomes healthy, and
+resume the supervisor with `SIGCONT` from an exit trap even if activation fails.
+Retain the previous image for rollback. This prevents the availability supervisor
+from restarting a container while Compose replaces it without disrupting the
+engine. The client retains downloaded content during temporary gateway failures;
+authorization denials remain distinct from server unavailability.
 
 ## PostgreSQL and original messages
 
