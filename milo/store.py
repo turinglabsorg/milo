@@ -236,7 +236,7 @@ class WriterLock:
 
 
 READER_POOL = 12
-SEARCH_COLUMNS = ("sender", "sender_email", "subject", "preview", "body")
+SEARCH_COLUMNS = ("sender", "sender_email", "recipients", "subject", "preview", "body")
 VISIBLE_WRITE = re.compile(r"\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:messages|drafts|scheduled|todos|senders|accounts|settings|rules|followups)\b", re.I)
 
 
@@ -794,8 +794,8 @@ class Store:
             clauses.append("account_id=?")
             params.append(account)
         if search:
-            clauses.append("(sender ILIKE ? OR sender_email ILIKE ? OR subject ILIKE ? OR body ILIKE ?)")
-            params.extend([f"%{search}%"] * 4)
+            clauses.append("(sender ILIKE ? OR sender_email ILIKE ? OR recipients ILIKE ? OR subject ILIKE ? OR body ILIKE ?)")
+            params.extend([f"%{search}%"] * 5)
         where = " AND ".join(clauses)
         return [self.public_message(row) for row in self.rows(
             f"SELECT {self.message_fields()} FROM messages WHERE {where} ORDER BY date DESC LIMIT ?", (*params, limit))]
@@ -921,8 +921,8 @@ class Store:
             clauses.append("COALESCE(thread_id,id)=?")
             params.append(thread)
         if search:
-            clauses.append("(sender ILIKE ? OR sender_email ILIKE ? OR subject ILIKE ? OR body ILIKE ?)")
-            params.extend([f"%{search}%"] * 4)
+            clauses.append("(sender ILIKE ? OR sender_email ILIKE ? OR recipients ILIKE ? OR subject ILIKE ? OR body ILIKE ?)")
+            params.extend([f"%{search}%"] * 5)
         cursor = " AND (date<? OR (date=? AND id<?))" if before else ""
         ordering = "date DESC,id DESC" if chronological else "pinned DESC,date DESC"
         if before:
