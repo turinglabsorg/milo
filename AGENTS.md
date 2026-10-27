@@ -69,6 +69,9 @@ external action. That file is the single source of global agent instructions.
   are rebuilt, and shutdown cancels a running build. Only one process builds
   (advisory try-lock 80251); `SCHEMA` DDL reruns only when its hash changes
   (setting `schema`), since rerunning it locks tables and deadlocked with CIC.
+  Message and conversation searches include the stored `recipients` header,
+  including sent To addresses and display names, with the same account/view
+  filters. Keep `messages_search_recipients` in the background index set.
 - Linux notifications: `scripts/notifier.py` (systemd user unit
   `milo-notifier.service`, written by `install.py` when `.data/server.json`
   exists) follows `/api/events` and asks `GET /api/notifications?after=<seq>`
