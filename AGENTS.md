@@ -72,6 +72,12 @@ external action. That file is the single source of global agent instructions.
   Message and conversation searches include the stored `recipients` header,
   including sent To addresses and display names, with the same account/view
   filters. Keep `messages_search_recipients` in the background index set.
+- `GET /api/messages` accepts explicit `limit` (1–500) and a paired finite
+  `before_date`/`before_id` cursor for chronological conversation pagination.
+  Its `next` query object retains filters and page size. Without pagination,
+  preserve the pinned-first 100-row client list. Results are conversation
+  metadata, not thread bodies; see `docs/API.md`. No new schema or index is
+  needed: pagination reuses `Store.conversations` and its existing keyset path.
 - Linux notifications: `scripts/notifier.py` (systemd user unit
   `milo-notifier.service`, written by `install.py` when `.data/server.json`
   exists) follows `/api/events` and asks `GET /api/notifications?after=<seq>`

@@ -15,7 +15,7 @@ from urllib.parse import quote, urlsplit
 
 import httpx
 import psycopg
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
@@ -453,8 +453,30 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         return {"recipients": store.recipient_suggestions(q)}
 
     @app.get("/api/messages", dependencies=[Depends(auth)])
-    def messages(view="inbox", category: str | None = None, account: str | None = None, search=""):
-        return {"messages": store.conversations(view, category, account, search[:300])}
+    def messages(view="inbox", category: str | None = None, account: str | None = None, search="",
+                 limit: int | None = Query(default=None, ge=1, le=500),
+                 before_date: float | None = None, before_id: str = ""):
+        """List conversations, or paginate chronologically with an explicit limit (1–500).
+
+        Follow the returned next query parameters unchanged to retain filters and page size.
+        Without a limit or cursor, preserve the pinned-first visible list used by existing clients.
+        """
+        if (before_date is None) != (not before_id) or len(before_id) > 128 or (before_date is not None and not math.isfinite(before_date)):
+            raise HTTPException(422, "Cursore non valido")
+        before = (before_date, before_id) if before_id else None
+        if limit is None and before is None:
+            return {"messages": store.conversations(view, category, account, search[:300])}
+        size = limit or 100
+        rows = store.conversations(view, category, account, search[:300], limit=size + 1,
+                                   before=before, chronological=True)
+        more = len(rows) > size
+        rows = rows[:size]
+        following = None
+        if more:
+            following = {"view": view, "limit": size, "before_date": rows[-1]["date"], "before_id": rows[-1]["id"]}
+            following.update({key: value for key, value in (("category", category), ("account", account),
+                                                           ("search", search[:300])) if value})
+        return {"messages": rows, "next": following}
 
     @app.get("/api/client/messages", dependencies=[Depends(auth)])
     def client_messages(before_date: float | None = None, before_id: str = ""):
