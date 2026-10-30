@@ -99,5 +99,7 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(preview.waitForExistence(timeout: 10), "The HTML preview must render what was typed")
         XCTAssertTrue(app.staticTexts["Inviata insieme al testo semplice"].exists)
         save("06-compose-html")
+        for _ in 0..<3 where !preview.isHittable { app.swipeUp() }
+        save("07-compose-html-preview")
     }
 }
