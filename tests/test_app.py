@@ -281,3 +281,55 @@ def test_snoozed_email_returns_to_inbox(logged_in, account_data):
     assert client.get("/api/messages?view=snoozed").json()["messages"][0]["id"] == message_id
     client.patch("/api/messages/"+message_id, json={"snoozed_until": time.time()-1})
     assert client.get("/api/messages").json()["messages"][0]["id"] == message_id
+
+
+def test_html_drafts_are_sent_as_multipart_alternative(logged_in, account_data, monkeypatch):
+    client = logged_in
+    add_mail(client, account_data)
+    account_id = client.app.state.store.accounts()[0]["id"]
+    html = ('<html><body><p>Ciao <b>Comune</b></p>'
+            '<img src="https://pixel.example/logo.png?id=abc" width="194" height="47" alt="Logo"></body></html>')
+    draft = {"account_id": account_id, "to": "ufficio@example.com", "subject": "Proposta",
+             "body": "Ciao Comune", "html": html}
+    draft_id = client.put("/api/drafts", json=draft).json()["id"]
+    assert client.get("/api/drafts").json()["drafts"][0]["html"] == html
+    sent = []
+
+    class FakeSMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def ehlo(self):
+            pass
+
+        def login(self, *args):
+            pass
+
+        def send_message(self, message, from_addr=None, to_addrs=None):
+            sent.append(message)
+            return {}
+
+    monkeypatch.setattr("milo.mail.smtplib.SMTP_SSL", FakeSMTP)
+    assert client.post(f"/api/drafts/{draft_id}/send").status_code == 200
+    assert len(sent) == 1
+    message = sent[0]
+    assert message.get_content_type() == "multipart/alternative"
+    plain = message.get_body(("plain",))
+    rich = message.get_body(("html",))
+    assert plain.get_content().strip() == "Ciao Comune"
+    assert rich.get_content_type() == "text/html"
+    assert 'width="194" height="47"' in rich.get_content()
+    assert "https://pixel.example/logo.png?id=abc" in rich.get_content()
+
+
+def test_plain_drafts_stay_text_plain(account_data):
+    from milo.mail import build_message
+
+    message = build_message(account_data, {"to": "a@example.com", "subject": "S", "body": "Testo"})
+    assert message.get_content_type() == "text/plain"

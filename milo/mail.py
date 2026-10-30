@@ -395,6 +395,8 @@ def build_message(account, draft, original=None, attachments=()):
         message["In-Reply-To"] = original["message_id"]
         message["References"] = original["message_id"]
     message.set_content(draft["body"] + reply_quote(draft, original))
+    if draft.get("html"):
+        message.add_alternative(draft["html"], subtype="html")
     for attachment in attachments:
         maintype, _, subtype = attachment["type"].partition("/")
         message.add_attachment(attachment["data"], maintype=maintype, subtype=subtype, filename=attachment["name"])

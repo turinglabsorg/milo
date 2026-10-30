@@ -59,6 +59,8 @@ external action. That file is the single source of global agent instructions.
   are rejected before the composer closes, and SMTP uses the same normalized
   headers as Gmail. Moving between To and Cc must preserve the new field's
   pending suggestion lookup when the previous field loses focus.
+- Drafts may carry an optional  field (API only):  then
+  adds it as the  alternative of the plain  (docs/API.md).
 - Outgoing attachments: `draft_attachments` rows + files in
   `draft-attachments/<draft_id>/` (raw-body `POST /api/drafts/{id}/attachments?name=`,
   18 MB total); added by `build_message`, removed when the draft is sent or

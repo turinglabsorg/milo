@@ -40,3 +40,13 @@ To examine all messages inside a returned conversation, use
 `GET /api/messages/{id}/thread?lazy=true` for metadata, and fetch bodies or
 attachments only when needed. A conversation summary or sent flag alone does
 not establish successful delivery or the absence of a later bounce or reply.
+
+# HTML drafts
+
+`PUT /api/drafts` accepts an optional `html` field next to the plain-text
+`body`. When `html` is non-empty, sending (immediate or scheduled, SMTP or
+Gmail) builds a `multipart/alternative` message: `body` becomes the
+`text/plain` part and `html` the `text/html` part, so clients render the HTML
+and fall back to text. Drafts without `html` are sent as `text/plain` exactly
+as before. The web and iOS composers do not edit `html`; saving such a draft
+from a composer drops it.

@@ -83,6 +83,7 @@ class DraftInput(BaseModel):
     cc: str = Field(default="", max_length=2000)
     subject: str = Field(max_length=998)
     body: str = Field(max_length=1_000_000)
+    html: str = Field(default="", max_length=1_000_000)
     reply_to_id: str | None = None
     context_message_id: str | None = None
     mode: Literal["new", "reply", "reply_all", "forward"] = "new"
