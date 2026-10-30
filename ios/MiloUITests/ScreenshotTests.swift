@@ -109,4 +109,41 @@ final class ScreenshotTests: XCTestCase {
         sleep(1)
         save("07-compose-html-rendered")
     }
+
+    func testComposeTracksOpensAndSentMailShowsDeliveryTicks() {
+        let row = app.descendants(matching: .any).matching(identifier: "row-m2").firstMatch
+        if !row.waitForExistence(timeout: 10) {
+            app.staticTexts["Smart inbox"].firstMatch.tap()
+        }
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["compose"].waitForExistence(timeout: 5))
+        app.buttons["compose"].tap()
+        XCTAssertTrue(app.webViews["compose-rich-editor"].waitForExistence(timeout: 10))
+        let track = app.switches["compose-track"]
+        for _ in 0..<5 where !track.isHittable { app.swipeUp() }
+        XCTAssertTrue(track.waitForExistence(timeout: 5), "The compose options offer open tracking")
+        XCTAssertEqual(track.value as? String, "1", "Open tracking is on by default")
+        save("08-compose-track-open")
+        app.buttons["Chiudi"].tap()
+        XCTAssertTrue(app.buttons["Elimina bozza"].waitForExistence(timeout: 5))
+        app.buttons["Elimina bozza"].tap()
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let sent = app.descendants(matching: .any).matching(identifier: "view-sent").firstMatch
+        XCTAssertTrue(sent.waitForExistence(timeout: 10))
+        sent.tap()
+        let opened = app.descendants(matching: .any).matching(identifier: "row-m7").firstMatch
+        XCTAssertTrue(opened.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "delivery-opened").firstMatch.waitForExistence(timeout: 10),
+                      "An opened mail shows two accent ticks")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "delivery-sent").firstMatch.exists,
+                      "A mail confirmed by the server but not yet opened shows one muted tick")
+        save("09-sent-ticks")
+
+        opened.tap()
+        XCTAssertTrue(app.buttons["reply"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "delivery-opened").firstMatch.waitForExistence(timeout: 10),
+                      "The thread shows the delivery ticks on the sent message")
+        save("10-thread-ticks")
+    }
 }

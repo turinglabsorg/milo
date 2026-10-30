@@ -24,7 +24,7 @@ public final class DemoTransport: Transport, @unchecked Sendable {
 
     private var visibleRows: [[String: Any]] {
         lock.lock(); defer { lock.unlock() }
-        return Self.rows.filter { !removed.contains($0["id"] as? String ?? "") }
+        return Self.allRows.filter { !removed.contains($0["id"] as? String ?? "") }
     }
 
     public init() {}
@@ -46,6 +46,14 @@ public final class DemoTransport: Transport, @unchecked Sendable {
         row("m6", "TestFlight", "testflight@example.com", "Milo is now available to test",
             "You've been invited to test Milo.", 120000, category: "updates"),
     ]
+    /// Mail Sam sent: one already opened by the recipient, one only confirmed by the server.
+    static let sentRows: [[String: Any]] = [
+        row("m7", "Sam Taylor", "sam@example.com", "Proposta per lunedì",
+            "Ti mando la proposta: dimmi se i numeri ti tornano.", 900, sent: true),
+        row("m8", "Sam Taylor", "sam@example.com", "Preventivo aggiornato",
+            "In allegato il preventivo con le modifiche di ieri.", 7200, sent: true),
+    ]
+    static var allRows: [[String: Any]] { rows + sentRows }
     /// A fixed-width newsletter layout, wider than a phone.
     static let wideHTML = "<table width=\"600\" style=\"width:600px\"><tr><td style=\"width:600px;padding:20px\">" +
         "<div style=\"width:560px;height:180px;background:#2563eb;border-radius:24px\"></div>" +
@@ -54,11 +62,12 @@ public final class DemoTransport: Transport, @unchecked Sendable {
         "</td></tr></table>"
 
     static func row(_ id: String, _ sender: String, _ email: String, _ subject: String, _ preview: String,
-                    _ age: Double, read: Int = 1, starred: Int = 0, category: String = "people", count: Int = 1) -> [String: Any] {
+                    _ age: Double, read: Int = 1, starred: Int = 0, category: String = "people", count: Int = 1,
+                    sent: Bool = false) -> [String: Any] {
         ["id": id, "account_id": "demo", "thread_id": "t-" + id, "sender": sender, "sender_email": email,
          "subject": subject, "preview": preview, "date": now - age, "read": read, "content_version": "v-" + id,
-         "starred": starred, "archived": 0, "sent": 0, "category": category, "has_inbox": 1, "has_archive": 0,
-         "has_sent": 0, "received_count": count, "unread_count": read == 0 ? 1 : 0, "pinned": 0,
+         "starred": starred, "archived": 0, "sent": sent ? 1 : 0, "category": category, "has_inbox": sent ? 0 : 1,
+         "has_archive": 0, "has_sent": sent ? 1 : 0, "received_count": count, "unread_count": read == 0 ? 1 : 0, "pinned": 0,
          "message_count": count, "analyzed_count": 0, "replied": false]
     }
 
@@ -69,6 +78,10 @@ public final class DemoTransport: Transport, @unchecked Sendable {
         message["cc_addresses"] = [[String: Any]]()
         message["reply_to_addresses"] = [[String: Any]]()
         message["body_loaded"] = body
+        if (row["sent"] as? Int) == 1 {
+            message["recipients"] = "giulia@example.com"
+            message["to_addresses"] = [["name": "Giulia Rossi", "email": "giulia@example.com"]]
+        }
         if body {
             let text = (row["preview"] as? String ?? "") + "\n\nA presto,\n" + (row["sender"] as? String ?? "")
             message["body"] = text
@@ -128,8 +141,8 @@ public final class DemoTransport: Transport, @unchecked Sendable {
             }
             return (200, ["recipients": matched])
         case ("GET", "/api/deliveries"):
-            return (200, ["deliveries": [["id": "m1", "sent": Self.now - 900, "opened": Self.now - 300, "opens": 2, "tracked": 1],
-                                         ["id": "m4", "sent": Self.now - 86400, "opened": NSNull(), "opens": 0, "tracked": 1]]])
+            return (200, ["deliveries": [["id": "m7", "sent": Self.now - 900, "opened": Self.now - 300, "opens": 2, "tracked": 1],
+                                         ["id": "m8", "sent": Self.now - 7200, "opened": NSNull(), "opens": 0, "tracked": 1]]])
         case ("GET", "/api/drafts"):
             lock.lock(); defer { lock.unlock() }
             return (200, ["drafts": Array(drafts.values)])
@@ -148,7 +161,7 @@ public final class DemoTransport: Transport, @unchecked Sendable {
         let parts = path.split(separator: "/").map(String.init)
         if parts.count >= 3, parts[1] == "messages" {
             let id = parts[2]
-            guard let row = Self.rows.first(where: { $0["id"] as? String == id }) else { return (404, ["detail": "Email non trovata"]) }
+            guard let row = Self.allRows.first(where: { $0["id"] as? String == id }) else { return (404, ["detail": "Email non trovata"]) }
             if parts.count == 4, parts[3] == "todos", method == "POST" {
                 let body = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: String] ?? [:]
                 let text = body["text"] ?? ""

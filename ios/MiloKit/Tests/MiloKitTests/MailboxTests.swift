@@ -65,12 +65,16 @@ final class MailboxTests: XCTestCase {
         let (mailbox, transport) = make()
         await mailbox.refresh()
         XCTAssertTrue(transport.requests.contains("GET /api/deliveries"))
-        let opened = try XCTUnwrap(mailbox.deliveries["m1"])
+        let opened = try XCTUnwrap(mailbox.deliveries["m7"])
         XCTAssertNotNil(opened.opened)
         XCTAssertEqual(opened.opens, 2)
         XCTAssertTrue(opened.tracked.value)
-        let waiting = try XCTUnwrap(mailbox.deliveries["m4"])
+        let waiting = try XCTUnwrap(mailbox.deliveries["m8"])
         XCTAssertNil(waiting.opened)
+        XCTAssertFalse(mailbox.conversations.contains { $0.id == "m7" }, "Sent mail stays out of the inbox")
+        mailbox.view = .sent
+        mailbox.applyFilter()
+        XCTAssertEqual(Set(mailbox.conversations.map(\.id)), ["m7", "m8"])
     }
 
     func testEditorDocumentBlocksRemoteImagesAndKeepsTheSenderDocument() {
