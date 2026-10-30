@@ -100,7 +100,7 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(app.buttons["Grassetto"].waitForExistence(timeout: 5), "The formatting toolbar shows while editing")
         XCTAssertTrue(app.buttons["Fine"].exists)
         editor.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Gentile Comune'")).firstMatch.tap()
-        app.typeText(" di Ragusa")
+        editor.typeText(" di Ragusa")
         XCTAssertTrue(editor.staticTexts.containing(NSPredicate(format: "label CONTAINS 'di Ragusa'")).firstMatch.waitForExistence(timeout: 10),
                       "Typing edits the rendered message")
         save("06-compose-html-editing")
