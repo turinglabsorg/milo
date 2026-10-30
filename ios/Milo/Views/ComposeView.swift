@@ -127,7 +127,6 @@ struct ComposeView: View {
                                 .font(.caption).foregroundStyle(Color.milo.muted)
                         }
                     }
-                    .accessibilityIdentifier("compose-html-section")
                 }
                 Section {
                     if let templates = mailbox.state?.templates, !templates.isEmpty {
