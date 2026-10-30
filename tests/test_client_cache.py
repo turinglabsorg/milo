@@ -221,3 +221,36 @@ def test_web_composer_keeps_the_html_alternative_of_an_api_draft(tmp_path):
         draft = page.request.get(url + '/api/drafts').json()['drafts'][0]
         assert draft['body'] == 'Ciao Comune, testo aggiornato' and draft['html'] == html
         browser.close()
+
+
+def test_web_composer_edits_and_previews_the_html_alternative(tmp_path):
+    with service(tmp_path) as (url, sent), sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(service_workers='block')
+        pixel_requests = []
+        page.route('https://pixel.example/**', lambda route: (pixel_requests.append(route.request.url), route.fulfill(status=204)))
+        page.goto(url)
+        expect(page.locator('.message-row')).to_have_count(2)
+        account = page.request.get(url + '/api/state').json()['accounts'][0]['id']
+        page.request.put(url + '/api/drafts', data={'id': 'html-edit', 'account_id': account, 'to': 'comune@example.com',
+                                                   'subject': 'HTML', 'body': 'Ciao Comune', 'mode': 'new', 'revision': 1})
+        page.reload()
+        page.locator('[data-view="drafts"]').click()
+        page.locator('.draft-row').click()
+        section = page.locator('#compose-form .compose-html')
+        expect(section).not_to_have_attribute('open', '')
+        section.locator('summary').click()
+        html = '<p>Ciao <b>Comune</b></p><img src="https://pixel.example/logo.png?id=abc" width="194" height="47" alt="Logo">'
+        page.locator('#compose-form [name="html"]').fill(html)
+        expect(page.frame_locator('.compose-html-preview iframe').locator('b')).to_have_text('Comune')
+        expect(section.locator('summary small')).to_have_text('Inviata insieme al testo semplice')
+        page.get_by_role('button', name='Salva bozza', exact=True).click()
+        expect(page.locator('.draft-save-status')).to_have_text('Bozza salvata')
+        assert page.request.get(url + '/api/drafts').json()['drafts'][0]['html'] == html
+        page.reload()
+        page.locator('[data-view="drafts"]').click()
+        page.locator('.draft-row').click()
+        expect(page.locator('#compose-form .compose-html')).to_have_attribute('open', '')
+        expect(page.locator('#compose-form [name="html"]')).to_have_value(html)
+        assert pixel_requests == []
+        browser.close()

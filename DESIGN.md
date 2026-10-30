@@ -134,3 +134,7 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
   danger-coloured on hover. Quick replies are 16 px-radius pills under the
   reply actions, loaded on request.
 - Shortcuts are listed with `kbd` chips (11 px, bordered, `--surface-alt`).
+- The composer's optional **Versione HTML** is a bordered `details` section after
+  the message body (9 px radius, `--surface`), open when the draft has HTML. It
+  stacks a 13 px monospace code field and a white sandboxed preview frame (8 px
+  radius); the preview blocks remote images and says so in an 11 px muted note.

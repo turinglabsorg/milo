@@ -48,7 +48,7 @@ not establish successful delivery or the absence of a later bounce or reply.
 Gmail) builds a `multipart/alternative` message: `body` becomes the
 `text/plain` part and `html` the `text/html` part, so clients render the HTML
 and fall back to text. Drafts without `html` are sent as `text/plain` exactly
-as before. The web composer does not edit `html` but keeps it when it saves
-the draft, so only the plain-text `body` changes; update `html` through the
-API if the text changes. The iOS composer does not keep `html` yet: saving
+as before. The web composer edits `html` in its **Versione HTML** section, with
+a sandboxed preview that blocks remote images so tracking pixels do not fire,
+and saves it with the draft. The iOS composer does not keep `html` yet: saving
 such a draft from iOS drops it.
