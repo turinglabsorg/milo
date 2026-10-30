@@ -59,7 +59,7 @@ public enum MailEditor {
           const href = node.getAttribute('href');
           if (/^https?:/i.test(href) && !node.textContent.includes(href)) node.append(' (' + href + ')');
         });
-        return clone.textContent.replace(/[ \t\u00a0]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        return clone.textContent.replace(/[ \t\u00a0]+\n/g, '\n').replace(/^--$/gm, '-- ').replace(/\n{3,}/g, '\n\n').trim();
       };
       ed.height = () => Math.ceil(document.documentElement.scrollHeight);
       ed.state = () => ({html: ed.serialize(), text: ed.text(), height: ed.height()});
@@ -81,6 +81,7 @@ public enum MailEditor {
         if (on) document.body.focus();
       };
       document.addEventListener('input', ed.post);
+      new MutationObserver(ed.post).observe(document.documentElement, {subtree: true, childList: true, characterData: true});
       document.addEventListener('selectionchange', () => {
         const selection = getSelection();
         if (selection.rangeCount && document.body.contains(selection.anchorNode)) ed.range = selection.getRangeAt(0).cloneRange();

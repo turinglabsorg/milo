@@ -271,8 +271,12 @@ struct ComposeView: View {
     }
 
     private func send() {
-        sending = true
         error = nil
+        if draft.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            error = "Il messaggio è vuoto: scrivi il testo prima di inviarlo."
+            return
+        }
+        sending = true
         let draft = draft
         Task {
             defer { sending = false }
