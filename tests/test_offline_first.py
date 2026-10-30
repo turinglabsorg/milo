@@ -323,7 +323,7 @@ def test_service_worker_retires_old_shell_and_refreshes_cached_client_assets(tmp
         page.goto(url + '/static/icon.svg')
         page.evaluate('()=>caches.open("milo-shell-v10").then(cache=>cache.put("/static/app.js",new Response("// obsolete-client")))')
         warm(page, url, sent)
-        wait_for_async(page, 'async()=>{const keys=await caches.keys();return keys.includes("milo-shell-v33")&&!keys.includes("milo-shell-v10");}')
+        wait_for_async(page, 'async()=>{const keys=await caches.keys();return keys.includes("milo-shell-v34")&&!keys.includes("milo-shell-v10");}')
         version['name'] = 'updated'
         old = page.evaluate('()=>fetch("/static/app.js").then(response=>response.text())')
         assert 'shell-version-original' in old

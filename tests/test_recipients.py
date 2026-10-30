@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 import time
@@ -164,5 +165,57 @@ def test_forward_from_recipient_suggestions_reaches_transport(tmp_path, monkeypa
         assert str(submitted[0]["To"]) == "Recipient <recipient@example.com>"
         assert str(submitted[0]["Cc"]) == "Copy <copy@example.com>"
         assert "Messaggio inoltrato" in submitted[0].get_body(("plain",)).get_content()
+        assert not errors
+        browser.close()
+
+
+WEBKIT = pytest.param("webkit", marks=pytest.mark.skipif(
+    sys.platform != "darwin" and not os.environ.get("MILO_WEBKIT"), reason="macOS WebKit coverage"))
+
+
+@pytest.mark.parametrize("engine", ["chromium", WEBKIT])
+def test_typed_formatted_text_reaches_transport(tmp_path, monkeypatch, engine):
+    from test_responsive_inbox import service
+
+    from milo.mail import build_message
+
+    context, submitted = {}, []
+
+    def prepare(app, received, sent):
+        context["bootstrap"] = app.state.store.bootstrap
+
+    def deliver(account, draft, original=None, attachments=()):
+        message = build_message(account, draft, original, attachments)
+        submitted.append(message)
+        return message
+
+    monkeypatch.setattr("milo.app.send_mail", deliver)
+    with service(tmp_path, prepare, live=True) as (url, sent), sync_playwright() as playwright:
+        browser = getattr(playwright, engine).launch(headless=True)
+        page = browser.new_page(viewport={"width": 1440, "height": 1000}, service_workers="block")
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        assert page.request.post(url + "/api/setup", data={
+            "password": "isolated test password", "bootstrap": context["bootstrap"],
+        }).status == 200
+        page.goto(url)
+        expect(page.locator(f'[data-message="{sent}"]')).to_be_visible()
+        page.locator('[data-action="compose"]').first.click()
+        form = page.locator("#compose-form")
+        form.locator('[name="to"]').fill("comune@example.com")
+        form.locator('[name="subject"]').fill("Vuoto")
+        form.get_by_role("button", name="Invia messaggio").click()
+        expect(form.locator(".form-error")).to_contain_text("Il messaggio è vuoto")
+        form.locator('[name="subject"]').fill("Testo digitato")
+        page.frame_locator("#compose-form .rich-frame").locator("body").click()
+        page.keyboard.type("Buongiorno Comune")
+        form.get_by_role("button", name="Invia messaggio").click()
+        expect(page.locator("#toast")).to_contain_text("Messaggio in partenza")
+        deadline = time.time() + 25
+        while time.time() < deadline and page.request.get(url + "/api/drafts").json()["drafts"]:
+            page.wait_for_timeout(250)
+        assert len(submitted) == 1
+        assert "Buongiorno Comune" in submitted[0].get_body(("plain",)).get_content()
+        assert "Buongiorno Comune" in submitted[0].get_body(("html",)).get_content()
         assert not errors
         browser.close()

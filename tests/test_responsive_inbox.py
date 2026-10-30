@@ -207,7 +207,7 @@ def test_large_forward_quoted_history_and_failed_close_recovery(tmp_path, width,
         page.get_by_role('button', name='Salva bozza', exact=True).click()
         expect(page.locator('.draft-save-status')).to_have_text('Bozza salvata')
         stored = page.request.get(url + '/api/drafts').json()['drafts'][0]
-        assert stored['body'] == forwarded and stored['context_message_id'] == sent
+        assert stored['body'] == forwarded.strip() and stored['context_message_id'] == sent
 
         # Closing must complete before a failing server response arrives.
         def fail_save(route):

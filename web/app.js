@@ -771,7 +771,7 @@ function initRichFrame(frame){
   const doc=frame.contentDocument;if(!doc?.body)return;
   richFit(frame);
   if(frame.dataset.editing==='1')doc.designMode='on';
-  doc.addEventListener('input',()=>{richSync(frame);richFit(frame);});
+  new MutationObserver(()=>{richSync(frame);richFit(frame);}).observe(doc.documentElement,{subtree:true,childList:true,characterData:true,attributes:true});
   doc.addEventListener('keydown',handleKeydown);
   doc.addEventListener('click',event=>{if(frame.dataset.editing!=='1'&&event.target.closest?.('a'))event.preventDefault();});
 }
@@ -916,6 +916,7 @@ function renderInlineComposer(existing=null) {
 }
 function captureCompose() {
   const form=$('#compose-form');if(!form||!S.compose)return null;
+  form.querySelectorAll('.rich-frame').forEach(frame=>{const doc=frame.contentDocument;if(doc?.body&&doc.querySelector('[data-milo-editor]')){form.querySelector('[name="html"]').value=richSerialize(doc);form.querySelector('[name="body"]').value=richText(doc);}});
   const fields=Object.fromEntries(new FormData(form));
   const changed=Object.keys(fields).some(key=>fields[key]!==String(S.compose[key]||''));
   S.compose={...S.compose,...fields,revision:changed?Math.max(Date.now(),(S.compose.revision||0)+1):S.compose.revision};
@@ -1363,6 +1364,7 @@ document.addEventListener('submit', async event => {
     if(form.id==='compose-form') {
       const snapshot=captureCompose(),id=await saveCompose();if(!id)throw new Error('Scrivi prima il tuo messaggio.');
       if(!String(snapshot.to||'').trim()&&!String(snapshot.cc||'').trim())throw new Error('Inserisci almeno un destinatario.');
+      if(!String(snapshot.body||'').trim()&&!(snapshot.attachments||[]).length)throw new Error('Il messaggio è vuoto: scrivi il testo prima di inviarlo.');
       await persistDraft(snapshot);await scheduleDraft(id,Date.now()/1000+UNDO_SECONDS,snapshot.followup_days);
       if(S.compose?.id===id)removeComposer();
       toast('Messaggio in partenza…',{label:'Annulla',duration:UNDO_SECONDS*1000,run:()=>undoSend(id,snapshot).catch(error=>toast(error.message))});
