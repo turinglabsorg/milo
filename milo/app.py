@@ -774,11 +774,14 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             signature = ((store.setting("signatures") or {}).get(account["id"]) or "").strip() if token else ""
             if token:
                 html = draft.get("html") or text_html(draft["body"])
+                signed = None
                 if signature:
                     _, width, height = render_signature(signature, account["email"])
-                    html = html_with_signature(html, signature, f"{own_pixel}{token}.png", width, height)
-                else:
-                    html = html_with_pixel(html, f"{own_pixel}{token}.gif")
+                    signed = html_with_signature(html, signature, f"{own_pixel}{token}.png", width, height)
+                if signed is None:
+                    signature = ""
+                    signed = html_with_pixel(html, f"{own_pixel}{token}.gif")
+                html = signed
                 draft = {**draft, "html": html}
             if account["provider"] == "google":
                 client = Gmail(store, account["id"])

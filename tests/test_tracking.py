@@ -127,3 +127,16 @@ def test_public_signature_image_comes_from_the_private_service():
         assert card.headers["content-type"] == "image/png" and card.content == b"\x89PNG-card"
         fallback = client.get("/o/" + "d" * 24 + ".png")
         assert fallback.headers["content-type"] == "image/gif"
+
+
+def test_template_documents_keep_their_own_signature(logged_in, account_data, monkeypatch):
+    client = logged_in
+    add_mail(client, account_data)
+    account_id = client.app.state.store.accounts()[0]["id"]
+    assert client.put("/api/settings/signatures", json={"signatures": {account_id: "Seb"}}).status_code == 200
+    template = '<!doctype html><html><head><style>.brand{color:#0f3d3e}</style></head><body><p>Gentile Comune</p></body></html>'
+    message = send(client, account_id, monkeypatch, [], id="template", html=template)
+    html = message.get_body(("html",)).get_content()
+    assert ".png" not in html and "-- " not in html
+    assert re.search(r'<img src="http://127\.0\.0\.1:8025/o/[A-Za-z0-9_-]{24}\.gif" width="1" height="1"[^>]*></body></html>', html)
+    assert client.get("/api/deliveries").json()["deliveries"][0]["tracked"] == 1
