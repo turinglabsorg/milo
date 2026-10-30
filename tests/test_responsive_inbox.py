@@ -322,3 +322,26 @@ def test_new_message_opens_in_the_reading_column(tmp_path, width, height):
             expect(page.locator('.mail-content h2')).to_be_visible()
         assert errors == []
         browser.close()
+
+
+def test_closing_a_signature_only_message_keeps_no_draft(tmp_path):
+    def prepare(app, received, sent):
+        store = app.state.store
+        store.set_setting("signatures", {store.accounts()[0]['id']: 'Sam Taylor'})
+
+    with service(tmp_path, prepare) as (url, sent), sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(service_workers='block')
+        page.goto(url)
+        expect(page.locator('.message-row').first).to_be_visible()
+        page.locator('[data-action="compose"]').first.click()
+        expect(page.frame_locator('#compose-form .rich-frame').locator('body')).to_contain_text('Sam Taylor')
+        page.locator('#compose-form [data-action="close-compose"]').first.click()
+        expect(page.locator('#compose-form')).to_have_count(0)
+        page.wait_for_timeout(1000)
+        assert page.request.get(url + '/api/drafts').json()['drafts'] == []
+        page.locator('[data-action="compose"]').first.click()
+        type_body(page, 'Una riga')
+        page.locator('#compose-form [data-action="close-compose"]').first.click()
+        wait_for_async(page, 'async()=>(await (await fetch("/api/drafts")).json()).drafts.length===1')
+        browser.close()
