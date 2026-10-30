@@ -54,7 +54,7 @@ def test_scheduled_forward_to_autocompleted_recipients_sends_once(logged_in, mon
     message = email.message_from_bytes(base64.urlsafe_b64decode(submitted[0]["raw"]), policy=policy.default)
     assert getaddresses([str(message["To"])]) == [("Recipient", "recipient@example.com")]
     assert getaddresses([str(message["Cc"])]) == [("Copy", "copy@example.com")]
-    assert "Original text" in message.get_content()
+    assert "Original text" in message.get_body(("plain",)).get_content()
     assert logged_in.get("/api/drafts").json()["drafts"] == []
     assert store.messages(view="sent")[0]["subject"] == "Fwd: Project"
 
