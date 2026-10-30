@@ -205,6 +205,11 @@ public final class APIClient: Sendable {
         try await call("POST", "/devices", body: ["token": token, "environment": environment])
     }
 
+    public func deliveries() async throws -> [Delivery] {
+        struct List: Decodable { var deliveries: [Delivery] }
+        return try await get(List.self, "/deliveries").deliveries
+    }
+
     public func todos() async throws -> [Todo] {
         struct List: Decodable { var todos: [Todo] }
         return try await get(List.self, "/todos").todos

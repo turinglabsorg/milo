@@ -295,6 +295,13 @@ public struct Draft: Codable, Hashable, Identifiable, Sendable {
     public var mode: Mode
     public var revision: Int
     public var scheduled: Schedule?
+    /// Open tracking for this message; `nil` means the server default (tracked).
+    public var track: Bool?
+
+    public var tracksOpen: Bool {
+        get { track ?? true }
+        set { track = newValue }
+    }
 
     public init(id: String = UUID().uuidString.lowercased(), accountId: String, to: String = "", cc: String = "",
                 subject: String = "", body: String = "", replyToId: String? = nil, mode: Mode = .new,
@@ -309,6 +316,23 @@ public struct Draft: Codable, Hashable, Identifiable, Sendable {
         self.contextMessageId = replyToId
         self.mode = mode
         self.revision = revision
+    }
+}
+
+/// A message Milo submitted: accepted by the provider, and opened once its tracked image loads.
+public struct Delivery: Codable, Hashable, Identifiable, Sendable {
+    public var id: String
+    public var sent: Double
+    public var opened: Double?
+    public var opens: Int
+    public var tracked: Flag
+
+    public init(id: String, sent: Double, opened: Double? = nil, opens: Int = 0, tracked: Bool = true) {
+        self.id = id
+        self.sent = sent
+        self.opened = opened
+        self.opens = opens
+        self.tracked = Flag(tracked)
     }
 }
 

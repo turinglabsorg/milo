@@ -275,6 +275,7 @@ struct MessageCard: View {
                             .font(.caption).foregroundStyle(Color.milo.muted).lineLimit(1)
                     }
                     Spacer()
+                    if message.sent.value, let delivery = mailbox.deliveries[message.id] { DeliveryTick(delivery: delivery) }
                     Text(Format.date(message.date, long: true)).font(.caption).foregroundStyle(Color.milo.muted)
                 }
             }

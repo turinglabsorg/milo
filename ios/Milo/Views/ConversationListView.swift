@@ -27,7 +27,8 @@ struct ConversationListView: View {
                     .font(.footnote).foregroundStyle(Color.milo.muted)
             }
             ForEach(mailbox.conversations, id: \.key) { row in
-                ConversationRow(row: row, color: Color(hex: mailbox.state?.accounts.first { $0.id == row.accountId }?.color))
+                ConversationRow(row: row, color: Color(hex: mailbox.state?.accounts.first { $0.id == row.accountId }?.color),
+                                delivery: row.sent.value ? mailbox.deliveries[row.id] : nil)
                     .tag(row.key)
                     .swipeActions(edge: .leading) {
                         Button {
@@ -94,6 +95,7 @@ struct ConversationListView: View {
 struct ConversationRow: View {
     var row: Conversation
     var color: Color?
+    var delivery: Delivery? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 11) {
@@ -115,6 +117,7 @@ struct ConversationRow: View {
                     Spacer(minLength: 4)
                     if row.pinned.value { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(Color.milo.muted) }
                     if row.starred.value { Image(systemName: "star.fill").font(.caption2).foregroundStyle(Color.milo.accent) }
+                    if let delivery { DeliveryTick(delivery: delivery) }
                     Text(Format.date(row.date)).font(.caption).foregroundStyle(Color.milo.muted)
                 }
                 Text(Mailbox.subjectCore(row.subject))
@@ -129,5 +132,33 @@ struct ConversationRow: View {
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("row-" + row.id)
+    }
+}
+
+/// One muted check once the provider accepted Milo's submission, two accent checks once it was opened.
+struct DeliveryTick: View {
+    var delivery: Delivery
+
+    private var opened: Bool { delivery.opened != nil }
+
+    var label: String {
+        if let opened = delivery.opened {
+            return "Aperto il \(Format.date(opened, long: true))" + (delivery.opens > 1 ? " · \(delivery.opens) aperture" : "")
+        }
+        return delivery.tracked.value ? "Inviato e confermato dal server · non ancora aperto"
+            : "Inviato e confermato dal server · apertura non tracciata"
+    }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            Image(systemName: "checkmark")
+            if opened { Image(systemName: "checkmark").offset(x: 5) }
+        }
+        .font(.caption2.weight(.bold))
+        .padding(.trailing, opened ? 5 : 0)
+        .foregroundStyle(opened ? Color.milo.accent : Color.milo.muted)
+        .accessibilityElement()
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(opened ? "delivery-opened" : "delivery-sent")
     }
 }

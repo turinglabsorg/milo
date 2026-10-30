@@ -49,6 +49,30 @@ final class MailboxTests: XCTestCase {
         XCTAssertNil(plain.html)
     }
 
+    func testDraftsAreTrackedUnlessTheOwnerTurnsItOff() throws {
+        var draft = Draft(accountId: "a1", to: "c@example.com", body: "Ciao")
+        XCTAssertTrue(draft.tracksOpen)
+        var encoded = try JSONSerialization.jsonObject(with: APIClient.encoder.encode(draft)) as? [String: Any]
+        XCTAssertNil(encoded?["track"])
+        draft.tracksOpen = false
+        encoded = try JSONSerialization.jsonObject(with: APIClient.encoder.encode(draft)) as? [String: Any]
+        XCTAssertEqual(encoded?["track"] as? Bool, false)
+        let stored = try APIClient.decoder.decode(Draft.self, from: APIClient.encoder.encode(draft))
+        XCTAssertFalse(stored.tracksOpen)
+    }
+
+    func testRefreshLoadsDeliveryTicks() async throws {
+        let (mailbox, transport) = make()
+        await mailbox.refresh()
+        XCTAssertTrue(transport.requests.contains("GET /api/deliveries"))
+        let opened = try XCTUnwrap(mailbox.deliveries["m1"])
+        XCTAssertNotNil(opened.opened)
+        XCTAssertEqual(opened.opens, 2)
+        XCTAssertTrue(opened.tracked.value)
+        let waiting = try XCTUnwrap(mailbox.deliveries["m4"])
+        XCTAssertNil(waiting.opened)
+    }
+
     func testEditorDocumentBlocksRemoteImagesAndKeepsTheSenderDocument() {
         let fragment = MailEditor.document("<p>Ciao</p>")
         XCTAssertTrue(fragment.contains("data-milo-fragment"))

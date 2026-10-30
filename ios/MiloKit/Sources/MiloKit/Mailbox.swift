@@ -27,6 +27,8 @@ public final class Mailbox {
     public private(set) var loadingThread = false
     public private(set) var threadError: String?
     public private(set) var pendingCount = 0
+    /// Delivery ticks of sent messages, keyed by message id.
+    public private(set) var deliveries: [String: Delivery] = [:]
 
     private var catalogue: [String: Conversation] = [:]
     private var serverSearch: [String: [String]] = [:]
@@ -88,6 +90,10 @@ public final class Mailbox {
             unreachableRefreshes = 0
             lastError = nil
             await flush()
+            if let rows = try? await api.deliveries() {
+                let fresh = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                if fresh != deliveries { deliveries = fresh }
+            }
             switch view {
             case .todo: todos = try await api.todos()
             case .drafts: drafts = mergeDrafts(try await api.drafts(), await cache.pendingDrafts())

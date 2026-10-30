@@ -163,6 +163,9 @@ struct ComposeView: View {
                             }
                         } label: { Label("Risposte salvate", systemImage: "text.badge.plus") }
                     }
+                    Toggle("Traccia apertura", isOn: $draft.tracksOpen)
+                        .tint(Color.milo.accent)
+                        .accessibilityIdentifier("compose-track")
                     Picker("Ricordamelo se non risponde", selection: $followup) {
                         Text("Mai").tag(0)
                         Text("Entro 1 giorno").tag(1)

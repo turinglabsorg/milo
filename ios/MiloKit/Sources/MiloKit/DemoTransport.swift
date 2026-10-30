@@ -127,6 +127,9 @@ public final class DemoTransport: Transport, @unchecked Sendable {
                 $0["name"]!.lowercased().contains(query) || $0["email"]!.contains(query)
             }
             return (200, ["recipients": matched])
+        case ("GET", "/api/deliveries"):
+            return (200, ["deliveries": [["id": "m1", "sent": Self.now - 900, "opened": Self.now - 300, "opens": 2, "tracked": 1],
+                                         ["id": "m4", "sent": Self.now - 86400, "opened": NSNull(), "opens": 0, "tracked": 1]]])
         case ("GET", "/api/drafts"):
             lock.lock(); defer { lock.unlock() }
             return (200, ["drafts": Array(drafts.values)])
