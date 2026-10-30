@@ -24,7 +24,8 @@ def render_html(mail, message_id, load_images=False, own_pixel=None):
             if value.startswith("cid:"):
                 return images.get(value[4:])
             if own_pixel and value.startswith(own_pixel):
-                return None
+                name = value[len(own_pixel):]
+                return f"/api/signature/{name}" if name.endswith(".png") else None
             parsed = urlsplit(value)
             if parsed.scheme in {"https", "http"} and parsed.hostname and not parsed.username:
                 blocked = True

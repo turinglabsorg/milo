@@ -30,6 +30,7 @@ from .mail import (
     PIXEL_TOKEN,
     SyncEngine,
     html_with_pixel,
+    html_with_signature,
     parse_message,
     recipient_headers,
     safe_error,
@@ -62,6 +63,7 @@ from .models import (
 from .push import Push
 from .recap import RecapWorker
 from .render import render_html
+from .signature import render_signature
 from .store import ATTACHMENT_LIMIT, DRAFT_ID, Store
 
 EVENT_HEARTBEAT = 25
@@ -769,9 +771,15 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             original = store.message(draft["reply_to_id"]) if draft.get("reply_to_id") else None
             attachments = store.draft_attachment_files(draft_id)
             token = secrets.token_urlsafe(18) if draft.get("track", True) else None
+            signature = ((store.setting("signatures") or {}).get(account["id"]) or "").strip() if token else ""
             if token:
-                draft = {**draft, "html": html_with_pixel(draft.get("html") or text_html(draft["body"]),
-                                                          f"{own_pixel}{token}.gif")}
+                html = draft.get("html") or text_html(draft["body"])
+                if signature:
+                    _, width, height = render_signature(signature, account["email"])
+                    html = html_with_signature(html, signature, f"{own_pixel}{token}.png", width, height)
+                else:
+                    html = html_with_pixel(html, f"{own_pixel}{token}.gif")
+                draft = {**draft, "html": html}
             if account["provider"] == "google":
                 client = Gmail(store, account["id"])
                 try:
@@ -793,8 +801,8 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                 store.remove_draft_attachments(draft_id)
             features.sent(draft_id, account["id"], draft, rfc_message_id, thread_id)
             if rfc_message_id:
-                store.execute("INSERT INTO deliveries VALUES(?,?,?,?,NULL,0) ON CONFLICT(message_id) DO NOTHING",
-                              (rfc_message_id, account["id"], token, time.time()))
+                store.execute("INSERT INTO deliveries VALUES(?,?,?,?,NULL,0,?,?) ON CONFLICT(message_id) DO NOTHING",
+                              (rfc_message_id, account["id"], token, time.time(), signature or None, account["email"]))
                 mail_changed()
             return {"ok": True}
         except ValueError as exc:
@@ -819,10 +827,23 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     def opened(token: str, request: Request):
         if not (request.client and request.client.host in {"127.0.0.1", "::1"}) or not PIXEL_TOKEN.fullmatch(token):
             return Response(status_code=404)
-        if store.execute("UPDATE deliveries SET opened=COALESCE(opened,?), opens=opens+1 WHERE token=?",
-                         (time.time(), token)).rowcount:
-            mail_changed()
-        return Response(status_code=204)
+        if not store.execute("UPDATE deliveries SET opened=COALESCE(opened,?), opens=opens+1 WHERE token=?",
+                             (time.time(), token)).rowcount:
+            return Response(status_code=204)
+        mail_changed()
+        return signature_image(token) or Response(status_code=204)
+
+    def signature_image(token):
+        rows = store.rows("SELECT signature,sender FROM deliveries WHERE token=?", (token,))
+        if not rows or not rows[0]["signature"]:
+            return None
+        return Response(render_signature(rows[0]["signature"], rows[0]["sender"] or "")[0], media_type="image/png",
+                        headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/signature/{name}", dependencies=[Depends(auth)])
+    def own_signature(name: str):
+        token = name.removesuffix(".png")
+        return (PIXEL_TOKEN.fullmatch(token) and signature_image(token)) or Response(status_code=404)
 
     @app.post("/api/drafts/{draft_id}/send", dependencies=[Depends(auth)])
     def send(draft_id: str):

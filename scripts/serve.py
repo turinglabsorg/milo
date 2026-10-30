@@ -62,10 +62,11 @@ def main():
 
     def opened(token):
         try:
-            urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:8029/internal/opened/{token}", method="POST"),
-                                   timeout=5).close()
+            with urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:8029/internal/opened/{token}",
+                                                               method="POST"), timeout=5) as response:
+                return response.read() if response.headers.get_content_type() == "image/png" else None
         except OSError:
-            pass
+            return None
 
     app = create_public_app(config["url"] if config else None, lifespan, opened if config else None)
     logging = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)

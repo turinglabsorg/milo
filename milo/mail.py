@@ -472,3 +472,19 @@ def html_with_pixel(html, url):
     image = f'<img src="{escape(url)}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0">'
     match = re.search(r"</body\s*>", html, re.I)
     return html[:match.start()] + image + html[match.start():] if match else html + image
+
+
+def html_with_signature(html, signature, url, width, height):
+    """Replace the composer's text signature with the tracked signature image, or append it."""
+    image = (f'<img src="{escape(url)}" width="{width}" height="{height}" alt="{escape(" · ".join(signature.split(chr(10))))}" '
+             'style="display:block;border:0;border-radius:12px">')
+    lines = [line.rstrip() for line in signature.strip().splitlines()]
+    pattern = (r"<p>\s*--(?:\s|&nbsp;|\u00a0)*<br\s*/?>\s*"
+               + r"\s*<br\s*/?>\s*".join(re.escape(escape(line, quote=False)) for line in lines)
+               + r"\s*(?:<br\s*/?>\s*)?</p>")
+    block = f"<p>-- <br>{image}</p>"
+    replaced, count = re.subn(pattern, lambda _: block, html, count=1)
+    if count:
+        return replaced
+    match = re.search(r"</body\s*>", html, re.I)
+    return html[:match.start()] + block + html[match.start():] if match else html + block

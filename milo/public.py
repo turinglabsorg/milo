@@ -1,4 +1,5 @@
 """Public landing and a fixed OAuth relay. This app never opens the mail archive."""
+import asyncio
 import base64
 import re
 from pathlib import Path
@@ -8,7 +9,7 @@ from fastapi import BackgroundTasks, FastAPI, Query
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
 PIXEL = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
-PIXEL_NAME = re.compile(r"([A-Za-z0-9_-]{24})\.gif")
+PIXEL_NAME = re.compile(r"([A-Za-z0-9_-]{24})\.(gif|png)")
 
 
 def create_public_app(private_url=None, lifespan=None, opened=None):
@@ -64,10 +65,15 @@ def create_public_app(private_url=None, lifespan=None, opened=None):
         return RedirectResponse(private_url + "/api/oauth/google/callback?" + urlencode(params), 303)
 
     @app.get("/o/{name}")
-    def pixel(name: str, background: BackgroundTasks):
+    async def pixel(name: str, background: BackgroundTasks):
         match = PIXEL_NAME.fullmatch(name)
         if match and opened:
-            background.add_task(opened, match.group(1))
+            if match.group(2) == "png":
+                image = await asyncio.to_thread(opened, match.group(1))
+                if image:
+                    return Response(image, media_type="image/png")
+            else:
+                background.add_task(opened, match.group(1))
         return Response(PIXEL, media_type="image/gif")
 
     @app.api_route("/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])

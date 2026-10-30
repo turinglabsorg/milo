@@ -1,0 +1,52 @@
+"""Signature cards rendered as images, so a tracked message reports its first open."""
+import io
+from functools import lru_cache
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
+
+ASSETS = Path(__file__).resolve().parent / "signature_assets"
+LOGOS = {"zonzolab.com": "zonzolab.png", "meaningtech.io": "meaningtech.png"}
+SCALE = 2
+
+
+def logo_name(email):
+    address = (email or "").lower()
+    if address.startswith("turinglabs"):
+        return "turinglabs.png"
+    return LOGOS.get(address.rpartition("@")[2])
+
+
+@lru_cache(maxsize=64)
+def render_signature(text, email=""):
+    """A white rounded card with the account logo and the signature lines: (png, width, height) at 1x."""
+    lines = [line.rstrip() for line in (text or "").strip().splitlines() if line.strip()][:6] or [""]
+    title = ImageFont.truetype(str(ASSETS / "Geist-SemiBold.ttf"), 15 * SCALE)
+    body = ImageFont.truetype(str(ASSETS / "Geist-Regular.ttf"), 13 * SCALE)
+    fonts = [title] + [body] * (len(lines) - 1)
+    heights = [22 * SCALE] + [19 * SCALE] * (len(lines) - 1)
+    pad, gap, logo_size = 14 * SCALE, 14 * SCALE, 44 * SCALE
+    name = logo_name(email)
+    measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    text_width = max(int(measure.textlength(line, font=font)) for line, font in zip(lines, fonts, strict=True))
+    text_height = sum(heights)
+    inner = max(text_height, logo_size if name else 0)
+    left = pad + (logo_size + gap if name else 0)
+    width, height = left + text_width + pad, inner + 2 * pad
+    card = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(card)
+    draw.rounded_rectangle([0, 0, width - 1, height - 1], radius=12 * SCALE, fill="#ffffff",
+                           outline="#e4e7ec", width=SCALE)
+    if name:
+        logo = Image.open(ASSETS / name).convert("RGBA").resize((logo_size, logo_size), Image.LANCZOS)
+        mask = Image.new("L", logo.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle([0, 0, logo_size - 1, logo_size - 1], radius=10 * SCALE, fill=255)
+        logo.putalpha(Image.composite(logo.getchannel("A"), mask, mask))
+        card.alpha_composite(logo, (pad, (height - logo_size) // 2))
+    y = (height - text_height) // 2
+    for line, font, line_height, color in zip(lines, fonts, heights, ["#172033"] + ["#617189"] * 5, strict=False):
+        draw.text((left, y + line_height // 2), line, font=font, fill=color, anchor="lm")
+        y += line_height
+    output = io.BytesIO()
+    card.save(output, "PNG", optimize=True)
+    return output.getvalue(), width // SCALE, height // SCALE

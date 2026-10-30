@@ -77,5 +77,53 @@ def test_public_pixel_reports_only_valid_tokens():
         assert response.status_code == 200 and response.headers["content-type"] == "image/gif"
         assert response.headers["cache-control"] == "no-store" and response.content.startswith(b"GIF89a")
         assert client.get("/o/short.gif").status_code == 200
-        assert client.get("/o/" + "b" * 24 + ".png").status_code == 200
+        assert client.get("/o/" + "b" * 24 + ".jpg").status_code == 200
     assert opened == ["b" * 24]
+
+
+def test_signature_becomes_the_tracked_image(logged_in, account_data, monkeypatch):
+    client = logged_in
+    add_mail(client, account_data)
+    account_id = client.app.state.store.accounts()[0]["id"]
+    signature = "Sebastiano Cataudo\nZonzolab · you@example.com"
+    assert client.put("/api/settings/signatures", json={"signatures": {account_id: signature}}).status_code == 200
+    html = "<p>Buongiorno</p><p>-- <br>Sebastiano Cataudo<br>Zonzolab · you@example.com</p>"
+    message = send(client, account_id, monkeypatch, [], id="signed", html=html,
+                   body="Buongiorno\n\n-- \n" + signature)
+    sent_html = message.get_body(("html",)).get_content()
+    token = re.search(r'src="http://127\.0\.0\.1:8025/o/([A-Za-z0-9_-]{24})\.png" width="\d+" height="\d+"', sent_html).group(1)
+    assert "Sebastiano Cataudo<br>" not in sent_html and sent_html.startswith("<p>Buongiorno</p><p>-- <br><img")
+    assert 'alt="Sebastiano Cataudo · Zonzolab · you@example.com"' in sent_html
+    assert signature in message.get_body(("plain",)).get_content()
+
+    sent_id = client.get("/api/messages?view=sent").json()["messages"][0]["id"]
+    thread = client.get(f"/api/messages/{sent_id}/thread").json()
+    rendered = [item for item in thread["messages"] if item["id"] == sent_id][0]["html"]
+    assert f'src="/api/signature/{token}.png"' in rendered
+    own = client.get(f"/api/signature/{token}.png")
+    assert own.status_code == 200 and own.content.startswith(b"\x89PNG")
+    assert client.get("/api/deliveries").json()["deliveries"][0]["opened"] is None
+
+    local = TestClient(client.app, client=("127.0.0.1", 40000))
+    opened = local.post(f"/internal/opened/{token}")
+    assert opened.status_code == 200 and opened.headers["content-type"] == "image/png"
+    assert opened.content == own.content
+    assert client.get("/api/deliveries").json()["deliveries"][0]["opens"] == 1
+
+
+def test_missing_signature_is_appended_as_image(logged_in, account_data, monkeypatch):
+    client = logged_in
+    add_mail(client, account_data)
+    account_id = client.app.state.store.accounts()[0]["id"]
+    assert client.put("/api/settings/signatures", json={"signatures": {account_id: "Seb"}}).status_code == 200
+    message = send(client, account_id, monkeypatch, [], id="unsigned")
+    html = message.get_body(("html",)).get_content()
+    assert re.match(r'<p><b>Buongiorno</b></p><p>-- <br><img src="http://127\.0\.0\.1:8025/o/[A-Za-z0-9_-]{24}\.png"', html)
+
+
+def test_public_signature_image_comes_from_the_private_service():
+    with TestClient(create_public_app(opened=lambda token: b"\x89PNG-card" if token == "c" * 24 else None)) as client:
+        card = client.get("/o/" + "c" * 24 + ".png")
+        assert card.headers["content-type"] == "image/png" and card.content == b"\x89PNG-card"
+        fallback = client.get("/o/" + "d" * 24 + ".png")
+        assert fallback.headers["content-type"] == "image/gif"

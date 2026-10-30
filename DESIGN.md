@@ -152,3 +152,8 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
   check when Milo's submission was accepted by the provider, two checks in the
   accent colour once the open pixel was fetched. The tooltip states the open time
   and count, or that the message is not tracked.
+- With tracking on, the account signature is sent as a white, 12 px rounded card
+  image (account logo, name in Geist SemiBold 15 px `#172033`, details in Geist
+  Regular 13 px `--muted`) served from the public origin; the plain-text part keeps
+  the text signature. Milo shows the same card from the private origin without
+  counting an open.

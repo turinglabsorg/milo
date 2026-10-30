@@ -97,8 +97,11 @@ CREATE INDEX IF NOT EXISTS draft_attachments_draft ON draft_attachments(draft_id
 -- Messages Milo submitted, with the optional open-tracking token.
 CREATE TABLE IF NOT EXISTS deliveries(
     message_id TEXT PRIMARY KEY, account_id TEXT NOT NULL, token TEXT UNIQUE,
-    sent DOUBLE PRECISION NOT NULL, opened DOUBLE PRECISION, opens INTEGER NOT NULL DEFAULT 0);
+    sent DOUBLE PRECISION NOT NULL, opened DOUBLE PRECISION, opens INTEGER NOT NULL DEFAULT 0,
+    signature TEXT, sender TEXT);
 CREATE INDEX IF NOT EXISTS deliveries_sent ON deliveries(sent DESC);
+ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS signature TEXT;
+ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS sender TEXT;
 """
 # Most providers refuse messages above 25 MB once encoded; base64 adds a third.
 ATTACHMENT_LIMIT = 18 * 1024 * 1024
