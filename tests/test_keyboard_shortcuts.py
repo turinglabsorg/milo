@@ -1,4 +1,5 @@
 import pytest
+from browser_helpers import type_body, write_body
 from playwright.sync_api import expect, sync_playwright
 from test_conversations import add
 from test_responsive_inbox import service
@@ -41,9 +42,8 @@ def test_favorite_shortcut_works_in_html_and_preserves_typing(tmp_path):
         page.keyboard.press('Escape')
         page.locator(f'[data-message="{sent}"]').click()
         page.get_by_role('button', name='Rispondi', exact=True).click()
-        page.locator('[name="body"]').fill('Keep this draft')
-        page.locator('[name="body"]').press('End')
-        page.keyboard.press('p')
+        write_body(page, 'Keep this draft')
+        type_body(page, 'p')
         page.keyboard.press('Backspace')
         expect(page.locator('[name="body"]')).to_have_value('Keep this draft')
         page.locator('.reading-toolbar').click(position={'x': 4, 'y': 4})

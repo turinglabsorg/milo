@@ -3,7 +3,7 @@ import time
 from email.message import EmailMessage
 from pathlib import Path
 
-from browser_helpers import wait_for_async
+from browser_helpers import wait_for_async, write_body
 from playwright.sync_api import expect, sync_playwright
 from test_conversations import add
 from test_responsive_inbox import service
@@ -201,7 +201,7 @@ def test_offline_draft_save_delete_and_identity_are_local_then_sync(tmp_path):
         page.locator('[data-action="compose"]').click()
         page.locator('#compose-form [name="to"]').fill('customer@example.com')
         page.locator('#compose-form [name="subject"]').fill('Offline draft')
-        page.locator('#compose-form [name="body"]').fill('Stored locally before sync')
+        write_body(page, 'Stored locally before sync')
         page.get_by_role('button', name='Salva bozza', exact=True).click()
         expect(page.locator('.draft-save-status')).to_contain_text('sul dispositivo', timeout=1000)
         page.get_by_role('button', name='Chiudi', exact=True).click()
@@ -323,7 +323,7 @@ def test_service_worker_retires_old_shell_and_refreshes_cached_client_assets(tmp
         page.goto(url + '/static/icon.svg')
         page.evaluate('()=>caches.open("milo-shell-v10").then(cache=>cache.put("/static/app.js",new Response("// obsolete-client")))')
         warm(page, url, sent)
-        wait_for_async(page, 'async()=>{const keys=await caches.keys();return keys.includes("milo-shell-v32")&&!keys.includes("milo-shell-v10");}')
+        wait_for_async(page, 'async()=>{const keys=await caches.keys();return keys.includes("milo-shell-v33")&&!keys.includes("milo-shell-v10");}')
         version['name'] = 'updated'
         old = page.evaluate('()=>fetch("/static/app.js").then(response=>response.text())')
         assert 'shell-version-original' in old

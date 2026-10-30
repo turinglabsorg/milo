@@ -60,7 +60,7 @@ final class ScreenshotTests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.buttons["reply"].waitForExistence(timeout: 10))
         app.buttons["reply"].tap()
-        XCTAssertTrue(app.textViews["compose-body"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.webViews["compose-rich-editor"].waitForExistence(timeout: 10))
         save("03-reply")
         app.buttons["compose-send"].tap()
         XCTAssertTrue(app.staticTexts["Messaggio in partenza…"].waitForExistence(timeout: 10))
@@ -86,20 +86,14 @@ final class ScreenshotTests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.buttons["reply"].waitForExistence(timeout: 10))
         app.buttons["reply"].tap()
-        let body = app.textViews["compose-body"]
-        XCTAssertTrue(body.waitForExistence(timeout: 10))
-        body.tap()
-        body.typeText("Gentile Comune")
-        let formatted = app.buttons["Formattato"]
-        XCTAssertTrue(formatted.waitForExistence(timeout: 5))
-        formatted.tap()
         let editor = app.webViews["compose-rich-editor"]
-        XCTAssertTrue(editor.waitForExistence(timeout: 10))
-        XCTAssertTrue(editor.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Gentile Comune'")).firstMatch.waitForExistence(timeout: 10),
-                      "The plain text must become the formatted message")
+        XCTAssertTrue(editor.waitForExistence(timeout: 10), "Every message opens in the formatted editor")
+        XCTAssertFalse(app.buttons["Testo semplice"].exists, "There is no plain-text mode")
+        XCTAssertFalse(app.buttons["Formattato"].exists)
+        XCTAssertFalse(app.textViews["compose-body"].exists)
         XCTAssertTrue(app.buttons["Grassetto"].waitForExistence(timeout: 5), "The formatting toolbar shows while editing")
         XCTAssertTrue(app.buttons["Fine"].exists)
-        editor.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Gentile Comune'")).firstMatch.tap()
+        editor.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "Editing opens the keyboard on the rendered message")
         for letter in "ragusa" {
             let key = app.keyboards.keys.matching(NSPredicate(format: "label ==[c] %@", String(letter))).firstMatch

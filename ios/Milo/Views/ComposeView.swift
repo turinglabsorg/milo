@@ -11,7 +11,6 @@ struct ComposeView: View {
     @State private var error: String?
     @State private var scheduling = false
     @State private var customDate = Date().addingTimeInterval(3600)
-    @FocusState private var bodyFocused: Bool
     @FocusState private var recipientSlot: RecipientSlot?
     @State private var suggestions: [Recipient] = []
     @State private var suggestTask: Task<Void, Never>?
@@ -77,24 +76,6 @@ struct ComposeView: View {
     }
 
     private var hasHTML: Bool { !(draft.html ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
-    private var formatBinding: Binding<Bool> {
-        Binding(get: { hasHTML }, set: { formatted in
-            guard formatted != hasHTML else { return }
-            if formatted {
-                draft.html = MailEditor.paragraphs(from: draft.body)
-                editingHTML = true
-            } else {
-                let previous = draft.html
-                draft.html = ""
-                editingHTML = false
-                notice.show("Formattazione rimossa: resta il testo semplice.", actionTitle: "Annulla", duration: 8) {
-                    draft.html = previous
-                }
-            }
-            draft.revision = max(Int(Date().timeIntervalSince1970 * 1000), draft.revision + 1)
-        })
-    }
 
     private struct RichTool: Identifiable {
         let command: String
@@ -178,32 +159,15 @@ struct ComposeView: View {
                         .accessibilityIdentifier("compose-subject")
                 }
                 Section {
-                    Picker("Formato", selection: formatBinding) {
-                        Text("Testo semplice").tag(false)
-                        Text("Formattato").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("compose-format")
-                    if hasHTML {
-                        richEditor
-                    } else {
-                        TextEditor(text: $draft.body)
-                            .frame(minHeight: 220)
-                            .focused($bodyFocused)
-                            .accessibilityIdentifier("compose-body")
-                    }
+                    richEditor
                 }
                 Section {
                     if let templates = mailbox.state?.templates, !templates.isEmpty {
                         Menu {
                             ForEach(templates, id: \.name) { template in
                                 Button(template.name) {
-                                    if hasHTML {
-                                        editingHTML = true
-                                        editor.exec("insertHTML", MailEditor.paragraphs(from: template.body))
-                                    } else {
-                                        draft.body = template.body + draft.body
-                                    }
+                                    editingHTML = true
+                                    editor.exec("insertHTML", MailEditor.paragraphs(from: template.body))
                                 }
                             }
                         } label: { Label("Risposte salvate", systemImage: "text.badge.plus") }
@@ -259,7 +223,12 @@ struct ComposeView: View {
                 }
             }
             .sheet(isPresented: $scheduling) { scheduleSheet.presentationDetents([.medium, .large]) }
-            .onAppear { if draft.mode != .new && !hasHTML { bodyFocused = true } }
+            .onAppear {
+                if !hasHTML {
+                    draft.html = MailEditor.paragraphs(from: draft.body)
+                    editingHTML = true
+                }
+            }
             .interactiveDismissDisabled(sending)
         }
     }

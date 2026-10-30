@@ -6,6 +6,7 @@ from statistics import median
 from time import perf_counter
 
 import httpx
+from browser_helpers import type_body, write_body
 from playwright.sync_api import expect, sync_playwright
 from test_responsive_inbox import service
 
@@ -66,10 +67,9 @@ def test_large_archive_api_and_client_latency(tmp_path):
         assert max(readers) < 1000, f'Slowest reader: {max(readers):.1f}ms'
         page.get_by_role('button', name='Rispondi', exact=True).click()
         field = page.locator('[name="body"]')
-        field.fill('A large draft. ' * 14000)
+        write_body(page, 'A large draft. ' * 14000)
         start = perf_counter()
-        field.press('Control+End')
-        field.press_sequentially('Typed without waiting for the server')
+        type_body(page, 'Typed without waiting for the server')
         typing = (perf_counter() - start) * 1000
         # Shared CI runners are roughly half as fast as a developer machine.
         budget = 1500 if os.environ.get('GITHUB_ACTIONS') else 1000

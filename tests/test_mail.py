@@ -270,6 +270,25 @@ def test_replies_quote_the_original_below_the_answer():
     assert "ha scritto" not in build_message(account, draft).get_content()
 
 
+def test_formatted_replies_quote_the_original_in_both_parts():
+    account = {"email": "me@example.com"}
+    draft = {"to": "anna@example.com", "subject": "Re: Cena", "body": "Volentieri!", "mode": "reply",
+             "html": "<p><b>Volentieri!</b></p>"}
+    original = {"message_id": "<cena@example.com>", "sender": "Anna Rossi", "sender_email": "anna@example.com",
+                "date": 1792044000.0, "body": "Ci vediamo <sabato>?\n\nA."}
+    message = build_message(account, draft, original)
+    plain = message.get_body(("plain",)).get_content()
+    html = message.get_body(("html",)).get_content()
+    assert "ha scritto:\n> Ci vediamo <sabato>?" in plain
+    assert html.startswith("<p><b>Volentieri!</b></p><br><div>Il giorno ")
+    assert "Anna Rossi &lt;anna@example.com&gt; ha scritto:</div><blockquote" in html
+    assert "Ci vediamo &lt;sabato&gt;?<br><br>A.</blockquote>" in html
+    document = build_message(account, {**draft, "html": "<html><body><p>Ok</p></body></html>"}, original)
+    assert document.get_body(("html",)).get_content().strip().endswith("</blockquote></body></html>")
+    forward = build_message(account, {**draft, "mode": "forward"}, original)
+    assert forward.get_body(("html",)).get_content().strip() == "<p><b>Volentieri!</b></p>"
+
+
 def test_preview_skips_newsletter_links():
     mail = EmailMessage()
     mail["From"] = "Brand <news@brand.example>"

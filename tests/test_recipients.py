@@ -163,6 +163,6 @@ def test_forward_from_recipient_suggestions_reaches_transport(tmp_path, monkeypa
         assert len(submitted) == 1
         assert str(submitted[0]["To"]) == "Recipient <recipient@example.com>"
         assert str(submitted[0]["Cc"]) == "Copy <copy@example.com>"
-        assert "Messaggio inoltrato" in submitted[0].get_content()
+        assert "Messaggio inoltrato" in submitted[0].get_body(("plain",)).get_content()
         assert not errors
         browser.close()

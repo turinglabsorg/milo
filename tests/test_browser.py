@@ -3,6 +3,7 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
+from browser_helpers import write_body
 from playwright.sync_api import expect, sync_playwright
 
 
@@ -23,7 +24,7 @@ def test_client_flows_and_responsive_layout(width, height):
         expect(page.locator(".mail-body")).to_be_visible()
         page.get_by_role("button", name="Rispondi", exact=True).click()
         expect(page.locator("#compose-form")).to_be_visible()
-        page.locator('[name="body"]').fill("A browser-tested draft")
+        write_body(page, "A browser-tested draft")
         page.get_by_role("button", name="Salva bozza", exact=True).click()
         expect(page.locator("#toast")).to_contain_text("Bozza salvata")
         page.get_by_role("button", name="Chiudi", exact=True).click()

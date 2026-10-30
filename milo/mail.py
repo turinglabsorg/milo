@@ -12,6 +12,7 @@ from datetime import datetime
 from email import policy
 from email.message import EmailMessage
 from email.utils import getaddresses, make_msgid, parsedate_to_datetime
+from html import escape
 from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
 
@@ -394,9 +395,10 @@ def build_message(account, draft, original=None, attachments=()):
     if original and original.get("message_id"):
         message["In-Reply-To"] = original["message_id"]
         message["References"] = original["message_id"]
-    message.set_content(draft["body"] + reply_quote(draft, original))
+    quote = reply_quote(draft, original)
+    message.set_content(draft["body"] + quote)
     if draft.get("html"):
-        message.add_alternative(draft["html"], subtype="html")
+        message.add_alternative(html_with_quote(draft["html"], quote) if quote else draft["html"], subtype="html")
     for attachment in attachments:
         maintype, _, subtype = attachment["type"].partition("/")
         message.add_attachment(attachment["data"], maintype=maintype, subtype=subtype, filename=attachment["name"])
@@ -443,3 +445,13 @@ def send_mail(account, draft, original=None, attachments=()):
         if refused:
             raise RuntimeError("Invio parziale: alcuni destinatari sono stati rifiutati. Verifica prima di reinviare.")
     return message
+
+
+def html_with_quote(html, quote):
+    """The plain-text quote as an HTML blockquote, placed before the closing body tag when present."""
+    header, _, quoted = quote.strip("\n").partition("\n")
+    lines = [line[2:] if line.startswith("> ") else line[1:] for line in quoted.splitlines()]
+    block = (f'<br><div>{escape(header)}</div><blockquote style="margin:0 0 0 .8ex;border-left:1px solid #ccc;'
+             f'padding-left:1ex">{"<br>".join(escape(line) for line in lines)}</blockquote>')
+    match = re.search(r"</body\s*>", html, re.I)
+    return html[:match.start()] + block + html[match.start():] if match else html + block

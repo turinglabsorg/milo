@@ -1,7 +1,7 @@
 from email.message import EmailMessage
 
 import pytest
-from browser_helpers import wait_for_async
+from browser_helpers import wait_for_async, write_body
 from playwright.sync_api import expect, sync_playwright
 from test_responsive_inbox import service
 
@@ -29,7 +29,7 @@ def test_reply_all_includes_cc_excludes_self_and_retains_draft(tmp_path):
         expect(page.locator('#inline-composer #compose-form')).to_be_visible()
         expect(page.locator('[name="to"]')).to_have_value('support@example.com, colleague@example.com')
         expect(page.locator('[name="cc"]')).to_have_value('copy@example.com')
-        page.locator('[name="body"]').fill('Reply to everyone')
+        write_body(page, 'Reply to everyone')
         page.get_by_role('button', name='Salva bozza', exact=True).click()
         expect(page.locator('.draft-save-status')).to_have_text('Bozza salvata')
         draft = page.request.get(url + '/api/drafts').json()['drafts'][0]
@@ -227,7 +227,6 @@ def test_web_composer_renders_and_edits_the_html_of_an_api_draft(tmp_path):
         expect(editor.locator('b')).to_have_text('Comune')
         expect(page.locator('#compose-form [name="body"]')).to_be_hidden()
         expect(page.locator('#compose-form .rich-tools')).to_be_hidden()
-        expect(page.locator('#compose-form [data-rich-action="format-html"]')).to_have_attribute('aria-pressed', 'true')
         page.locator('#compose-form .rich-edit').click()
         expect(page.locator('#compose-form .rich-tools')).to_be_visible()
         editor.locator('b').click()
@@ -245,7 +244,7 @@ def test_web_composer_renders_and_edits_the_html_of_an_api_draft(tmp_path):
         browser.close()
 
 
-def test_web_composer_switches_between_plain_text_and_formatted(tmp_path):
+def test_web_composer_is_always_formatted(tmp_path):
     with service(tmp_path) as (url, sent), sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(service_workers='block')
@@ -254,29 +253,24 @@ def test_web_composer_switches_between_plain_text_and_formatted(tmp_path):
         page.goto(url)
         expect(page.locator('.message-row')).to_have_count(2)
         page.locator('[data-action="compose"]').first.click()
+        expect(page.locator('#compose-form [data-rich-action^="format-"]')).to_have_count(0)
+        expect(page.locator('#compose-form [name="body"]')).to_be_hidden()
+        expect(page.locator('#compose-form .rich-tools')).to_be_visible()
         page.locator('#compose-form [name="to"]').fill('comune@example.com')
         page.locator('#compose-form [name="subject"]').fill('Formattato')
-        page.locator('#compose-form [name="body"]').fill('Prima riga\n\nSeconda riga')
-        page.locator('#compose-form [data-rich-action="format-html"]').click()
         editor = page.frame_locator('#compose-form .rich-frame')
-        expect(editor.locator('p')).to_have_count(2)
-        expect(page.locator('#compose-form .rich-tools')).to_be_visible()
-        editor.locator('p').first.click()
+        editor.locator('body').click()
+        page.keyboard.type('Prima riga')
+        page.keyboard.press('Enter')
+        page.keyboard.type('Seconda riga')
+        editor.locator('body').locator('text=Prima riga').click()
         page.keyboard.press('Home')
         page.keyboard.press('Shift+End')
         page.locator('#compose-form [data-rich-command="bold"]').click()
         page.get_by_role('button', name='Salva bozza', exact=True).click()
         expect(page.locator('.draft-save-status')).to_have_text('Bozza salvata')
         draft = page.request.get(url + '/api/drafts').json()['drafts'][0]
-        assert '<b>Prima riga</b>' in draft['html'] and draft['body'] == 'Prima riga\n\nSeconda riga'
-        page.locator('#compose-form [data-rich-action="format-text"]').click()
-        expect(page.locator('#compose-form [name="body"]')).to_have_value('Prima riga\n\nSeconda riga')
-        expect(page.locator('#compose-form .rich-editor')).to_have_count(0)
-        page.get_by_role('button', name='Salva bozza', exact=True).click()
-        for _ in range(50):
-            if page.request.get(url + '/api/drafts').json()['drafts'][0]['html'] == '':
-                break
-            page.wait_for_timeout(100)
-        assert page.request.get(url + '/api/drafts').json()['drafts'][0]['html'] == ''
+        assert '<b>Prima riga</b>' in draft['html'] and 'Seconda riga' in draft['html']
+        assert draft['body'].startswith('Prima riga\n') and 'Seconda riga' in draft['body']
         assert errors == []
         browser.close()

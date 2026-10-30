@@ -312,7 +312,7 @@ function renderReading() {
   const panel=$('#reading-panel');if(!panel)return;
   if(S.compose?.pane){renderComposePane();return;}
   const editor=$('#inline-composer #compose-form'),active=document.activeElement;
-  const caret=active?.tagName==='TEXTAREA'?[active.selectionStart,active.selectionEnd]:null;
+  const caret=active?.tagName==='TEXTAREA'?[active.selectionStart,active.selectionEnd]:active?.classList?.contains('rich-frame')?richCaret(active.contentDocument):null;
   if(editor)captureCompose();
   if(editor)editor.remove();
   const m=S.selected;
@@ -326,7 +326,7 @@ function renderReading() {
   morphChildren(panel,`<div class="reading-toolbar"><button class="icon-button back-button" data-action="back" aria-label="Torna alla lista">${icon('back')}</button><button class="icon-button ${m.pinned?'is-active':''}" data-action="pin" aria-label="${m.pinned?'Rimuovi pin':'Fissa in alto'}" title="${m.pinned?'Rimuovi pin':'Fissa in alto'}">${icon('pin')}</button><button class="icon-button" data-action="archive" aria-label="${m.archived?'Sposta in inbox':'Archivia'}" title="Archivia">${icon('archive')}</button><button class="icon-button" data-action="trash" aria-label="Elimina conversazione" title="Sposta nel cestino (Backspace / Canc)" aria-keyshortcuts="Backspace Delete">${icon('trash')}</button><button class="icon-button" data-action="snooze" aria-label="Posticipa" title="Posticipa">${icon('clock')}</button><button class="icon-button" data-action="read" aria-label="${m.read?'Segna da leggere':'Segna come letta'}">${icon('mail')}</button><button class="icon-button ${m.starred?'is-active':''}" data-action="star" aria-label="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'}" title="${m.starred?'Rimuovi dai preferiti':'Aggiungi ai preferiti'} (P)" aria-keyshortcuts="P">${icon('star')}</button>${peerEmail&&!peer.sent?`<span class="separator"></span><button class="icon-button ${vip?'is-active':''}" data-action="vip" data-sender="${esc(peerEmail)}" aria-label="${vip?'Rimuovi il mittente dai VIP':'Segna il mittente come VIP'}" title="${vip?'Rimuovi dai VIP':'Mittente VIP: notifiche sempre'}">${icon('crown')}</button><button class="icon-button" data-action="block-sender" data-sender="${esc(peerEmail)}" aria-label="Blocca il mittente" title="Blocca il mittente">${icon('ban')}</button>`:''}<div class="right"><span class="dot" style="background:${accountColor(m.account_id)}"></span>${esc(S.state.accounts.find(a=>a.id===m.account_id)?.name||'Account')}</div></div>${confirmationChip(m)}<article class="mail-content"><select class="category-select" id="message-category" aria-label="Categoria della email">${Object.entries(categoryNames).map(([key,name])=>`<option value="${key}" ${key===m.category?'selected':''}>${name}</option>`).join('')}</select>${peer.unsubscribe?`<button class="unsubscribe-button" data-action="unsubscribe" data-message-id="${esc(peer.id)}">${icon('ban')}Disiscriviti</button>`:''}<h2>${esc(subjectCore(m.subject))}</h2>${downloading?`<div class="download-status" role="status">${icon('refresh','spinner')}Scarico la conversazione e le tue risposte…</div>`:''}${S.threadSync.error?`<div class="error-banner">${esc(S.threadSync.error)}</div>`:''}${S.loadingMessage?skeleton(7,'reader','Carico il messaggio…'):`<section class="ai-summary"><div class="ai-summary-title">${icon('sparkle')}${analysis?'Il punto, secondo Milo':'Milo AI'}<button data-action="analyze">${analysis?'Rianalizza':'Analizza'}${icon('arrow')}</button></div><div id="analysis-content">${S.analyzing?skeleton(3,'block','Analisi in corso…'):`<p>${analysis?esc(analysis.summary):'Sintesi, cose da fare e priorità della conversazione.'}</p>${actionProposals(analyzed)}`}</div></section><div class="thread-messages">${messages.map((item,index)=>`<details class="thread-message ${item.sent?'sent-message':''}" data-thread-message="${esc(item.id)}" ${index===messages.length-1||open.has(item.id)?'open':''}><summary><span class="sender-detail">${avatar(item)}<span><strong>${item.sent?'Tu':esc(item.sender)}</strong><span class="address">${esc(item.sender_email)}</span><small>${item.sent?'Risposta inviata':esc(item.preview.slice(0,90))}</small></span><time>${dateLabel(item.date,true)}</time></span></summary><div class="thread-message-body" data-body-for="${esc(item.id)}">${index===messages.length-1||open.has(item.id)?bodyMarkup(item):''}</div></details>`).join('')}</div><div class="reply-actions"><button data-action="reply">${icon('reply')}Rispondi</button><button data-action="reply-all">${icon('reply')}Rispondi a tutti</button><button data-action="forward">${icon('forward')}Inoltra</button><button data-action="ai-reply">${icon('sparkle')}Aiutami a rispondere</button></div>${peer.sent?'':`<div class="quick-replies">${S.suggesting===peer.id?skeleton(1,'block','Milo prepara le risposte…'):suggestions?suggestions.map((reply,index)=>`<button class="quick-reply" data-quick-reply="${index}">${esc(reply)}</button>`).join(''):`<button class="quick-reply ghost" data-action="suggest">${icon('sparkle')}Suggerisci risposte rapide</button>`}</div>`}<div id="inline-composer"></div>`}</article>`);
   fitFrames(panel);
   for(const item of messages)if((item.id===messages.at(-1)?.id||open.has(item.id))&&!item.body_loaded)ensureBody(item.id).catch(()=>{});
-  if(S.compose?.inline&&S.selected&&S.compose.thread_key===threadKey(S.selected)){renderInlineComposer(editor);if(editor&&editor.contains(active)){active.focus({preventScroll:true});if(caret)active.setSelectionRange(...caret);}}
+  if(S.compose?.inline&&S.selected&&S.compose.thread_key===threadKey(S.selected)){renderInlineComposer(editor);if(editor&&editor.contains(active)){if(active.classList.contains('rich-frame'))active.addEventListener('load',()=>{active.focus({preventScroll:true});const doc=active.contentDocument;doc?.body?.focus();richSetCaret(doc,caret);},{once:true});else{active.focus({preventScroll:true});if(caret)active.setSelectionRange(...caret);}}}
 }
 
 const viewRequests=new Map();
@@ -734,13 +734,13 @@ function composeMarkup(draft,inline=false,pane=false) {
 const RICH_TOOLS=[['bold','B','Grassetto'],['italic','I','Corsivo'],['underline','U','Sottolineato'],['h2','Titolo','Titolo'],['p','Testo','Paragrafo'],['insertUnorderedList','•','Elenco puntato'],['insertOrderedList','1.','Elenco numerato'],['createLink','Link','Inserisci link'],['removeFormat','Tx','Rimuovi formattazione']];
 function hasComposeHtml(draft){return Boolean((draft.html||'').trim());}
 function composeMessageMarkup(draft){
-  const rich=hasComposeHtml(draft);
-  return `<div class="field compose-message${rich?' is-rich':''}"><div class="compose-message-head"><span id="compose-message-label">Messaggio</span><div class="compose-format" role="group" aria-label="Formato del messaggio"><button type="button" data-rich-action="format-text" aria-pressed="${!rich}">Testo semplice</button><button type="button" data-rich-action="format-html" aria-pressed="${rich}">Formattato</button></div></div><textarea class="composer-body" name="body" placeholder="Scrivi qui…" maxlength="1000000" aria-labelledby="compose-message-label"${rich?' hidden':''}>
+  const html=hasComposeHtml(draft)?draft.html:textToHtml(draft.body),editing=!hasComposeHtml(draft)||draft.html===textToHtml(draft.body);
+  return `<div class="field compose-message is-rich"><div class="compose-message-head"><span id="compose-message-label">Messaggio</span></div><textarea class="composer-body" name="body" maxlength="1000000" aria-labelledby="compose-message-label" hidden>
 ${esc(draft.body)}</textarea><textarea name="html" hidden>
-${esc(draft.html||'')}</textarea>${rich?richEditorMarkup(draft.html):''}</div>`;
+${esc(html)}</textarea>${richEditorMarkup(html,false,editing)}</div>`;
 }
-function richEditorMarkup(html,images=false){
-  return `<div class="rich-editor"><div class="rich-bar"><div class="rich-tools" role="toolbar" aria-label="Formattazione" hidden>${RICH_TOOLS.map(([command,label,title])=>`<button type="button" data-rich-command="${command}" title="${title}" aria-label="${title}" class="rich-tool rich-${command}">${esc(label)}</button>`).join('')}</div><button type="button" class="secondary rich-edit" data-rich-action="edit">Modifica</button></div><iframe class="rich-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer" title="Messaggio formattato" data-images="${images?1:0}" srcdoc="${esc(richDocument(html,images))}"></iframe><div class="rich-note">${images?'Immagini esterne caricate.':'Immagini esterne bloccate: aprire la bozza non attiva il pixel di tracciamento.'}${images?'':' <button type="button" data-rich-action="images">Carica immagini</button>'}</div></div>`;
+function richEditorMarkup(html,images=false,editing=false){
+  return `<div class="rich-editor${editing?' editing':''}"><div class="rich-bar"><div class="rich-tools" role="toolbar" aria-label="Formattazione"${editing?'':' hidden'}>${RICH_TOOLS.map(([command,label,title])=>`<button type="button" data-rich-command="${command}" title="${title}" aria-label="${title}" class="rich-tool rich-${command}">${esc(label)}</button>`).join('')}</div><button type="button" class="secondary rich-edit" data-rich-action="edit" aria-pressed="${editing}">${editing?'Fine':'Modifica'}</button></div><iframe class="rich-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer" title="Messaggio formattato" data-images="${images?1:0}" data-editing="${editing?1:0}" srcdoc="${esc(richDocument(html,images))}"></iframe><div class="rich-note">${images?'Immagini esterne caricate.':'Immagini esterne bloccate: aprire la bozza non attiva il pixel di tracciamento.'}${images?'':' <button type="button" data-rich-action="images">Carica immagini</button>'}</div></div>`;
 }
 function richDocument(html,images=false){
   const head=`<meta data-milo-editor charset="utf-8"><meta data-milo-editor name="referrer" content="no-referrer"><meta data-milo-editor http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: ${images?'https:':''}; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style data-milo-editor>html{color-scheme:light}body{margin:0;padding:16px;min-height:calc(100% - 32px);font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;background:#fff;overflow-wrap:anywhere}body:focus{outline:none}img,table{max-width:100%!important}</style>`;
@@ -758,9 +758,9 @@ function richText(doc){
   clone.querySelectorAll('div,li,tr').forEach(node=>node.append('\n'));clone.querySelectorAll('p,h1,h2,h3,h4,table,blockquote,ul,ol').forEach(node=>node.append('\n\n'));
   clone.querySelectorAll('li').forEach(node=>node.prepend('• '));
   clone.querySelectorAll('a[href]').forEach(node=>{const href=node.getAttribute('href');if(/^https?:/i.test(href)&&!node.textContent.includes(href))node.append(` (${href})`);});
-  return clone.textContent.replace(/[ \t\u00a0]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+  return clone.textContent.replace(/[ \t\u00a0]+\n/g,'\n').replace(/^--$/gm,'-- ').replace(/\n{3,}/g,'\n\n').trim();
 }
-function textToHtml(text){return (text||'').split(/\n{2,}/).map(block=>`<p>${esc(block).replace(/\n/g,'<br>')}</p>`).join('')||'<p><br></p>';}
+function textToHtml(text){return (text||'').split(/\n{2,}/).map(block=>`<p>${esc(block).replace(/\n/g,'<br>')||'<br>'}</p>`).join('')||'<p><br></p>';}
 function richSync(frame){
   const doc=frame.contentDocument,form=frame.closest('#compose-form');if(!doc?.body||!form)return;
   form.querySelector('[name="html"]').value=richSerialize(doc);form.querySelector('[name="body"]').value=richText(doc);
@@ -772,6 +772,7 @@ function initRichFrame(frame){
   richFit(frame);
   if(frame.dataset.editing==='1')doc.designMode='on';
   doc.addEventListener('input',()=>{richSync(frame);richFit(frame);});
+  doc.addEventListener('keydown',handleKeydown);
   doc.addEventListener('click',event=>{if(frame.dataset.editing!=='1'&&event.target.closest?.('a'))event.preventDefault();});
 }
 function setRichEditing(editor,editing){
@@ -781,20 +782,12 @@ function setRichEditing(editor,editing){
   const button=editor.querySelector('.rich-edit');button.textContent=editing?'Fine':'Modifica';button.setAttribute('aria-pressed',String(editing));
   if(editing){frame.focus();doc?.body?.focus();}
 }
-function setComposeFormat(form,rich){
-  const message=form.querySelector('.compose-message'),body=form.querySelector('[name="body"]'),htmlField=form.querySelector('[name="html"]');
-  if(rich===message.classList.contains('is-rich'))return;
-  if(rich){
-    htmlField.value=textToHtml(body.value);message.classList.add('is-rich');body.hidden=true;message.insertAdjacentHTML('beforeend',richEditorMarkup(htmlField.value));
-    const editor=message.querySelector('.rich-editor');editor.querySelector('.rich-frame').addEventListener('load',()=>setRichEditing(editor,true),{once:true});
-  } else {
-    const previous=htmlField.value;htmlField.value='';message.classList.remove('is-rich');body.hidden=false;message.querySelector('.rich-editor')?.remove();body.focus();
-    toast('Formattazione rimossa: resta il testo semplice.',{label:'Annulla',run:()=>{if(!form.isConnected)return;htmlField.value=previous;message.classList.add('is-rich');body.hidden=true;message.insertAdjacentHTML('beforeend',richEditorMarkup(previous));message.querySelectorAll('[data-rich-action^="format-"]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.richAction==='format-html')));htmlField.dispatchEvent(new Event('input',{bubbles:true}));},duration:8000});
-  }
-  message.querySelectorAll('[data-rich-action^="format-"]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.richAction===(rich?'format-html':'format-text'))));
-  htmlField.dispatchEvent(new Event('input',{bubbles:true}));
-}
-function richInsertText(form,text){const frame=form?.querySelector('.compose-message.is-rich .rich-frame');if(!frame)return false;const editor=frame.closest('.rich-editor');if(frame.dataset.editing!=='1')setRichEditing(editor,true);frame.contentDocument.execCommand('insertHTML',false,textToHtml(text));richSync(frame);return true;}
+function focusComposeBody(form){const frame=form?.querySelector('.rich-frame');if(!frame)return;const editor=frame.closest('.rich-editor');const go=()=>{if(frame.dataset.editing!=='1')setRichEditing(editor,true);else{frame.focus();frame.contentDocument?.body?.focus();}};frame.contentDocument?.body?go():frame.addEventListener('load',go,{once:true});}
+function richCaret(doc){const selection=doc?.getSelection();if(!selection?.rangeCount||!doc.body.contains(selection.anchorNode))return null;const range=doc.createRange();range.selectNodeContents(doc.body);range.setEnd(selection.anchorNode,selection.anchorOffset);return range.toString().length;}
+function richSetCaret(doc,offset){const selection=doc?.getSelection();if(!selection)return;if(offset==null){selection.selectAllChildren(doc.body);selection.collapseToEnd();return;}const walker=doc.createTreeWalker(doc.body,NodeFilter.SHOW_TEXT);let left=offset,node;while((node=walker.nextNode())){if(left<=node.length){selection.collapse(node,left);return;}left-=node.length;}selection.selectAllChildren(doc.body);selection.collapseToEnd();}
+function richInsertText(form,text){const frame=form?.querySelector('.compose-message.is-rich .rich-frame');if(!frame)return false;const editor=frame.closest('.rich-editor');
+  const insert=()=>{const doc=frame.contentDocument;if(frame.dataset.editing!=='1')setRichEditing(editor,true);frame.focus();doc.body.focus();const selection=doc.getSelection();if(!selection.rangeCount||!doc.body.contains(selection.anchorNode)){selection.selectAllChildren(doc.body);selection.collapseToStart();}doc.execCommand('insertHTML',false,textToHtml(text));richSync(frame);richFit(frame);};
+  if(frame.contentDocument?.querySelector('[data-milo-editor]'))insert();else frame.addEventListener('load',insert,{once:true});return true;}
 document.addEventListener('load',event=>{if(event.target.classList?.contains('rich-frame'))initRichFrame(event.target);},true);
 document.addEventListener('mousedown',event=>{if(event.target.closest?.('[data-rich-command]'))event.preventDefault();});
 document.addEventListener('click',event=>{
@@ -806,8 +799,6 @@ document.addEventListener('click',event=>{
     richSync(frame);richFit(frame);return;}
   const button=event.target.closest?.('[data-rich-action]');if(!button)return;
   const form=button.closest('#compose-form'),editor=button.closest('.rich-editor'),action=button.dataset.richAction;
-  if(action==='format-html')setComposeFormat(form,true);
-  if(action==='format-text')setComposeFormat(form,false);
   if(action==='edit')setRichEditing(editor,editor.querySelector('.rich-frame').dataset.editing!=='1');
   if(action==='images'){const frame=editor.querySelector('.rich-frame'),editing=frame.dataset.editing==='1',html=form.querySelector('[name="html"]').value;editor.outerHTML=richEditorMarkup(html,true);if(editing){const fresh=form.querySelector('.rich-editor');fresh.querySelector('.rich-frame').addEventListener('load',()=>setRichEditing(fresh,true),{once:true});}}
 });
@@ -918,7 +909,10 @@ function renderComposePane() {
 }
 function renderInlineComposer(existing=null) {
   const slot=$('#inline-composer');if(!slot||!S.compose)return;
-  if(existing)slot.append(existing);else slot.innerHTML=composeMarkup(S.compose,true);
+  if(!existing){slot.innerHTML=composeMarkup(S.compose,true);return;}
+  const html=existing.querySelector('[name="html"]')?.value||'';
+  existing.querySelectorAll('.rich-frame').forEach(frame=>frame.setAttribute('srcdoc',richDocument(html,frame.dataset.images==='1')));
+  slot.append(existing);
 }
 function captureCompose() {
   const form=$('#compose-form');if(!form||!S.compose)return null;
@@ -961,16 +955,17 @@ async function saveCompose(){clearTimeout(autosaveTimer);return saveLocalDraft(c
 function showCompose(draft={},inline=Boolean(draft.reply_to_id||draft.context_message_id)) {
   if(!S.state.accounts.length){showAccountForm();return;}
   if(S.compose){
-    if(inline&&S.compose.context_message_id===(draft.context_message_id||draft.reply_to_id)&&S.compose.mode===(draft.mode||'reply')){$('#compose-form [name="body"]')?.focus();return;}
+    if(inline&&S.compose.context_message_id===(draft.context_message_id||draft.reply_to_id)&&S.compose.mode===(draft.mode||'reply')){focusComposeBody($('#compose-form'));return;}
     closeCompose().catch(error=>toast(error.message));
   }
   const mode=draft.reply_to_id&&(!draft.mode||draft.mode==='new')?'reply':draft.mode||'new';
   const fresh=!draft.id,accountId=draft.account_id||S.state.accounts[0].id,signature=S.state.signatures?.[accountId];
   if(fresh&&signature)draft={...draft,body:draft.mode==='forward'?`\n\n-- \n${signature}${draft.body||''}`:`${draft.body||''}\n\n-- \n${signature}`};
   const current={...draft,id:draft.id||crypto.randomUUID(),account_id:accountId,to:draft.to||'',cc:draft.cc||'',subject:draft.subject||'',body:draft.body||'',mode,reply_to_id:draft.reply_to_id||null,context_message_id:draft.context_message_id||draft.reply_to_id||null,revision:draft.revision||Date.now(),inline:inline&&Boolean($('#inline-composer')),thread_key:S.selected?threadKey(S.selected):null};
+  if(!hasComposeHtml(current))current.html=textToHtml(current.body);
   current.initialBody=fresh?current.body:null;
   S.compose=current;
-  if(current.inline){renderInlineComposer();$('#inline-composer').scrollIntoView({block:'nearest'});$('#inline-composer [name="body"]').focus({preventScroll:true});}
+  if(current.inline){renderInlineComposer();$('#inline-composer').scrollIntoView({block:'nearest'});focusComposeBody($('#inline-composer #compose-form'));}
   else if($('#reading-panel')){current.pane=true;$('.shell')?.classList.remove('menu-open');S.menu=false;renderComposePane();$('#reading-panel').scrollTop=0;$(current.to?'#compose-form [name="subject"]':'#compose-form [name="to"]')?.focus({preventScroll:true});}
   else{showModal('Nuovo messaggio',composeMarkup(current),true);S.compose=current;}
 }
@@ -1438,6 +1433,8 @@ document.addEventListener('change', async event => {
   }
   if(event.target.name==='account_id'&&event.target.closest('#compose-form')&&S.compose){
     const field=$('#compose-form [name="body"]'),before=S.state.signatures?.[S.compose.account_id],after=S.state.signatures?.[event.target.value];
+    const frame=$('#compose-form .rich-frame'),doc=frame?.contentDocument;
+    if(doc?.body){const sig=text=>textToHtml('-- \n'+text);if(before&&doc.body.innerHTML.includes(sig(before)))doc.body.innerHTML=doc.body.innerHTML.replace(sig(before),after?sig(after):'');else if(after&&!doc.body.innerHTML.includes(sig(after)))doc.body.insertAdjacentHTML('beforeend','<p><br></p>'+sig(after));richSync(frame);richFit(frame);S.compose.account_id=event.target.value;return;}
     if(field&&before&&field.value.includes('-- \n'+before))field.value=field.value.replace('-- \n'+before,after?'-- \n'+after:'');
     else if(field&&after&&!field.value.includes('-- \n'+after))field.value=`${field.value}\n\n-- \n${after}`;
     S.compose.account_id=event.target.value;field?.dispatchEvent(new Event('input',{bubbles:true}));
