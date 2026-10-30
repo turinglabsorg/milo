@@ -288,6 +288,8 @@ public struct Draft: Codable, Hashable, Identifiable, Sendable {
     public var cc: String
     public var subject: String
     public var body: String
+    /// Optional `text/html` alternative sent together with the plain `body`.
+    public var html: String?
     public var replyToId: String?
     public var contextMessageId: String?
     public var mode: Mode

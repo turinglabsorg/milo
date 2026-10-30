@@ -50,5 +50,5 @@ Gmail) builds a `multipart/alternative` message: `body` becomes the
 and fall back to text. Drafts without `html` are sent as `text/plain` exactly
 as before. The web composer edits `html` in its **Versione HTML** section, with
 a sandboxed preview that blocks remote images so tracking pixels do not fire,
-and saves it with the draft. The iOS composer does not keep `html` yet: saving
-such a draft from iOS drops it.
+and saves it with the draft. The iOS composer has the same **Versione HTML**
+section and preview, and keeps `html` when it saves or sends a draft.

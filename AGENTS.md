@@ -61,8 +61,8 @@ external action. That file is the single source of global agent instructions.
   pending suggestion lookup when the previous field loses focus.
 - Drafts may carry an optional `html` field (API only): `build_message` then
   adds it as the `text/html` alternative of the plain `body` (docs/API.md).
-  The web composer edits and round-trips it (`draftPayload` includes `html`;
-  preview iframe has no remote images); iOS still drops it.
+  The web and iOS composers edit and round-trip it (web `draftPayload`, iOS
+  `Draft.html`); their previews load no remote images.
 - Outgoing attachments: `draft_attachments` rows + files in
   `draft-attachments/<draft_id>/` (raw-body `POST /api/drafts/{id}/attachments?name=`,
   18 MB total); added by `build_message`, removed when the draft is sent or

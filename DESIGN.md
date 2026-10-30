@@ -138,3 +138,5 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
   the message body (9 px radius, `--surface`), open when the draft has HTML. It
   stacks a 13 px monospace code field and a white sandboxed preview frame (8 px
   radius); the preview blocks remote images and says so in an 11 px muted note.
+  iOS uses a `DisclosureGroup` in the composer form with a monospaced editor and
+  the mail web view as preview, with the same labels.

@@ -34,6 +34,21 @@ final class MailboxTests: XCTestCase {
         XCTAssertEqual(message.toAddresses?.first?.email, "sam@example.com")
     }
 
+    func testDraftKeepsItsHTMLAlternative() throws {
+        let html = "<p>Ciao <b>Comune</b></p>"
+        let data = try JSONSerialization.data(withJSONObject: ["id": "d1", "account_id": "a1", "to": "c@example.com", "cc": "",
+                                                               "subject": "HTML", "body": "Ciao", "html": html, "mode": "new", "revision": 1])
+        var draft = try APIClient.decoder.decode(Draft.self, from: data)
+        XCTAssertEqual(draft.html, html)
+        draft.body = "Ciao, aggiornato"
+        let encoded = try JSONSerialization.jsonObject(with: APIClient.encoder.encode(draft)) as? [String: Any]
+        XCTAssertEqual(encoded?["html"] as? String, html)
+        XCTAssertEqual(encoded?["body"] as? String, "Ciao, aggiornato")
+        let plain = try APIClient.decoder.decode(Draft.self, from: JSONSerialization.data(withJSONObject: [
+            "id": "d2", "account_id": "a1", "to": "", "cc": "", "subject": "", "body": "x", "mode": "new", "revision": 1]))
+        XCTAssertNil(plain.html)
+    }
+
     func testInboxRendersFromCacheAfterRestart() async throws {
         let (mailbox, _) = make()
         await mailbox.start()

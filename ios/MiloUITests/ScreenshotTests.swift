@@ -76,4 +76,28 @@ final class ScreenshotTests: XCTestCase {
             save("05-todo")
         }
     }
+
+    func testComposeEditsAndPreviewsTheHTMLAlternative() {
+        let row = app.descendants(matching: .any).matching(identifier: "row-m2").firstMatch
+        if !row.waitForExistence(timeout: 10) {
+            app.staticTexts["Smart inbox"].firstMatch.tap()
+        }
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        XCTAssertTrue(app.buttons["reply"].waitForExistence(timeout: 10))
+        app.buttons["reply"].tap()
+        XCTAssertTrue(app.textViews["compose-body"].waitForExistence(timeout: 10))
+        let section = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Versione HTML'")).firstMatch
+        for _ in 0..<4 where !section.isHittable { app.swipeUp() }
+        XCTAssertTrue(section.waitForExistence(timeout: 5))
+        section.tap()
+        let editor = app.textViews["compose-html"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        editor.tap()
+        editor.typeText("<h1>LetzGo Guide</h1><p>Gentile <b>Comune</b></p>")
+        let preview = app.webViews.staticTexts.containing(NSPredicate(format: "label CONTAINS 'LetzGo Guide'")).firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 10), "The HTML preview must render what was typed")
+        XCTAssertTrue(app.staticTexts["Inviata insieme al testo semplice"].exists)
+        save("06-compose-html")
+    }
 }

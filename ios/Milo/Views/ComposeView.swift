@@ -15,6 +15,9 @@ struct ComposeView: View {
     @FocusState private var recipientSlot: RecipientSlot?
     @State private var suggestions: [Recipient] = []
     @State private var suggestTask: Task<Void, Never>?
+    @State private var htmlExpanded = false
+    @State private var previewHTML = ""
+    @State private var previewHeight: CGFloat = 240
 
     private enum RecipientSlot: Hashable { case to, cc }
 
@@ -70,6 +73,12 @@ struct ComposeView: View {
         }
     }
 
+    private var hasHTML: Bool { !(draft.html ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    private var htmlBinding: Binding<String> {
+        Binding(get: { draft.html ?? "" }, set: { draft.html = $0 })
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -93,6 +102,34 @@ struct ComposeView: View {
                         .accessibilityIdentifier("compose-body")
                 }
                 Section {
+                    DisclosureGroup(isExpanded: $htmlExpanded) {
+                        TextEditor(text: htmlBinding)
+                            .font(.system(.footnote, design: .monospaced))
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .frame(minHeight: 160)
+                            .accessibilityIdentifier("compose-html")
+                        if !previewHTML.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Anteprima").font(.caption).foregroundStyle(Color.milo.muted)
+                                MailWebView(html: MailHTML.document(previewHTML, remoteImages: false), height: $previewHeight)
+                                    .frame(height: previewHeight)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .accessibilityIdentifier("compose-html-preview")
+                                Text("Le immagini esterne non si caricano nell’anteprima, così il pixel di tracciamento non si attiva.")
+                                    .font(.caption2).foregroundStyle(Color.milo.muted)
+                            }
+                        }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Versione HTML")
+                            Text(hasHTML ? "Inviata insieme al testo semplice" : "Facoltativa")
+                                .font(.caption).foregroundStyle(Color.milo.muted)
+                        }
+                    }
+                    .accessibilityIdentifier("compose-html-section")
+                }
+                Section {
                     if let templates = mailbox.state?.templates, !templates.isEmpty {
                         Menu {
                             ForEach(templates, id: \.name) { template in
@@ -114,6 +151,11 @@ struct ComposeView: View {
             .onChange(of: draft.to) { _, _ in if recipientSlot == .to { refreshSuggestions() } }
             .onChange(of: draft.cc) { _, _ in if recipientSlot == .cc { refreshSuggestions() } }
             .onChange(of: recipientSlot) { _, _ in refreshSuggestions() }
+            .task(id: draft.html) {
+                try? await Task.sleep(nanoseconds: previewHTML.isEmpty ? 0 : 300_000_000)
+                guard !Task.isCancelled else { return }
+                previewHTML = draft.html ?? ""
+            }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -138,7 +180,10 @@ struct ComposeView: View {
                 }
             }
             .sheet(isPresented: $scheduling) { scheduleSheet.presentationDetents([.medium, .large]) }
-            .onAppear { if draft.mode != .new { bodyFocused = true } }
+            .onAppear {
+                htmlExpanded = hasHTML
+                if draft.mode != .new { bodyFocused = true }
+            }
             .interactiveDismissDisabled(sending)
         }
     }
