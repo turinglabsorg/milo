@@ -202,55 +202,81 @@ def test_server_restart_503_preserves_downloaded_inbox_and_body(tmp_path):
         browser.close()
 
 
-def test_web_composer_keeps_the_html_alternative_of_an_api_draft(tmp_path):
-    html = '<html><body><p>Ciao <b>Comune</b></p><img src="https://pixel.example/logo.png?id=abc" width="194" height="47" alt="Logo"></body></html>'
+
+def open_draft(page, url):
+    page.reload()
+    page.locator('[data-view="drafts"]').click()
+    page.locator('.draft-row').first.click()
+
+
+def test_web_composer_renders_and_edits_the_html_of_an_api_draft(tmp_path):
+    html = '<html><head><style>.brand{color:#0f3d3e}</style></head><body><p class="brand">Ciao <b>Comune</b></p><img src="https://pixel.example/logo.png?id=abc" width="194" height="47" alt="Logo"></body></html>'
     with service(tmp_path) as (url, sent), sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(service_workers='block')
+        pixel_requests, errors = [], []
+        page.route('https://pixel.example/**', lambda route: (pixel_requests.append(route.request.url), route.fulfill(status=204)))
+        page.on('pageerror', lambda error: errors.append(str(error)))
         page.goto(url)
         expect(page.locator('.message-row')).to_have_count(2)
         account = page.request.get(url + '/api/state').json()['accounts'][0]['id']
         page.request.put(url + '/api/drafts', data={'id': 'html-draft', 'account_id': account, 'to': 'comune@example.com',
                                                    'subject': 'HTML', 'body': 'Ciao Comune', 'html': html, 'mode': 'new', 'revision': 1})
-        page.reload()
-        page.locator('[data-view="drafts"]').click()
-        page.locator('.draft-row').click()
-        page.locator('#compose-form [name="body"]').fill('Ciao Comune, testo aggiornato')
+        open_draft(page, url)
+        editor = page.frame_locator('#compose-form .rich-frame')
+        expect(editor.locator('b')).to_have_text('Comune')
+        expect(page.locator('#compose-form [name="body"]')).to_be_hidden()
+        expect(page.locator('#compose-form .rich-tools')).to_be_hidden()
+        expect(page.locator('#compose-form [data-rich-action="format-html"]')).to_have_attribute('aria-pressed', 'true')
+        page.locator('#compose-form .rich-edit').click()
+        expect(page.locator('#compose-form .rich-tools')).to_be_visible()
+        editor.locator('b').click()
+        page.keyboard.press('End')
+        page.keyboard.type(', testo aggiornato')
         page.get_by_role('button', name='Salva bozza', exact=True).click()
         expect(page.locator('.draft-save-status')).to_have_text('Bozza salvata')
         draft = page.request.get(url + '/api/drafts').json()['drafts'][0]
-        assert draft['body'] == 'Ciao Comune, testo aggiornato' and draft['html'] == html
+        assert 'testo aggiornato' in draft['html'] and '.brand{color:#0f3d3e}' in draft['html']
+        assert 'pixel.example/logo.png?id=abc' in draft['html'] and 'data-milo-editor' not in draft['html']
+        assert 'contenteditable' not in draft['html'] and draft['body'].startswith('Ciao Comune, testo aggiornato')
+        open_draft(page, url)
+        expect(page.frame_locator('#compose-form .rich-frame').locator('body')).to_contain_text('testo aggiornato')
+        assert pixel_requests == [] and errors == []
         browser.close()
 
 
-def test_web_composer_edits_and_previews_the_html_alternative(tmp_path):
+def test_web_composer_switches_between_plain_text_and_formatted(tmp_path):
     with service(tmp_path) as (url, sent), sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(service_workers='block')
-        pixel_requests = []
-        page.route('https://pixel.example/**', lambda route: (pixel_requests.append(route.request.url), route.fulfill(status=204)))
+        errors = []
+        page.on('pageerror', lambda error: errors.append(str(error)))
         page.goto(url)
         expect(page.locator('.message-row')).to_have_count(2)
-        account = page.request.get(url + '/api/state').json()['accounts'][0]['id']
-        page.request.put(url + '/api/drafts', data={'id': 'html-edit', 'account_id': account, 'to': 'comune@example.com',
-                                                   'subject': 'HTML', 'body': 'Ciao Comune', 'mode': 'new', 'revision': 1})
-        page.reload()
-        page.locator('[data-view="drafts"]').click()
-        page.locator('.draft-row').click()
-        section = page.locator('#compose-form .compose-html')
-        expect(section).not_to_have_attribute('open', '')
-        section.locator('summary').click()
-        html = '<p>Ciao <b>Comune</b></p><img src="https://pixel.example/logo.png?id=abc" width="194" height="47" alt="Logo">'
-        page.locator('#compose-form [name="html"]').fill(html)
-        expect(page.frame_locator('.compose-html-preview iframe').locator('b')).to_have_text('Comune')
-        expect(section.locator('summary small')).to_have_text('Inviata insieme al testo semplice')
+        page.locator('[data-action="compose"]').first.click()
+        page.locator('#compose-form [name="to"]').fill('comune@example.com')
+        page.locator('#compose-form [name="subject"]').fill('Formattato')
+        page.locator('#compose-form [name="body"]').fill('Prima riga\n\nSeconda riga')
+        page.locator('#compose-form [data-rich-action="format-html"]').click()
+        editor = page.frame_locator('#compose-form .rich-frame')
+        expect(editor.locator('p')).to_have_count(2)
+        expect(page.locator('#compose-form .rich-tools')).to_be_visible()
+        editor.locator('p').first.click()
+        page.keyboard.press('Home')
+        page.keyboard.press('Shift+End')
+        page.locator('#compose-form [data-rich-command="bold"]').click()
         page.get_by_role('button', name='Salva bozza', exact=True).click()
         expect(page.locator('.draft-save-status')).to_have_text('Bozza salvata')
-        assert page.request.get(url + '/api/drafts').json()['drafts'][0]['html'] == html
-        page.reload()
-        page.locator('[data-view="drafts"]').click()
-        page.locator('.draft-row').click()
-        expect(page.locator('#compose-form .compose-html')).to_have_attribute('open', '')
-        expect(page.locator('#compose-form [name="html"]')).to_have_value(html)
-        assert pixel_requests == []
+        draft = page.request.get(url + '/api/drafts').json()['drafts'][0]
+        assert '<b>Prima riga</b>' in draft['html'] and draft['body'] == 'Prima riga\n\nSeconda riga'
+        page.locator('#compose-form [data-rich-action="format-text"]').click()
+        expect(page.locator('#compose-form [name="body"]')).to_have_value('Prima riga\n\nSeconda riga')
+        expect(page.locator('#compose-form .rich-editor')).to_have_count(0)
+        page.get_by_role('button', name='Salva bozza', exact=True).click()
+        for _ in range(50):
+            if page.request.get(url + '/api/drafts').json()['drafts'][0]['html'] == '':
+                break
+            page.wait_for_timeout(100)
+        assert page.request.get(url + '/api/drafts').json()['drafts'][0]['html'] == ''
+        assert errors == []
         browser.close()

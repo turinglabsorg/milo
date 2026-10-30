@@ -726,14 +726,88 @@ function showAccountSettings(accountId) {
 }
 
 function composeMarkup(draft,inline=false) {
-  return `<form id="compose-form" class="${inline?'inline-compose-form':''}"><div class="compose-heading"><h3>${draft.mode==='forward'?'Inoltra':['reply','reply_all'].includes(draft.mode)?draft.mode==='reply_all'?'Rispondi a tutti':'Rispondi':'Nuovo messaggio'}</h3>${inline?`<button class="icon-button" type="button" data-action="close-compose" aria-label="Chiudi" title="Chiudi bozza">${icon('close')}</button>`:''}</div><label class="field"><span>Da</span><select name="account_id">${S.state.accounts.map(a=>`<option value="${esc(a.id)}" ${draft.account_id===a.id?'selected':''}>${esc(a.name)} · ${esc(a.email)}</option>`).join('')}</select></label><label class="field recipient-field"><span>A</span><input name="to" value="${esc(draft.to)}" placeholder="nome@example.com" maxlength="2000" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"></label><label class="field recipient-field"><span>Cc</span><input name="cc" value="${esc(draft.cc)}" placeholder="Copia conoscenza" maxlength="2000" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"></label><label class="field"><span>Oggetto</span><input name="subject" value="${esc(draft.subject)}" placeholder="Di cosa parliamo?" maxlength="998"></label><label class="field"><span>Messaggio</span><textarea class="composer-body" name="body" placeholder="Scrivi qui…" maxlength="1000000">
-${esc(draft.body)}</textarea></label>${composeHtmlMarkup(draft)}<div class="attachments compose-attachments">${composeAttachments(draft)}</div><div class="compose-tools"><button class="secondary attach-button" type="button" data-action="attach-file">${icon('paperclip')}Allega</button><input class="attach-input" type="file" multiple hidden>${(S.state.templates||[]).length?`<select class="template-select" aria-label="Inserisci una risposta salvata"><option value="">Risposte salvate…</option>${S.state.templates.map((template,index)=>`<option value="${index}">${esc(template.name)}</option>`).join('')}</select>`:''}<label class="followup-field"><span>Ricordamelo se non risponde</span><select name="followup_days">${[['','mai'],['1','entro 1 giorno'],['3','entro 3 giorni'],['7','entro una settimana']].map(([value,label])=>`<option value="${value}" ${String(draft.followup_days||'')===value?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="delete-draft">Elimina bozza</button><button class="secondary" type="button" data-action="save-draft">Salva bozza</button><button class="secondary" type="button" data-action="schedule-send">${icon('clock')}Programma</button><button class="primary" type="submit">${icon('sent')}Invia messaggio</button></div><div class="draft-save-status" role="status">${S.pendingDrafts.has(draft.id)?'Salvataggio in attesa':'Le modifiche vengono salvate automaticamente.'}</div></form>`;
+  return `<form id="compose-form" class="${inline?'inline-compose-form':''}"><div class="compose-heading"><h3>${draft.mode==='forward'?'Inoltra':['reply','reply_all'].includes(draft.mode)?draft.mode==='reply_all'?'Rispondi a tutti':'Rispondi':'Nuovo messaggio'}</h3>${inline?`<button class="icon-button" type="button" data-action="close-compose" aria-label="Chiudi" title="Chiudi bozza">${icon('close')}</button>`:''}</div><label class="field"><span>Da</span><select name="account_id">${S.state.accounts.map(a=>`<option value="${esc(a.id)}" ${draft.account_id===a.id?'selected':''}>${esc(a.name)} · ${esc(a.email)}</option>`).join('')}</select></label><label class="field recipient-field"><span>A</span><input name="to" value="${esc(draft.to)}" placeholder="nome@example.com" maxlength="2000" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"></label><label class="field recipient-field"><span>Cc</span><input name="cc" value="${esc(draft.cc)}" placeholder="Copia conoscenza" maxlength="2000" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false"></label><label class="field"><span>Oggetto</span><input name="subject" value="${esc(draft.subject)}" placeholder="Di cosa parliamo?" maxlength="998"></label>${composeMessageMarkup(draft)}<div class="attachments compose-attachments">${composeAttachments(draft)}</div><div class="compose-tools"><button class="secondary attach-button" type="button" data-action="attach-file">${icon('paperclip')}Allega</button><input class="attach-input" type="file" multiple hidden>${(S.state.templates||[]).length?`<select class="template-select" aria-label="Inserisci una risposta salvata"><option value="">Risposte salvate…</option>${S.state.templates.map((template,index)=>`<option value="${index}">${esc(template.name)}</option>`).join('')}</select>`:''}<label class="followup-field"><span>Ricordamelo se non risponde</span><select name="followup_days">${[['','mai'],['1','entro 1 giorno'],['3','entro 3 giorni'],['7','entro una settimana']].map(([value,label])=>`<option value="${value}" ${String(draft.followup_days||'')===value?'selected':''}>${label}</option>`).join('')}</select></label></div><div class="form-error" role="alert"></div><div class="form-actions"><button class="secondary" type="button" data-action="delete-draft">Elimina bozza</button><button class="secondary" type="button" data-action="save-draft">Salva bozza</button><button class="secondary" type="button" data-action="schedule-send">${icon('clock')}Programma</button><button class="primary" type="submit">${icon('sent')}Invia messaggio</button></div><div class="draft-save-status" role="status">${S.pendingDrafts.has(draft.id)?'Salvataggio in attesa':'Le modifiche vengono salvate automaticamente.'}</div></form>`;
 }
-function composeHtmlPreview(html){return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style>html{color-scheme:light}body{margin:0;padding:16px;font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;overflow-wrap:anywhere}img,table{max-width:100%!important}</style></head><body>${html}</body></html>`;}
-function composeHtmlMarkup(draft){const html=draft.html||'';return `<details class="compose-html"${html?' open':''}><summary><span>Versione HTML</span><small>${html?'Inviata insieme al testo semplice':'Facoltativa: chi la supporta vede questa, gli altri il testo'}</small></summary><div class="compose-html-grid"><label class="field"><span>Codice HTML</span><textarea class="composer-html" name="html" spellcheck="false" autocapitalize="off" placeholder="<p>Ciao…</p>" maxlength="1000000">
-${esc(html)}</textarea></label><div class="compose-html-preview"><span>Anteprima</span><iframe sandbox="allow-same-origin" referrerpolicy="no-referrer" title="Anteprima della versione HTML" srcdoc="${esc(composeHtmlPreview(html))}"></iframe><small>Le immagini esterne non si caricano nell'anteprima, così il pixel di tracciamento non si attiva.</small></div></div></details>`;}
-let htmlPreviewTimer=0;
-function scheduleComposeHtmlPreview(field){clearTimeout(htmlPreviewTimer);htmlPreviewTimer=setTimeout(()=>{const frame=field.closest('.compose-html')?.querySelector('iframe');if(frame)frame.srcdoc=composeHtmlPreview(field.value);const label=field.closest('.compose-html')?.querySelector('summary small');if(label)label.textContent=field.value.trim()?'Inviata insieme al testo semplice':'Facoltativa: chi la supporta vede questa, gli altri il testo';},250);}
+const RICH_TOOLS=[['bold','B','Grassetto'],['italic','I','Corsivo'],['underline','U','Sottolineato'],['h2','Titolo','Titolo'],['p','Testo','Paragrafo'],['insertUnorderedList','•','Elenco puntato'],['insertOrderedList','1.','Elenco numerato'],['createLink','Link','Inserisci link'],['removeFormat','Tx','Rimuovi formattazione']];
+function hasComposeHtml(draft){return Boolean((draft.html||'').trim());}
+function composeMessageMarkup(draft){
+  const rich=hasComposeHtml(draft);
+  return `<div class="field compose-message${rich?' is-rich':''}"><div class="compose-message-head"><span id="compose-message-label">Messaggio</span><div class="compose-format" role="group" aria-label="Formato del messaggio"><button type="button" data-rich-action="format-text" aria-pressed="${!rich}">Testo semplice</button><button type="button" data-rich-action="format-html" aria-pressed="${rich}">Formattato</button></div></div><textarea class="composer-body" name="body" placeholder="Scrivi qui…" maxlength="1000000" aria-labelledby="compose-message-label"${rich?' hidden':''}>
+${esc(draft.body)}</textarea><textarea name="html" hidden>
+${esc(draft.html||'')}</textarea>${rich?richEditorMarkup(draft.html):''}</div>`;
+}
+function richEditorMarkup(html,images=false){
+  return `<div class="rich-editor"><div class="rich-bar"><div class="rich-tools" role="toolbar" aria-label="Formattazione" hidden>${RICH_TOOLS.map(([command,label,title])=>`<button type="button" data-rich-command="${command}" title="${title}" aria-label="${title}" class="rich-tool rich-${command}">${esc(label)}</button>`).join('')}</div><button type="button" class="secondary rich-edit" data-rich-action="edit">Modifica</button></div><iframe class="rich-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer" title="Messaggio formattato" data-images="${images?1:0}" srcdoc="${esc(richDocument(html,images))}"></iframe><div class="rich-note">${images?'Immagini esterne caricate.':'Immagini esterne bloccate: aprire la bozza non attiva il pixel di tracciamento.'}${images?'':' <button type="button" data-rich-action="images">Carica immagini</button>'}</div></div>`;
+}
+function richDocument(html,images=false){
+  const head=`<meta data-milo-editor charset="utf-8"><meta data-milo-editor name="referrer" content="no-referrer"><meta data-milo-editor http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: ${images?'https:':''}; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style data-milo-editor>html{color-scheme:light}body{margin:0;padding:16px;min-height:calc(100% - 32px);font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;background:#fff;overflow-wrap:anywhere}body:focus{outline:none}img,table{max-width:100%!important}</style>`;
+  if(/<html[\s>]/i.test(html)){return /<head[^>]*>/i.test(html)?html.replace(/<head[^>]*>/i,match=>match+head):html.replace(/<html[^>]*>/i,match=>match+'<head>'+head+'</head>');}
+  return `<!doctype html><html data-milo-fragment><head>${head}</head><body>${html}</body></html>`;
+}
+function richSerialize(doc){
+  if(doc.documentElement.hasAttribute('data-milo-fragment'))return doc.body.innerHTML;
+  const root=doc.documentElement.cloneNode(true);root.querySelectorAll('[data-milo-editor]').forEach(node=>node.remove());root.querySelector('body')?.removeAttribute('contenteditable');
+  return '<!doctype html>\n'+root.outerHTML;
+}
+function richText(doc){
+  const clone=doc.body.cloneNode(true);clone.querySelectorAll('style,script,head').forEach(node=>node.remove());
+  clone.querySelectorAll('br').forEach(node=>node.replaceWith('\n'));
+  clone.querySelectorAll('div,li,tr').forEach(node=>node.append('\n'));clone.querySelectorAll('p,h1,h2,h3,h4,table,blockquote,ul,ol').forEach(node=>node.append('\n\n'));
+  clone.querySelectorAll('li').forEach(node=>node.prepend('• '));
+  clone.querySelectorAll('a[href]').forEach(node=>{const href=node.getAttribute('href');if(/^https?:/i.test(href)&&!node.textContent.includes(href))node.append(` (${href})`);});
+  return clone.textContent.replace(/[ \t\u00a0]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+}
+function textToHtml(text){return (text||'').split(/\n{2,}/).map(block=>`<p>${esc(block).replace(/\n/g,'<br>')}</p>`).join('')||'<p><br></p>';}
+function richSync(frame){
+  const doc=frame.contentDocument,form=frame.closest('#compose-form');if(!doc?.body||!form)return;
+  form.querySelector('[name="html"]').value=richSerialize(doc);form.querySelector('[name="body"]').value=richText(doc);
+  form.querySelector('[name="html"]').dispatchEvent(new Event('input',{bubbles:true}));
+}
+function richFit(frame){const doc=frame.contentDocument;if(doc?.documentElement)frame.style.height=Math.max(220,Math.min(900,doc.documentElement.scrollHeight))+'px';}
+function initRichFrame(frame){
+  const doc=frame.contentDocument;if(!doc?.body)return;
+  richFit(frame);
+  if(frame.dataset.editing==='1')doc.designMode='on';
+  doc.addEventListener('input',()=>{richSync(frame);richFit(frame);});
+  doc.addEventListener('click',event=>{if(frame.dataset.editing!=='1'&&event.target.closest?.('a'))event.preventDefault();});
+}
+function setRichEditing(editor,editing){
+  const frame=editor.querySelector('.rich-frame'),doc=frame.contentDocument;frame.dataset.editing=editing?'1':'0';
+  if(doc)doc.designMode=editing?'on':'off';
+  editor.classList.toggle('editing',editing);editor.querySelector('.rich-tools').hidden=!editing;
+  const button=editor.querySelector('.rich-edit');button.textContent=editing?'Fine':'Modifica';button.setAttribute('aria-pressed',String(editing));
+  if(editing){frame.focus();doc?.body?.focus();}
+}
+function setComposeFormat(form,rich){
+  const message=form.querySelector('.compose-message'),body=form.querySelector('[name="body"]'),htmlField=form.querySelector('[name="html"]');
+  if(rich===message.classList.contains('is-rich'))return;
+  if(rich){
+    htmlField.value=textToHtml(body.value);message.classList.add('is-rich');body.hidden=true;message.insertAdjacentHTML('beforeend',richEditorMarkup(htmlField.value));
+    const editor=message.querySelector('.rich-editor');editor.querySelector('.rich-frame').addEventListener('load',()=>setRichEditing(editor,true),{once:true});
+  } else {
+    const previous=htmlField.value;htmlField.value='';message.classList.remove('is-rich');body.hidden=false;message.querySelector('.rich-editor')?.remove();body.focus();
+    toast('Formattazione rimossa: resta il testo semplice.',{label:'Annulla',run:()=>{if(!form.isConnected)return;htmlField.value=previous;message.classList.add('is-rich');body.hidden=true;message.insertAdjacentHTML('beforeend',richEditorMarkup(previous));message.querySelectorAll('[data-rich-action^="format-"]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.richAction==='format-html')));htmlField.dispatchEvent(new Event('input',{bubbles:true}));},duration:8000});
+  }
+  message.querySelectorAll('[data-rich-action^="format-"]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.richAction===(rich?'format-html':'format-text'))));
+  htmlField.dispatchEvent(new Event('input',{bubbles:true}));
+}
+function richInsertText(form,text){const frame=form?.querySelector('.compose-message.is-rich .rich-frame');if(!frame)return false;const editor=frame.closest('.rich-editor');if(frame.dataset.editing!=='1')setRichEditing(editor,true);frame.contentDocument.execCommand('insertHTML',false,textToHtml(text));richSync(frame);return true;}
+document.addEventListener('load',event=>{if(event.target.classList?.contains('rich-frame'))initRichFrame(event.target);},true);
+document.addEventListener('mousedown',event=>{if(event.target.closest?.('[data-rich-command]'))event.preventDefault();});
+document.addEventListener('click',event=>{
+  const tool=event.target.closest?.('[data-rich-command]');
+  if(tool){const frame=tool.closest('.rich-editor').querySelector('.rich-frame'),doc=frame.contentDocument,command=tool.dataset.richCommand;if(!doc)return;frame.focus();
+    if(command==='h2'||command==='p')doc.execCommand('formatBlock',false,command);
+    else if(command==='createLink'){const url=prompt('Indirizzo del link (https://…)','https://');if(!url||!/^(https?:|mailto:)/i.test(url.trim()))return;doc.execCommand('createLink',false,url.trim());}
+    else doc.execCommand(command,false,null);
+    richSync(frame);richFit(frame);return;}
+  const button=event.target.closest?.('[data-rich-action]');if(!button)return;
+  const form=button.closest('#compose-form'),editor=button.closest('.rich-editor'),action=button.dataset.richAction;
+  if(action==='format-html')setComposeFormat(form,true);
+  if(action==='format-text')setComposeFormat(form,false);
+  if(action==='edit')setRichEditing(editor,editor.querySelector('.rich-frame').dataset.editing!=='1');
+  if(action==='images'){const frame=editor.querySelector('.rich-frame'),editing=frame.dataset.editing==='1',html=form.querySelector('[name="html"]').value;editor.outerHTML=richEditorMarkup(html,true);if(editing){const fresh=form.querySelector('.rich-editor');fresh.querySelector('.rich-frame').addEventListener('load',()=>setRichEditing(fresh,true),{once:true});}}
+});
 const ATTACHMENT_LIMIT=18*1024*1024;
 function fileSize(bytes){return bytes<1024?`${bytes} B`:bytes<1048576?`${Math.round(bytes/1024)} KB`:`${(bytes/1048576).toFixed(1).replace('.',',')} MB`;}
 function composeAttachments(draft){
@@ -947,7 +1021,7 @@ async function runAI(action,button) {
     } else {
       const result=await api('/messages/'+id+'/reply','POST');
       if(S.compose?.id===generatedDraft.id&&S.compose.revision===generatedDraft.revision&&(S.compose.body||'')===(S.compose.initialBody||'')){
-        const field=$('#compose-form [name="body"]');field.value=result.body+(S.compose.initialBody||'');field.dispatchEvent(new Event('input',{bubbles:true}));
+        const field=$('#compose-form [name="body"]');if(!richInsertText(field.closest('#compose-form'),result.body)){field.value=result.body+(S.compose.initialBody||'');field.dispatchEvent(new Event('input',{bubbles:true}));}
       }else if(S.compose?.id===generatedDraft.id)toast('Hai già modificato la bozza. Il tuo testo è stato conservato.');
     }
   } catch(error) { if(action==='recap') closeModal(); toast(error.message); }
@@ -1332,7 +1406,6 @@ document.addEventListener('submit', async event => {
 document.addEventListener('input', event => {
   if(event.target.closest('#compose-form')){const draft=captureCompose();rememberDraft(draft,false);clearTimeout(autosaveTimer);autosaveTimer=setTimeout(()=>persistDraft(draft).catch(()=>{if($('.draft-save-status'))$('.draft-save-status').textContent='Salvataggio in attesa. La copia resta nelle bozze.';}),700);}
   if(event.target.matches?.('#compose-form [name="to"], #compose-form [name="cc"]'))scheduleRecipients(event.target);
-  if(event.target.matches?.('#compose-form [name="html"]'))scheduleComposeHtmlPreview(event.target);
   if(event.target.id==='palette-input'&&S.palette){S.palette.active=0;renderPalette();}
   if(event.target.id==='search-input') {
     S.search=event.target.value;clearTimeout(searchTimer);
@@ -1349,6 +1422,7 @@ document.addEventListener('change', async event => {
   if(event.target.name==='theme'&&$('#appearance-form'))applyTheme(event.target.value);
   if(event.target.classList?.contains('template-select')&&event.target.value!==''){
     const template=S.state.templates?.[Number(event.target.value)],field=$('#compose-form [name="body"]');event.target.value='';
+    if(template&&richInsertText(field?.closest('#compose-form'),template.body))return;
     if(template&&field){const start=field.selectionStart??field.value.length;field.value=field.value.slice(0,start)+template.body+field.value.slice(field.selectionEnd??start);field.focus();field.setSelectionRange(start+template.body.length,start+template.body.length);field.dispatchEvent(new Event('input',{bubbles:true}));}
   }
   if(event.target.name==='account_id'&&event.target.closest('#compose-form')&&S.compose){
