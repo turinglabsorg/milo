@@ -15,7 +15,6 @@ struct ComposeView: View {
     @State private var suggestions: [Recipient] = []
     @State private var suggestTask: Task<Void, Never>?
     @State private var editingHTML = false
-    @State private var remoteImages = false
     @State private var editorHeight: CGFloat = 240
     @State private var editor = HTMLEditorController()
     @State private var linkPrompt = false
@@ -121,7 +120,7 @@ struct ComposeView: View {
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("compose-edit-html")
             }
-            HTMLEditorView(html: draft.html ?? "", remoteImages: remoteImages, editing: editingHTML,
+            HTMLEditorView(html: draft.html ?? "", remoteImages: false, editing: editingHTML,
                            height: $editorHeight, controller: editor) { html, text in
                 draft.html = html
                 draft.body = text
@@ -130,14 +129,6 @@ struct ComposeView: View {
             .frame(height: editorHeight)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(editingHTML ? Color.milo.accent : Color.milo.line, lineWidth: 1))
-            if !remoteImages {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("Immagini esterne bloccate: aprire la bozza non attiva il pixel di tracciamento.")
-                    Button("Carica immagini") { remoteImages = true }.buttonStyle(.borderless)
-                }
-                .font(.caption2)
-                .foregroundStyle(Color.milo.muted)
-            }
         }
         .padding(.vertical, 4)
     }

@@ -740,7 +740,7 @@ ${esc(draft.body)}</textarea><textarea name="html" hidden>
 ${esc(html)}</textarea>${richEditorMarkup(html,false,editing)}</div>`;
 }
 function richEditorMarkup(html,images=false,editing=false){
-  return `<div class="rich-editor${editing?' editing':''}"><div class="rich-bar"><div class="rich-tools" role="toolbar" aria-label="Formattazione"${editing?'':' hidden'}>${RICH_TOOLS.map(([command,label,title])=>`<button type="button" data-rich-command="${command}" title="${title}" aria-label="${title}" class="rich-tool rich-${command}">${esc(label)}</button>`).join('')}</div><button type="button" class="secondary rich-edit" data-rich-action="edit" aria-pressed="${editing}">${editing?'Fine':'Modifica'}</button></div><iframe class="rich-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer" title="Messaggio formattato" data-images="${images?1:0}" data-editing="${editing?1:0}" srcdoc="${esc(richDocument(html,images))}"></iframe><div class="rich-note">${images?'Immagini esterne caricate.':'Immagini esterne bloccate: aprire la bozza non attiva il pixel di tracciamento.'}${images?'':' <button type="button" data-rich-action="images">Carica immagini</button>'}</div></div>`;
+  return `<div class="rich-editor${editing?' editing':''}"><div class="rich-bar"><div class="rich-tools" role="toolbar" aria-label="Formattazione"${editing?'':' hidden'}>${RICH_TOOLS.map(([command,label,title])=>`<button type="button" data-rich-command="${command}" title="${title}" aria-label="${title}" class="rich-tool rich-${command}">${esc(label)}</button>`).join('')}</div><button type="button" class="secondary rich-edit" data-rich-action="edit" aria-pressed="${editing}">${editing?'Fine':'Modifica'}</button></div><iframe class="rich-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer" title="Messaggio formattato" data-images="${images?1:0}" data-editing="${editing?1:0}" srcdoc="${esc(richDocument(html,images))}"></iframe></div>`;
 }
 function richDocument(html,images=false){
   const head=`<meta data-milo-editor charset="utf-8"><meta data-milo-editor name="referrer" content="no-referrer"><meta data-milo-editor http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: ${images?'https:':''}; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style data-milo-editor>html{color-scheme:light}body{margin:0;padding:16px;min-height:calc(100% - 32px);font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;background:#fff;overflow-wrap:anywhere}body:focus{outline:none}img,table{max-width:100%!important}</style>`;
@@ -761,8 +761,9 @@ function richText(doc){
   return clone.textContent.replace(/[ \t\u00a0]+\n/g,'\n').replace(/^--$/gm,'-- ').replace(/\n{3,}/g,'\n\n').trim();
 }
 function textToHtml(text){return (text||'').split(/\n{2,}/).map(block=>`<p>${esc(block).replace(/\n/g,'<br>')||'<br>'}</p>`).join('')||'<p><br></p>';}
+function richReady(frame){const doc=frame?.contentDocument;return Boolean(doc?.body&&doc.readyState==='complete'&&doc.querySelector('[data-milo-editor]'));}
 function richSync(frame){
-  const doc=frame.contentDocument,form=frame.closest('#compose-form');if(!doc?.body||!form)return;
+  const doc=frame.contentDocument,form=frame.closest('#compose-form');if(!richReady(frame)||!form)return;
   form.querySelector('[name="html"]').value=richSerialize(doc);form.querySelector('[name="body"]').value=richText(doc);
   form.querySelector('[name="html"]').dispatchEvent(new Event('input',{bubbles:true}));
 }
@@ -782,12 +783,12 @@ function setRichEditing(editor,editing){
   const button=editor.querySelector('.rich-edit');button.textContent=editing?'Fine':'Modifica';button.setAttribute('aria-pressed',String(editing));
   if(editing){frame.focus();doc?.body?.focus();}
 }
-function focusComposeBody(form){const frame=form?.querySelector('.rich-frame');if(!frame)return;const editor=frame.closest('.rich-editor');const go=()=>{if(frame.dataset.editing!=='1')setRichEditing(editor,true);else{frame.focus();frame.contentDocument?.body?.focus();}};frame.contentDocument?.body?go():frame.addEventListener('load',go,{once:true});}
+function focusComposeBody(form){const frame=form?.querySelector('.rich-frame');if(!frame)return;const editor=frame.closest('.rich-editor');const go=()=>{if(frame.dataset.editing!=='1')setRichEditing(editor,true);else{frame.focus();frame.contentDocument?.body?.focus();}};richReady(frame)?go():frame.addEventListener('load',go,{once:true});}
 function richCaret(doc){const selection=doc?.getSelection();if(!selection?.rangeCount||!doc.body.contains(selection.anchorNode))return null;const range=doc.createRange();range.selectNodeContents(doc.body);range.setEnd(selection.anchorNode,selection.anchorOffset);return range.toString().length;}
 function richSetCaret(doc,offset){const selection=doc?.getSelection();if(!selection)return;if(offset==null){selection.selectAllChildren(doc.body);selection.collapseToEnd();return;}const walker=doc.createTreeWalker(doc.body,NodeFilter.SHOW_TEXT);let left=offset,node;while((node=walker.nextNode())){if(left<=node.length){selection.collapse(node,left);return;}left-=node.length;}selection.selectAllChildren(doc.body);selection.collapseToEnd();}
 function richInsertText(form,text){const frame=form?.querySelector('.compose-message.is-rich .rich-frame');if(!frame)return false;const editor=frame.closest('.rich-editor');
   const insert=()=>{const doc=frame.contentDocument;if(frame.dataset.editing!=='1')setRichEditing(editor,true);frame.focus();doc.body.focus();const selection=doc.getSelection();if(!selection.rangeCount||!doc.body.contains(selection.anchorNode)){selection.selectAllChildren(doc.body);selection.collapseToStart();}doc.execCommand('insertHTML',false,textToHtml(text));richSync(frame);richFit(frame);};
-  if(frame.contentDocument?.querySelector('[data-milo-editor]'))insert();else frame.addEventListener('load',insert,{once:true});return true;}
+  if(richReady(frame))insert();else frame.addEventListener('load',insert,{once:true});return true;}
 document.addEventListener('load',event=>{if(event.target.classList?.contains('rich-frame'))initRichFrame(event.target);},true);
 document.addEventListener('mousedown',event=>{if(event.target.closest?.('[data-rich-command]'))event.preventDefault();});
 document.addEventListener('click',event=>{
@@ -800,7 +801,6 @@ document.addEventListener('click',event=>{
   const button=event.target.closest?.('[data-rich-action]');if(!button)return;
   const form=button.closest('#compose-form'),editor=button.closest('.rich-editor'),action=button.dataset.richAction;
   if(action==='edit')setRichEditing(editor,editor.querySelector('.rich-frame').dataset.editing!=='1');
-  if(action==='images'){const frame=editor.querySelector('.rich-frame'),editing=frame.dataset.editing==='1',html=form.querySelector('[name="html"]').value;editor.outerHTML=richEditorMarkup(html,true);if(editing){const fresh=form.querySelector('.rich-editor');fresh.querySelector('.rich-frame').addEventListener('load',()=>setRichEditing(fresh,true),{once:true});}}
 });
 const ATTACHMENT_LIMIT=18*1024*1024;
 function fileSize(bytes){return bytes<1024?`${bytes} B`:bytes<1048576?`${Math.round(bytes/1024)} KB`:`${(bytes/1048576).toFixed(1).replace('.',',')} MB`;}
@@ -916,7 +916,7 @@ function renderInlineComposer(existing=null) {
 }
 function captureCompose() {
   const form=$('#compose-form');if(!form||!S.compose)return null;
-  form.querySelectorAll('.rich-frame').forEach(frame=>{const doc=frame.contentDocument;if(doc?.body&&doc.querySelector('[data-milo-editor]')){form.querySelector('[name="html"]').value=richSerialize(doc);form.querySelector('[name="body"]').value=richText(doc);}});
+  form.querySelectorAll('.rich-frame').forEach(frame=>{const doc=frame.contentDocument;if(richReady(frame)){form.querySelector('[name="html"]').value=richSerialize(doc);form.querySelector('[name="body"]').value=richText(doc);}});
   const fields=Object.fromEntries(new FormData(form));
   const changed=Object.keys(fields).some(key=>fields[key]!==String(S.compose[key]||''));
   S.compose={...S.compose,...fields,revision:changed?Math.max(Date.now(),(S.compose.revision||0)+1):S.compose.revision};
@@ -1436,7 +1436,7 @@ document.addEventListener('change', async event => {
   if(event.target.name==='account_id'&&event.target.closest('#compose-form')&&S.compose){
     const field=$('#compose-form [name="body"]'),before=S.state.signatures?.[S.compose.account_id],after=S.state.signatures?.[event.target.value];
     const frame=$('#compose-form .rich-frame'),doc=frame?.contentDocument;
-    if(doc?.body){const sig=text=>textToHtml('-- \n'+text);if(before&&doc.body.innerHTML.includes(sig(before)))doc.body.innerHTML=doc.body.innerHTML.replace(sig(before),after?sig(after):'');else if(after&&!doc.body.innerHTML.includes(sig(after)))doc.body.insertAdjacentHTML('beforeend','<p><br></p>'+sig(after));richSync(frame);richFit(frame);S.compose.account_id=event.target.value;return;}
+    if(richReady(frame)){const sig=text=>textToHtml('-- \n'+text);if(before&&doc.body.innerHTML.includes(sig(before)))doc.body.innerHTML=doc.body.innerHTML.replace(sig(before),after?sig(after):'');else if(after&&!doc.body.innerHTML.includes(sig(after)))doc.body.insertAdjacentHTML('beforeend','<p><br></p>'+sig(after));richSync(frame);richFit(frame);S.compose.account_id=event.target.value;return;}
     if(field&&before&&field.value.includes('-- \n'+before))field.value=field.value.replace('-- \n'+before,after?'-- \n'+after:'');
     else if(field&&after&&!field.value.includes('-- \n'+after))field.value=`${field.value}\n\n-- \n${after}`;
     S.compose.account_id=event.target.value;field?.dispatchEvent(new Event('input',{bubbles:true}));
