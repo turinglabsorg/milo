@@ -1,8 +1,8 @@
 import {deviceCache} from '/static/cache.js';
-const CACHE = 'milo-shell-v31';
+const CACHE = 'milo-shell-v32';
 const SHELL = ['/', '/static/style.css', '/static/app.js', '/static/cache.js', '/static/replica.js', '/static/search-worker.js', '/static/icon.svg', '/static/fonts/Geist.woff2'];
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL.map(path => new Request(path, {cache: 'reload'})))));
   self.skipWaiting();
 });
 self.addEventListener('activate', event => {
@@ -23,7 +23,7 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin || url.pathname.startsWith('/api/') || event.request.method !== 'GET') return;
   // The installed app must start from the device even if a remote host stalls.
   event.respondWith(caches.match(event.request).then(cached=>{
-    const fresh=fetch(event.request).then(async response=>{
+    const fresh=fetch(event.request,{cache:'no-cache'}).then(async response=>{
       if(response.status===401||response.status===404)await caches.delete(CACHE);
       else if(response.ok&&SHELL.includes(url.pathname)){const cache=await caches.open(CACHE);await cache.put(event.request,response.clone());}
       return response;

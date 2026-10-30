@@ -231,6 +231,8 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             "img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+        elif "cache-control" not in response.headers:
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     def auth(request: Request):
