@@ -49,6 +49,19 @@ final class MailboxTests: XCTestCase {
         XCTAssertNil(plain.html)
     }
 
+    func testEditorDocumentBlocksRemoteImagesAndKeepsTheSenderDocument() {
+        let fragment = MailEditor.document("<p>Ciao</p>")
+        XCTAssertTrue(fragment.contains("data-milo-fragment"))
+        XCTAssertTrue(fragment.contains("img-src data:;"))
+        XCTAssertTrue(fragment.contains("<body><p>Ciao</p></body>"))
+        let full = MailEditor.document("<html><head><style>p{color:red}</style></head><body><p>Ciao</p></body></html>", remoteImages: true)
+        XCTAssertFalse(full.contains("data-milo-fragment"))
+        XCTAssertTrue(full.contains("img-src data: https:;"))
+        XCTAssertTrue(full.contains("<style>p{color:red}</style>"))
+        XCTAssertEqual(MailEditor.paragraphs(from: "Ciao <Comune>\nriga\n\nSeconda"), "<p>Ciao &lt;Comune&gt;<br>riga</p><p>Seconda</p>")
+        XCTAssertEqual(MailEditor.paragraphs(from: ""), "<p><br></p>")
+    }
+
     func testInboxRendersFromCacheAfterRestart() async throws {
         let (mailbox, _) = make()
         await mailbox.start()

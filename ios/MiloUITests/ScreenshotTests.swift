@@ -77,7 +77,7 @@ final class ScreenshotTests: XCTestCase {
         }
     }
 
-    func testComposeEditsAndPreviewsTheHTMLAlternative() {
+    func testComposeEditsTheHTMLAlternativeWYSIWYG() {
         let row = app.descendants(matching: .any).matching(identifier: "row-m2").firstMatch
         if !row.waitForExistence(timeout: 10) {
             app.staticTexts["Smart inbox"].firstMatch.tap()
@@ -86,22 +86,28 @@ final class ScreenshotTests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.buttons["reply"].waitForExistence(timeout: 10))
         app.buttons["reply"].tap()
-        XCTAssertTrue(app.textViews["compose-body"].waitForExistence(timeout: 10))
-        let section = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Versione HTML'")).firstMatch
-        for _ in 0..<4 where !section.isHittable { app.swipeUp() }
-        XCTAssertTrue(section.waitForExistence(timeout: 5))
-        section.tap()
-        let editor = app.textViews["compose-html"]
-        XCTAssertTrue(editor.waitForExistence(timeout: 5))
-        editor.tap()
-        editor.typeText("<h1>LetzGo Guide</h1><p>Gentile <b>Comune</b></p>")
-        let preview = app.webViews.staticTexts.containing(NSPredicate(format: "label CONTAINS 'LetzGo Guide'")).firstMatch
-        XCTAssertTrue(preview.waitForExistence(timeout: 10), "The HTML preview must render what was typed")
-        XCTAssertTrue(app.staticTexts["Inviata insieme al testo semplice"].exists)
-        save("06-compose-html")
-        app.swipeUp()
-        app.swipeUp()
+        let body = app.textViews["compose-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 10))
+        body.tap()
+        body.typeText("Gentile Comune")
+        let formatted = app.buttons["Formattato"]
+        XCTAssertTrue(formatted.waitForExistence(timeout: 5))
+        formatted.tap()
+        let editor = app.webViews["compose-rich-editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        XCTAssertTrue(editor.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Gentile Comune'")).firstMatch.waitForExistence(timeout: 10),
+                      "The plain text must become the formatted message")
+        XCTAssertTrue(app.buttons["Grassetto"].waitForExistence(timeout: 5), "The formatting toolbar shows while editing")
+        XCTAssertTrue(app.buttons["Fine"].exists)
+        editor.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Gentile Comune'")).firstMatch.tap()
+        app.typeText(" di Ragusa")
+        XCTAssertTrue(editor.staticTexts.containing(NSPredicate(format: "label CONTAINS 'di Ragusa'")).firstMatch.waitForExistence(timeout: 10),
+                      "Typing edits the rendered message")
+        save("06-compose-html-editing")
+        app.buttons["Fine"].tap()
+        XCTAssertTrue(app.buttons["Modifica"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Grassetto"].exists)
         sleep(1)
-        save("07-compose-html-preview")
+        save("07-compose-html-rendered")
     }
 }

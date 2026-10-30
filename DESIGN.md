@@ -134,9 +134,11 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
   danger-coloured on hover. Quick replies are 16 px-radius pills under the
   reply actions, loaded on request.
 - Shortcuts are listed with `kbd` chips (11 px, bordered, `--surface-alt`).
-- The composer's optional **Versione HTML** is a bordered `details` section after
-  the message body (9 px radius, `--surface`), open when the draft has HTML. It
-  stacks a 13 px monospace code field and a white sandboxed preview frame (8 px
-  radius); the preview blocks remote images and says so in an 11 px muted note.
-  iOS uses a `DisclosureGroup` in the composer form with a monospaced editor and
-  the mail web view as preview, with the same labels.
+- The composer's message header pairs the **Messaggio** label with a segmented
+  **Testo semplice / Formattato** control (8 px radius, selected = `--soft` with
+  accent label). Formatted drafts show only the rendered HTML in a bordered
+  editor (9 px radius) on a white frame; **Modifica** reveals a compact
+  toolbar (30 px buttons, 36 px on mobile) and an accent focus border, and
+  becomes **Fine**. An 11 px muted note says remote images are blocked, with a
+  **Carica immagini** text button. iOS mirrors this with a segmented picker, a
+  rendered web view and a toolbar shown while editing.

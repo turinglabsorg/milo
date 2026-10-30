@@ -15,9 +15,12 @@ struct ComposeView: View {
     @FocusState private var recipientSlot: RecipientSlot?
     @State private var suggestions: [Recipient] = []
     @State private var suggestTask: Task<Void, Never>?
-    @State private var htmlExpanded = false
-    @State private var previewHTML = ""
-    @State private var previewHeight: CGFloat = 240
+    @State private var editingHTML = false
+    @State private var remoteImages = false
+    @State private var editorHeight: CGFloat = 240
+    @State private var editor = HTMLEditorController()
+    @State private var linkPrompt = false
+    @State private var linkURL = "https://"
 
     private enum RecipientSlot: Hashable { case to, cc }
 
@@ -75,8 +78,87 @@ struct ComposeView: View {
 
     private var hasHTML: Bool { !(draft.html ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
-    private var htmlBinding: Binding<String> {
-        Binding(get: { draft.html ?? "" }, set: { draft.html = $0 })
+    private var formatBinding: Binding<Bool> {
+        Binding(get: { hasHTML }, set: { formatted in
+            guard formatted != hasHTML else { return }
+            if formatted {
+                draft.html = MailEditor.paragraphs(from: draft.body)
+                editingHTML = true
+            } else {
+                let previous = draft.html
+                draft.html = ""
+                editingHTML = false
+                notice.show("Formattazione rimossa: resta il testo semplice.", actionTitle: "Annulla", duration: 8) {
+                    draft.html = previous
+                }
+            }
+            draft.revision = max(Int(Date().timeIntervalSince1970 * 1000), draft.revision + 1)
+        })
+    }
+
+    private struct RichTool: Identifiable {
+        let command: String
+        let symbol: String
+        let title: String
+        var id: String { command }
+    }
+
+    private static let tools = [
+        RichTool(command: "bold", symbol: "bold", title: "Grassetto"),
+        RichTool(command: "italic", symbol: "italic", title: "Corsivo"),
+        RichTool(command: "underline", symbol: "underline", title: "Sottolineato"),
+        RichTool(command: "h2", symbol: "textformat.size.larger", title: "Titolo"),
+        RichTool(command: "p", symbol: "text.alignleft", title: "Paragrafo"),
+        RichTool(command: "insertUnorderedList", symbol: "list.bullet", title: "Elenco puntato"),
+        RichTool(command: "insertOrderedList", symbol: "list.number", title: "Elenco numerato"),
+        RichTool(command: "createLink", symbol: "link", title: "Inserisci link"),
+        RichTool(command: "removeFormat", symbol: "textformat", title: "Rimuovi formattazione"),
+    ]
+
+    @ViewBuilder
+    private var richEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                if editingHTML {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 2) {
+                            ForEach(Self.tools) { tool in
+                                Button {
+                                    if tool.command == "createLink" { linkURL = "https://"; linkPrompt = true }
+                                    else { editor.exec(tool.command) }
+                                } label: {
+                                    Image(systemName: tool.symbol).frame(width: 36, height: 36)
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel(tool.title)
+                            }
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+                Button(editingHTML ? "Fine" : "Modifica") { editingHTML.toggle() }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("compose-edit-html")
+            }
+            HTMLEditorView(html: draft.html ?? "", remoteImages: remoteImages, editing: editingHTML,
+                           height: $editorHeight, controller: editor) { html, text in
+                draft.html = html
+                draft.body = text
+                draft.revision = max(Int(Date().timeIntervalSince1970 * 1000), draft.revision + 1)
+            }
+            .frame(height: editorHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(editingHTML ? Color.milo.accent : Color.milo.line, lineWidth: 1))
+            if !remoteImages {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("Immagini esterne bloccate: aprire la bozza non attiva il pixel di tracciamento.")
+                    Button("Carica immagini") { remoteImages = true }.buttonStyle(.borderless)
+                }
+                .font(.caption2)
+                .foregroundStyle(Color.milo.muted)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     var body: some View {
@@ -96,43 +178,33 @@ struct ComposeView: View {
                         .accessibilityIdentifier("compose-subject")
                 }
                 Section {
-                    TextEditor(text: $draft.body)
-                        .frame(minHeight: 220)
-                        .focused($bodyFocused)
-                        .accessibilityIdentifier("compose-body")
-                }
-                Section {
-                    DisclosureGroup(isExpanded: $htmlExpanded) {
-                        TextEditor(text: htmlBinding)
-                            .font(.system(.footnote, design: .monospaced))
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .frame(minHeight: 160)
-                            .accessibilityIdentifier("compose-html")
-                        if !previewHTML.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Anteprima").font(.caption).foregroundStyle(Color.milo.muted)
-                                MailWebView(html: MailHTML.document(previewHTML, remoteImages: false), height: $previewHeight)
-                                    .frame(height: previewHeight)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    .accessibilityIdentifier("compose-html-preview")
-                                Text("Le immagini esterne non si caricano nell’anteprima, così il pixel di tracciamento non si attiva.")
-                                    .font(.caption2).foregroundStyle(Color.milo.muted)
-                            }
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Versione HTML")
-                            Text(hasHTML ? "Inviata insieme al testo semplice" : "Facoltativa")
-                                .font(.caption).foregroundStyle(Color.milo.muted)
-                        }
+                    Picker("Formato", selection: formatBinding) {
+                        Text("Testo semplice").tag(false)
+                        Text("Formattato").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("compose-format")
+                    if hasHTML {
+                        richEditor
+                    } else {
+                        TextEditor(text: $draft.body)
+                            .frame(minHeight: 220)
+                            .focused($bodyFocused)
+                            .accessibilityIdentifier("compose-body")
                     }
                 }
                 Section {
                     if let templates = mailbox.state?.templates, !templates.isEmpty {
                         Menu {
                             ForEach(templates, id: \.name) { template in
-                                Button(template.name) { draft.body = template.body + draft.body }
+                                Button(template.name) {
+                                    if hasHTML {
+                                        editingHTML = true
+                                        editor.exec("insertHTML", MailEditor.paragraphs(from: template.body))
+                                    } else {
+                                        draft.body = template.body + draft.body
+                                    }
+                                }
                             }
                         } label: { Label("Risposte salvate", systemImage: "text.badge.plus") }
                     }
@@ -150,10 +222,18 @@ struct ComposeView: View {
             .onChange(of: draft.to) { _, _ in if recipientSlot == .to { refreshSuggestions() } }
             .onChange(of: draft.cc) { _, _ in if recipientSlot == .cc { refreshSuggestions() } }
             .onChange(of: recipientSlot) { _, _ in refreshSuggestions() }
-            .task(id: draft.html) {
-                try? await Task.sleep(nanoseconds: previewHTML.isEmpty ? 0 : 300_000_000)
-                guard !Task.isCancelled else { return }
-                previewHTML = draft.html ?? ""
+            .alert("Inserisci link", isPresented: $linkPrompt) {
+                TextField("https://", text: $linkURL)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Annulla", role: .cancel) {}
+                Button("Inserisci") {
+                    let url = linkURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if url.lowercased().hasPrefix("https://") || url.lowercased().hasPrefix("http://") || url.lowercased().hasPrefix("mailto:") {
+                        editor.exec("createLink", url)
+                    }
+                }
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
@@ -179,10 +259,7 @@ struct ComposeView: View {
                 }
             }
             .sheet(isPresented: $scheduling) { scheduleSheet.presentationDetents([.medium, .large]) }
-            .onAppear {
-                htmlExpanded = hasHTML
-                if draft.mode != .new { bodyFocused = true }
-            }
+            .onAppear { if draft.mode != .new && !hasHTML { bodyFocused = true } }
             .interactiveDismissDisabled(sending)
         }
     }
