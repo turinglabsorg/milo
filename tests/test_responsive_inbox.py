@@ -272,3 +272,45 @@ def test_inline_reply_keeps_text_focus_and_caret_during_sync(tmp_path):
         expect(page.locator('#compose-form')).to_have_count(0)
         expect(page.locator('#toast')).not_to_have_text('String should have at most 100000 characters')
         browser.close()
+
+
+@pytest.mark.parametrize('width,height', [(1440, 1000), (390, 844)])
+def test_new_message_opens_in_the_reading_column(tmp_path, width, height):
+    with service(tmp_path) as (url, sent), sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={'width': width, 'height': height}, service_workers='block')
+        errors = []
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.goto(url)
+        expect(page.locator('.message-row').first).to_be_visible()
+        if width < 600:
+            page.locator('[data-action="menu"]').first.click()
+        page.locator('[data-action="compose"]').first.click()
+        form = page.locator('#reading-panel #pane-composer #compose-form')
+        expect(form).to_be_visible()
+        expect(page.get_by_role('dialog')).to_have_count(0)
+        expect(form.locator('[data-rich-action="format-html"]')).to_be_visible()
+        if width < 600:
+            expect(page.locator('#list-panel')).to_be_hidden()
+        else:
+            expect(page.locator('#list-panel')).to_be_visible()
+        form.locator('[name="to"]').fill('anna@example.com')
+        form.locator('[name="subject"]').fill('Colonna destra')
+        form.locator('[name="body"]').fill('Scritto nel pannello')
+        page.locator('[data-view="drafts"]').first.click() if width >= 600 else page.locator('.compose-pane-toolbar .back-button').click()
+        expect(page.locator('#compose-form')).to_have_count(0)
+        expect(page.locator('#list-panel')).to_be_visible()
+        if width < 600:
+            page.locator('[data-action="menu"]').first.click()
+            page.locator('[data-view="drafts"]').first.click()
+        expect(page.locator('.draft-row')).to_have_count(1)
+        page.locator('.draft-row').click()
+        expect(form).to_be_visible()
+        expect(form.locator('[name="subject"]')).to_have_value('Colonna destra')
+        page.locator(f'[data-view="inbox"]').first.click() if width >= 600 else None
+        if width >= 600:
+            page.locator(f'[data-message="{sent}"]').click()
+            expect(page.locator('#compose-form')).to_have_count(0)
+            expect(page.locator('.mail-content h2')).to_be_visible()
+        assert errors == []
+        browser.close()
