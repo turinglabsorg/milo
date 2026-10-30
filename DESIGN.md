@@ -142,3 +142,13 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
   becomes **Fine**. An 11 px muted note says remote images are blocked, with a
   **Carica immagini** text button. iOS mirrors this with a segmented picker, a
   rendered web view and a toolbar shown while editing.
+
+## Delivery and open tracking
+
+- The composer always edits formatted HTML; the plain-text part is generated from it.
+- **Traccia apertura** is a 15 px accent-coloured checkbox in the compose tools row,
+  checked by default. Unchecked messages carry no pixel.
+- Sent rows and sent thread messages show a 16 px tick before the time: one muted
+  check when Milo's submission was accepted by the provider, two checks in the
+  accent colour once the open pixel was fetched. The tooltip states the open time
+  and count, or that the message is not tracked.

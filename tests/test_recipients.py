@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import threading
 import time
@@ -7,6 +8,7 @@ from socket import socket
 
 import pytest
 import uvicorn
+from fastapi.testclient import TestClient
 from playwright.sync_api import expect, sync_playwright
 
 from milo.app import create_app
@@ -217,5 +219,66 @@ def test_typed_formatted_text_reaches_transport(tmp_path, monkeypatch, engine):
         assert len(submitted) == 1
         assert "Buongiorno Comune" in submitted[0].get_body(("plain",)).get_content()
         assert "Buongiorno Comune" in submitted[0].get_body(("html",)).get_content()
+        assert not errors
+        browser.close()
+
+
+def test_open_tracking_choice_and_delivery_ticks(tmp_path, monkeypatch):
+    from test_responsive_inbox import service
+
+    from milo.mail import build_message
+
+    context, submitted = {}, []
+
+    def prepare(app, received, sent):
+        context["app"] = app
+        context["bootstrap"] = app.state.store.bootstrap
+
+    def deliver(account, draft, original=None, attachments=()):
+        message = build_message(account, draft, original, attachments)
+        submitted.append(message)
+        return message
+
+    monkeypatch.setattr("milo.app.send_mail", deliver)
+    with service(tmp_path, prepare, live=True) as (url, sent), sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1440, "height": 1000}, service_workers="block")
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        assert page.request.post(url + "/api/setup", data={
+            "password": "isolated test password", "bootstrap": context["bootstrap"],
+        }).status == 200
+        page.goto(url)
+        expect(page.locator(f'[data-message="{sent}"]')).to_be_visible()
+        for subject, track in (("Tracciato", True), ("Non tracciato", False)):
+            page.locator('[data-action="compose"]').first.click()
+            form = page.locator("#compose-form")
+            expect(form.locator('[name="track"]')).to_be_checked()
+            form.locator('[name="to"]').fill("comune@example.com")
+            form.locator('[name="subject"]').fill(subject)
+            page.frame_locator("#compose-form .rich-frame").locator("body").click()
+            page.keyboard.type("Buongiorno")
+            if not track:
+                form.locator('[name="track"]').uncheck()
+            form.get_by_role("button", name="Invia messaggio").click()
+            expect(page.locator("#compose-form")).to_have_count(0)
+            deadline = time.time() + 25
+            while time.time() < deadline and page.request.get(url + "/api/drafts").json()["drafts"]:
+                page.wait_for_timeout(250)
+        assert len(submitted) == 2
+        tracked, untracked = (message.get_body(("html",)).get_content() for message in submitted)
+        assert "/o/" in tracked and "/o/" not in untracked
+        token = re.search(r"/o/([A-Za-z0-9_-]{24})\.gif", tracked).group(1)
+        page.locator('[data-view="sent"]').first.click()
+        rows = page.locator(".message-row")
+        expect(rows.filter(has_text="Non tracciato").locator(".delivery")).to_have_attribute(
+            "title", "Inviato e confermato dal server · apertura non tracciata")
+        tracked_row = rows.filter(has_text="Tracciato").filter(has_not_text="Non tracciato")
+        expect(tracked_row.locator(".delivery")).to_have_attribute("title", "Inviato e confermato dal server · non ancora aperto")
+        local = TestClient(context["app"], client=("127.0.0.1", 40000))
+        assert local.post(f"/internal/opened/{token}").status_code == 204
+        expect(tracked_row.locator(".delivery.opened")).to_be_visible(timeout=15000)
+        tracked_row.click()
+        expect(page.locator(".thread-message .delivery.opened")).to_be_visible()
         assert not errors
         browser.close()

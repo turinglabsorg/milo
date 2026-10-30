@@ -5,6 +5,7 @@ import copy
 import os
 import subprocess
 import sys
+import urllib.request
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -59,7 +60,14 @@ def main():
                 process.terminate()
                 await asyncio.to_thread(process.wait)
 
-    app = create_public_app(config["url"] if config else None, lifespan)
+    def opened(token):
+        try:
+            urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:8029/internal/opened/{token}", method="POST"),
+                                   timeout=5).close()
+        except OSError:
+            pass
+
+    app = create_public_app(config["url"] if config else None, lifespan, opened if config else None)
     logging = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)
     logging["formatters"]["access"]["()"] = PrivateAccessFormatter
     server = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0" if container else "127.0.0.1", port=int(os.environ.get("PORT", "8025")),

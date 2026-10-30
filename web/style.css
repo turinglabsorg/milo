@@ -229,7 +229,7 @@ body{background:var(--surface-alt);color:var(--text)}
 .quick-reply:hover{border-color:var(--purple);color:var(--purple)}.quick-reply.ghost{display:inline-flex;align-items:center;gap:6px;color:var(--muted)}.quick-reply .icon{width:14px;height:14px;color:var(--purple)}
 .compose-tools{display:flex;align-items:center;flex-wrap:wrap;gap:10px 16px;margin:-2px 0 10px}
 .template-select,.followup-field select{font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface-alt);color:var(--text)}
-.followup-field{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.followup-field{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}.track-field{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);cursor:pointer}.track-field input{width:15px;height:15px;margin:0;accent-color:var(--purple)}.delivery{display:inline-flex;align-items:center;color:var(--muted);flex:none}.delivery svg{width:16px;height:16px}.delivery.opened{color:var(--purple)}.sender-detail time .delivery{margin-right:6px;vertical-align:-4px}
 .attach-button{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;font-size:13px}.attach-button .icon{width:15px;height:15px}
 .compose-attachments:empty{display:none}.compose-attachments{margin:-4px 0 12px}
 .draft-attachment{gap:7px;padding:6px 6px 6px 9px;max-width:100%;background:var(--surface-alt);color:var(--text)}.draft-attachment .icon{width:14px;height:14px;color:var(--purple)}

@@ -1,12 +1,17 @@
 """Public landing and a fixed OAuth relay. This app never opens the mail archive."""
+import base64
+import re
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
-from fastapi import FastAPI, Query
+from fastapi import BackgroundTasks, FastAPI, Query
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
+PIXEL = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
+PIXEL_NAME = re.compile(r"([A-Za-z0-9_-]{24})\.gif")
 
-def create_public_app(private_url=None, lifespan=None):
+
+def create_public_app(private_url=None, lifespan=None, opened=None):
     if private_url:
         url = urlsplit(private_url)
         if (url.scheme != "https" or not url.hostname or not url.hostname.endswith(".ts.net")
@@ -57,6 +62,13 @@ def create_public_app(private_url=None, lifespan=None):
             return RedirectResponse("/", 303)
         params = {"state": state, **({"error": error} if error else {"code": code})}
         return RedirectResponse(private_url + "/api/oauth/google/callback?" + urlencode(params), 303)
+
+    @app.get("/o/{name}")
+    def pixel(name: str, background: BackgroundTasks):
+        match = PIXEL_NAME.fullmatch(name)
+        if match and opened:
+            background.add_task(opened, match.group(1))
+        return Response(PIXEL, media_type="image/gif")
 
     @app.api_route("/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
     def unavailable(path):

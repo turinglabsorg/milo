@@ -4,7 +4,7 @@ from urllib.parse import quote, urlsplit
 import nh3
 
 
-def render_html(mail, message_id, load_images=False):
+def render_html(mail, message_id, load_images=False, own_pixel=None):
     part = mail.get_body(preferencelist=("html",))
     if not part:
         return {"html": None, "remote_images": False}
@@ -23,6 +23,8 @@ def render_html(mail, message_id, load_images=False):
         if name == "src":
             if value.startswith("cid:"):
                 return images.get(value[4:])
+            if own_pixel and value.startswith(own_pixel):
+                return None
             parsed = urlsplit(value)
             if parsed.scheme in {"https", "http"} and parsed.hostname and not parsed.username:
                 blocked = True

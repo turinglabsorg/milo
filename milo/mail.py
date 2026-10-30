@@ -455,3 +455,20 @@ def html_with_quote(html, quote):
              f'padding-left:1ex">{"<br>".join(escape(line) for line in lines)}</blockquote>')
     match = re.search(r"</body\s*>", html, re.I)
     return html[:match.start()] + block + html[match.start():] if match else html + block
+
+
+PIXEL_PATH = "/o/"
+PIXEL_TOKEN = re.compile(r"[A-Za-z0-9_-]{24}")
+
+
+def text_html(text):
+    """Plain text as simple HTML paragraphs, for messages that need an HTML part."""
+    blocks = re.split(r"\n{2,}", text or "")
+    return "".join(f"<p>{escape(block).replace(chr(10), '<br>') or '<br>'}</p>" for block in blocks) or "<p><br></p>"
+
+
+def html_with_pixel(html, url):
+    """A 1x1 open-tracking image at the end of the HTML body."""
+    image = f'<img src="{escape(url)}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0">'
+    match = re.search(r"</body\s*>", html, re.I)
+    return html[:match.start()] + image + html[match.start():] if match else html + image

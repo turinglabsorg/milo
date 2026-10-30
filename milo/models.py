@@ -88,6 +88,7 @@ class DraftInput(BaseModel):
     context_message_id: str | None = None
     mode: Literal["new", "reply", "reply_all", "forward"] = "new"
     revision: int = Field(default=0, ge=0)
+    track: bool = True
 
 
 class AISettings(BaseModel):

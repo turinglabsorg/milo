@@ -3,6 +3,7 @@ import email
 import hashlib
 import json
 import math
+import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -24,7 +25,17 @@ from .ai import AI
 from .demo import seed_demo
 from .features import Features
 from .google import Gmail, GoogleOAuth
-from .mail import SyncEngine, parse_message, recipient_headers, safe_error, send_mail
+from .mail import (
+    PIXEL_PATH,
+    PIXEL_TOKEN,
+    SyncEngine,
+    html_with_pixel,
+    parse_message,
+    recipient_headers,
+    safe_error,
+    send_mail,
+    text_html,
+)
 from .models import (
     AccountInput,
     AccountUpdate,
@@ -73,6 +84,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
     if private_url and (urlsplit(private_url).scheme != "https" or not secure_cookies):
         raise ValueError("Private access requires HTTPS and secure cookies")
     client_url = (private_url or public_url).rstrip("/")
+    own_pixel = public_url.rstrip("/") + PIXEL_PATH
     store = Store(directory)
     features = Features(store)
     push = Push.from_environment(store)
@@ -210,7 +222,11 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                             and request.client and request.client.host in {"127.0.0.1", "::1"}
                             and urlsplit("http://" + request.headers.get("host", "")).hostname
                             in {"localhost", "127.0.0.1", "::1"})
-            if (not owner(request) and not local_health) or request.url.path in {
+            local_open = (request.method == "POST" and request.url.path.startswith("/internal/opened/")
+                          and request.client and request.client.host in {"127.0.0.1", "::1"}
+                          and urlsplit("http://" + request.headers.get("host", "")).hostname
+                          in {"localhost", "127.0.0.1", "::1"})
+            if (not owner(request) and not local_health and not local_open) or request.url.path in {
                 "/api/login", "/api/logout", "/api/setup", "/api/setup/authorize", "/api/setup/status"
             }:
                 return Response(status_code=404, headers={"Cache-Control": "no-store"})
@@ -526,7 +542,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             message[field] = [{"name": name, "email": address} for name, address in getaddresses(mail.get_all(header, []))
                               if address and "@" in address and not any(char in address for char in "\r\n\x00")]
         message["body_loaded"] = True
-        message.update(render_html(mail, message_id, load_images))
+        message.update(render_html(mail, message_id, load_images, own_pixel))
         message["attachments"] = [{"index": i, "name": part.get_filename() or "allegato",
                                     "type": part.get_content_type()}
                                    for i, part in enumerate(mail.walk()) if part.get_filename()]
@@ -563,7 +579,7 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                 message["body_loaded"] = False
                 continue
             mail = email.message_from_bytes(message.pop("raw"), policy=policy.default)
-            message.update(render_html(mail, message["id"], load_images))
+            message.update(render_html(mail, message["id"], load_images, own_pixel))
             message["attachments"] = [{"index": i, "name": part.get_filename(), "type": part.get_content_type()}
                                       for i, part in enumerate(mail.walk()) if part.get_filename()]
         # Reads serve only the server archive. Provider synchronization is
@@ -752,6 +768,10 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         try:
             original = store.message(draft["reply_to_id"]) if draft.get("reply_to_id") else None
             attachments = store.draft_attachment_files(draft_id)
+            token = secrets.token_urlsafe(18) if draft.get("track", True) else None
+            if token:
+                draft = {**draft, "html": html_with_pixel(draft.get("html") or text_html(draft["body"]),
+                                                          f"{own_pixel}{token}.gif")}
             if account["provider"] == "google":
                 client = Gmail(store, account["id"])
                 try:
@@ -772,6 +792,10 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
             if store.execute("DELETE FROM drafts WHERE id=? AND data=?", (draft_id, saved_data)).rowcount:
                 store.remove_draft_attachments(draft_id)
             features.sent(draft_id, account["id"], draft, rfc_message_id, thread_id)
+            if rfc_message_id:
+                store.execute("INSERT INTO deliveries VALUES(?,?,?,?,NULL,0) ON CONFLICT(message_id) DO NOTHING",
+                              (rfc_message_id, account["id"], token, time.time()))
+                mail_changed()
             return {"ok": True}
         except ValueError as exc:
             store.execute("UPDATE scheduled SET error=? WHERE draft_id=?", (str(exc), draft_id))
@@ -783,6 +807,22 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         finally:
             with store.lock:
                 sending.discard(draft_id)
+
+    @app.get("/api/deliveries", dependencies=[Depends(auth)])
+    def deliveries(since: float = Query(0, ge=0)):
+        return {"deliveries": store.rows(
+            "SELECT m.id,d.sent,d.opened,d.opens,(d.token IS NOT NULL)::int AS tracked FROM deliveries d "
+            "JOIN messages m ON m.account_id=d.account_id AND m.message_id=d.message_id "
+            "WHERE d.sent>=? ORDER BY d.sent DESC LIMIT 5000", (since,))}
+
+    @app.post("/internal/opened/{token}")
+    def opened(token: str, request: Request):
+        if not (request.client and request.client.host in {"127.0.0.1", "::1"}) or not PIXEL_TOKEN.fullmatch(token):
+            return Response(status_code=404)
+        if store.execute("UPDATE deliveries SET opened=COALESCE(opened,?), opens=opens+1 WHERE token=?",
+                         (time.time(), token)).rowcount:
+            mail_changed()
+        return Response(status_code=204)
 
     @app.post("/api/drafts/{draft_id}/send", dependencies=[Depends(auth)])
     def send(draft_id: str):

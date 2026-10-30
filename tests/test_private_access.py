@@ -94,3 +94,18 @@ def test_container_trusts_only_explicit_published_gateway(tmp_path):
     for invalid in ('0.0.0.0', '8.8.8.8', '172.29.184.0/24'):
         with pytest.raises((ValueError, AddressValueError)):
             create_app(tmp_path / invalid.replace('/', '_'), proxy_peers=[invalid])
+
+
+def test_only_the_local_landing_can_report_pixel_opens(tmp_path, monkeypatch):
+    app = create_app(tmp_path, private_url=PRIVATE, tailscale_owners=['owner@example.com'], secure_cookies=True,
+                     public_url='https://public.example')
+    monkeypatch.setattr(app.state.engine, 'sync_all', lambda: [])
+    token = 'A' * 24
+    with TestClient(app, base_url='http://127.0.0.1:8029', client=('127.0.0.1', 40000)) as local:
+        assert local.post(f'/internal/opened/{token}').status_code == 204
+        assert local.get(f'/internal/opened/{token}').status_code == 404
+        assert local.get('/api/deliveries').status_code == 404
+    with TestClient(app, base_url=PRIVATE, client=('127.0.0.1', 40000)) as proxied:
+        assert proxied.post(f'/internal/opened/{token}').status_code == 404
+    with TestClient(app, base_url='http://127.0.0.1:8029', client=('172.29.184.1', 40000)) as gateway:
+        assert gateway.post(f'/internal/opened/{token}').status_code == 404
