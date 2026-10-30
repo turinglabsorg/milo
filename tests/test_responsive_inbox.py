@@ -297,7 +297,10 @@ def test_new_message_opens_in_the_reading_column(tmp_path, width, height):
         form.locator('[name="to"]').fill('anna@example.com')
         form.locator('[name="subject"]').fill('Colonna destra')
         form.locator('[name="body"]').fill('Scritto nel pannello')
-        page.locator('[data-view="drafts"]').first.click() if width >= 600 else page.locator('.compose-pane-toolbar .back-button').click()
+        if width >= 600:
+            page.locator('[data-view="drafts"]').first.click()
+        else:
+            page.locator('.compose-pane-toolbar .back-button').click()
         expect(page.locator('#compose-form')).to_have_count(0)
         expect(page.locator('#list-panel')).to_be_visible()
         if width < 600:
@@ -307,8 +310,8 @@ def test_new_message_opens_in_the_reading_column(tmp_path, width, height):
         page.locator('.draft-row').click()
         expect(form).to_be_visible()
         expect(form.locator('[name="subject"]')).to_have_value('Colonna destra')
-        page.locator(f'[data-view="inbox"]').first.click() if width >= 600 else None
         if width >= 600:
+            page.locator('[data-view="inbox"]').first.click()
             page.locator(f'[data-message="{sent}"]').click()
             expect(page.locator('#compose-form')).to_have_count(0)
             expect(page.locator('.mail-content h2')).to_be_visible()
