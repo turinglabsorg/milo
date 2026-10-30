@@ -840,7 +840,7 @@ function captureCompose() {
 }
 function storePendingDrafts(){clearTimeout(localDraftTimer);try{localStorage.setItem('milo-pending-drafts',JSON.stringify([...S.pendingDrafts.values()]));}catch{toast('Spazio locale esaurito. La bozza resta in Bozze finché Milo è aperto; attendi il salvataggio sul server prima di uscire.');}}
 function rememberDraft(draft,immediate=true){if(!draft||S.discardedDrafts.has(draft.id)||(!draft.to&&!draft.subject&&!draft.body))return false;if((S.pendingDrafts.get(draft.id)?.revision||0)>draft.revision)return true;S.pendingDrafts.set(draft.id,{...draft});if(immediate)storePendingDrafts();else{clearTimeout(localDraftTimer);localDraftTimer=setTimeout(storePendingDrafts,200);}return true;}
-function draftPayload(draft){return Object.fromEntries(['id','account_id','to','cc','subject','body','reply_to_id','context_message_id','mode','revision'].map(key=>[key,draft[key]??(['to','cc','subject','body'].includes(key)?'':null)]));}
+function draftPayload(draft){return Object.fromEntries(['id','account_id','to','cc','subject','body','html','reply_to_id','context_message_id','mode','revision'].map(key=>[key,draft[key]??(['to','cc','subject','body','html'].includes(key)?'':null)]));}
 function persistDraft(draft) {
   if(!rememberDraft(draft)||S.discardedDrafts.has(draft.id))return Promise.resolve(null);
   const previous=S.draftWrites.get(draft.id);

@@ -200,3 +200,24 @@ def test_server_restart_503_preserves_downloaded_inbox_and_body(tmp_path):
         page.reload()
         expect(page.locator('.message-row')).to_have_count(2)
         browser.close()
+
+
+def test_web_composer_keeps_the_html_alternative_of_an_api_draft(tmp_path):
+    html = '<html><body><p>Ciao <b>Comune</b></p><img src="https://pixel.example/logo.png?id=abc" width="194" height="47" alt="Logo"></body></html>'
+    with service(tmp_path) as (url, sent), sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(service_workers='block')
+        page.goto(url)
+        expect(page.locator('.message-row')).to_have_count(2)
+        account = page.request.get(url + '/api/state').json()['accounts'][0]['id']
+        page.request.put(url + '/api/drafts', data={'id': 'html-draft', 'account_id': account, 'to': 'comune@example.com',
+                                                   'subject': 'HTML', 'body': 'Ciao Comune', 'html': html, 'mode': 'new', 'revision': 1})
+        page.reload()
+        page.locator('[data-view="drafts"]').click()
+        page.locator('.draft-row').click()
+        page.locator('#compose-form [name="body"]').fill('Ciao Comune, testo aggiornato')
+        page.get_by_role('button', name='Salva bozza', exact=True).click()
+        expect(page.locator('.draft-save-status')).to_have_text('Bozza salvata')
+        draft = page.request.get(url + '/api/drafts').json()['drafts'][0]
+        assert draft['body'] == 'Ciao Comune, testo aggiornato' and draft['html'] == html
+        browser.close()
