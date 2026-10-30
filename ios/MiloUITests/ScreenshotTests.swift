@@ -119,9 +119,13 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(app.buttons["compose"].waitForExistence(timeout: 5))
         app.buttons["compose"].tap()
         XCTAssertTrue(app.webViews["compose-rich-editor"].waitForExistence(timeout: 10))
+        if app.buttons["Fine"].waitForExistence(timeout: 5) { app.buttons["Fine"].tap() }
+        if app.keyboards.firstMatch.exists { app.navigationBars.firstMatch.tap() }
         let track = app.switches["compose-track"]
-        for _ in 0..<5 where !track.isHittable { app.swipeUp() }
         XCTAssertTrue(track.waitForExistence(timeout: 5), "The compose options offer open tracking")
+        for _ in 0..<6 where !track.isHittable { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(track.isHittable, "The tracking toggle is on screen")
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "The keyboard does not cover the compose options")
         XCTAssertEqual(track.value as? String, "1", "Open tracking is on by default")
         save("08-compose-track-open")
         app.buttons["Chiudi"].tap()
@@ -129,7 +133,7 @@ final class ScreenshotTests: XCTestCase {
         app.buttons["Elimina bozza"].tap()
 
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        let sent = app.descendants(matching: .any).matching(identifier: "view-sent").firstMatch
+        let sent = app.staticTexts["Posta inviata"].firstMatch
         XCTAssertTrue(sent.waitForExistence(timeout: 10))
         sent.tap()
         let opened = app.descendants(matching: .any).matching(identifier: "row-m7").firstMatch
