@@ -26,6 +26,37 @@ jobs:
           mkdir -p "$RUNNER_TEMP/keys"
           printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8"
           chmod 600 "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8"
+      - name: Revoke stale CI signing certificates
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          pip3 install --quiet --break-system-packages "pyjwt[crypto]==2.10.1" "requests==2.32.3" || pip3 install --quiet "pyjwt[crypto]==2.10.1" "requests==2.32.3"
+          python3 - <<PY
+          import os, time, jwt, requests
+          token = jwt.encode({"iss": os.environ["ASC_ISSUER_ID"], "iat": int(time.time()), "exp": int(time.time()) + 600,
+                              "aud": "appstoreconnect-v1"}, os.environ["ASC_KEY_P8"], algorithm="ES256",
+                             headers={"kid": os.environ["ASC_KEY_ID"]})
+          base = "https://api.appstoreconnect.apple.com/v1"
+          headers = {"Authorization": f"Bearer {token}"}
+          certs = requests.get(base + "/certificates", headers=headers, params={"limit": 200}, timeout=30).json()["data"]
+          for cert in certs:
+              a = cert["attributes"]
+              print(a["certificateType"], "|", a.get("displayName"), "|", a.get("name"), "|", a.get("expirationDate"))
+          dev_types = {"DEVELOPMENT", "IOS_DEVELOPMENT"}
+          dist_types = {"DISTRIBUTION", "IOS_DISTRIBUTION"}
+          def by_ci(cert):
+              return "created via api" in (cert["attributes"].get("displayName") or "").lower()
+          stale = [c for c in certs if by_ci(c) and c["attributes"]["certificateType"] in dev_types]
+          dist = sorted((c for c in certs if by_ci(c) and c["attributes"]["certificateType"] in dist_types),
+                        key=lambda c: c["attributes"].get("expirationDate") or "")
+          if len([c for c in certs if c["attributes"]["certificateType"] in dist_types]) >= 2:
+              stale += dist
+          for cert in stale:
+              a = cert["attributes"]
+              status = requests.delete(f"{base}/certificates/{cert[id]}", headers=headers, timeout=30).status_code
+              print("revoked", a["certificateType"], a.get("displayName"), a.get("expirationDate"), status)
+          print("revoked", len(stale), "of", len(certs))
+          PY
       - name: Archive and upload to TestFlight
         run: |
           set -o pipefail
