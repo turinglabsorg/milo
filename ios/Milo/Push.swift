@@ -57,10 +57,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         return .newData
     }
 
-    /// Show new-mail banners even while Milo is open.
+    /// Show new-mail banners even while Milo is open, and apply the server's unread badge:
+    /// without `.badge` iOS ignores the count of a push that arrives in the foreground.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions {
-        [.banner, .sound, .list]
+        notification.request.content.title.isEmpty && notification.request.content.body.isEmpty
+            ? [.badge] : [.banner, .sound, .list, .badge]
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
