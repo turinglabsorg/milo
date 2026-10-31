@@ -134,6 +134,27 @@ public final class APIClient: Sendable {
     // MARK: Endpoints
 
     public func status() async throws -> ServiceStatus { try await get(ServiceStatus.self, "/status") }
+
+    /// The account's signature card as the server renders it for sent mail.
+    public func signatureCard(accountId: String) async throws -> Data {
+        try await data("GET", "/signatures/\(Self.encode(accountId))/card.png")
+    }
+
+    /// Sent mail shows its signature card through `/api/signature/<token>.png`, a path the mail web view
+    /// cannot load: embed each card as a data URL. Cards that fail to load stay as they are.
+    public func inliningSignatureCards(_ html: String) async -> String {
+        guard let pattern = try? NSRegularExpression(pattern: "/api/signature/([A-Za-z0-9_-]{24})\\.png") else { return html }
+        let tokens = Set(pattern.matches(in: html, range: NSRange(html.startIndex..., in: html)).compactMap {
+            Range($0.range(at: 1), in: html).map { String(html[$0]) }
+        })
+        var result = html
+        for token in tokens.sorted() {
+            guard let png = try? await data("GET", "/signature/\(token).png") else { continue }
+            result = result.replacingOccurrences(of: "/api/signature/\(token).png",
+                                                 with: "data:image/png;base64," + png.base64EncodedString())
+        }
+        return result
+    }
     public func state() async throws -> ServiceState { try await get(ServiceState.self, "/state") }
 
     public func downloadMail() async throws { _ = try await data("POST", "/sync", idempotent: true) }

@@ -93,9 +93,9 @@ def test_signature_becomes_the_tracked_image(logged_in, account_data, monkeypatc
                    body="Buongiorno\n\n-- \n" + signature)
     sent_html = message.get_body(("html",)).get_content()
     token = re.search(r'src="http://127\.0\.0\.1:8025/o/([A-Za-z0-9_-]{24})\.png" width="\d+" height="\d+"', sent_html).group(1)
-    assert "Sebastiano Cataudo<br>" not in sent_html and sent_html.startswith("<p>Buongiorno</p><p>-- <br><img")
+    assert "Sebastiano Cataudo<br>" not in sent_html and sent_html.startswith('<p>Buongiorno</p><div style="margin:16px 0 0"><img')
     assert 'alt="Sebastiano Cataudo · Zonzolab · you@example.com"' in sent_html
-    assert signature in message.get_body(("plain",)).get_content()
+    assert signature in message.get_body(("plain",)).get_content() and "-- " not in sent_html
 
     sent_id = client.get("/api/messages?view=sent").json()["messages"][0]["id"]
     thread = client.get(f"/api/messages/{sent_id}/thread").json()
@@ -119,7 +119,7 @@ def test_missing_signature_is_appended_as_image(logged_in, account_data, monkeyp
     assert client.put("/api/settings/signatures", json={"signatures": {account_id: "Seb"}}).status_code == 200
     message = send(client, account_id, monkeypatch, [], id="unsigned")
     html = message.get_body(("html",)).get_content()
-    assert re.match(r'<p><b>Buongiorno</b></p><p>-- <br><img src="http://127\.0\.0\.1:8025/o/[A-Za-z0-9_-]{24}\.png"', html)
+    assert re.match(r'<p><b>Buongiorno</b></p><div style="margin:16px 0 0"><img src="http://127\.0\.0\.1:8025/o/[A-Za-z0-9_-]{24}\.png"', html)
 
 
 def test_public_signature_image_comes_from_the_private_service():
@@ -153,7 +153,7 @@ def test_signature_links_stay_clickable_under_the_card(logged_in, account_data, 
     html = "<p>Buongiorno</p><p>-- <br>" + "<br>".join(signature.split("\n")) + "</p>"
     message = send(client, account_id, monkeypatch, [], id="linked", html=html, body="Buongiorno\n\n-- \n" + signature)
     sent_html = message.get_body(("html",)).get_content()
-    assert sent_html.startswith("<p>Buongiorno</p><p>-- <br><img")
+    assert sent_html.startswith('<p>Buongiorno</p><div style="margin:16px 0 0"><img')
     assert 'alt="Sebastiano Cataudo · Zonzolab · you@example.com · +39 334 112 3870"' in sent_html
     assert '<a href="https://www.linkedin.com/in/someone"' in sent_html and ">LinkedIn</a>" in sent_html
     assert '<a href="https://x.com/someone"' in sent_html and ">X</a>" in sent_html
@@ -161,3 +161,16 @@ def test_signature_links_stay_clickable_under_the_card(logged_in, account_data, 
     token = re.search(r"/o/([A-Za-z0-9_-]{24})\.png", sent_html).group(1)
     sender = client.app.state.store.accounts()[0]["email"]
     assert client.get(f"/api/signature/{token}.png").content == render_signature(card, sender)[0]
+
+
+def test_composer_previews_the_account_signature_card(logged_in, account_data):
+    client = logged_in
+    add_mail(client, account_data)
+    account = client.app.state.store.accounts()[0]
+    signature = "Sebastiano Cataudo\n+39 334 112 3870\nhttps://x.com/someone"
+    assert client.get(f"/api/signatures/{account['id']}/card.png").status_code == 404
+    assert client.put("/api/settings/signatures", json={"signatures": {account["id"]: signature}}).status_code == 200
+    card = client.get(f"/api/signatures/{account['id']}/card.png")
+    assert card.status_code == 200 and card.headers["content-type"] == "image/png"
+    assert card.content == render_signature(signature, account["email"])[0]
+    assert client.get("/api/signatures/unknown/card.png").status_code == 404

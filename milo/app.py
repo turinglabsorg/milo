@@ -843,6 +843,15 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
         return Response(render_signature(rows[0]["signature"], rows[0]["sender"] or "")[0], media_type="image/png",
                         headers={"Cache-Control": "no-store"})
 
+    @app.get("/api/signatures/{account_id}/card.png", dependencies=[Depends(auth)])
+    def signature_card(account_id: str):
+        account = store.account(account_id)
+        signature = ((store.setting("signatures") or {}).get(account_id) or "").strip() if account else ""
+        if not signature:
+            return Response(status_code=404)
+        return Response(render_signature(signature, account["email"])[0], media_type="image/png",
+                        headers={"Cache-Control": "no-store"})
+
     @app.get("/api/signature/{name}", dependencies=[Depends(auth)])
     def own_signature(name: str):
         token = name.removesuffix(".png")

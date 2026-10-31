@@ -24,6 +24,7 @@ struct HTMLEditorView: UIViewRepresentable {
     var html: String
     var remoteImages: Bool
     var editing: Bool
+    var signature: MailEditor.SignaturePreview? = nil
     @Binding var height: CGFloat
     var controller: HTMLEditorController
     var onChange: (String, String) -> Void
@@ -57,6 +58,7 @@ struct HTMLEditorView: UIViewRepresentable {
             coordinator.editing = editing
             if coordinator.ready { coordinator.applyEditing(view) }
         }
+        if coordinator.ready, signature != coordinator.signature { coordinator.decorate(view) }
     }
 
     static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
@@ -69,6 +71,7 @@ struct HTMLEditorView: UIViewRepresentable {
         var remoteImages = false
         var editing = false
         var ready = false
+        var signature: MailEditor.SignaturePreview?
 
         init(_ parent: HTMLEditorView) { self.parent = parent }
 
@@ -76,6 +79,7 @@ struct HTMLEditorView: UIViewRepresentable {
             self.html = html
             self.remoteImages = remoteImages
             ready = false
+            signature = nil
             view.loadHTMLString(MailEditor.document(html, remoteImages: remoteImages), baseURL: nil)
         }
 
@@ -84,6 +88,18 @@ struct HTMLEditorView: UIViewRepresentable {
             Task { @MainActor in
                 _ = try? await view.callAsyncJavaScript("window.miloEditor && window.miloEditor.setEditing(on)",
                                                         arguments: ["on": on], contentWorld: .defaultClient)
+            }
+        }
+
+        /// Shows the sender's signature card in place of its text; the saved HTML keeps the text.
+        func decorate(_ view: WKWebView) {
+            let preview = parent.signature
+            signature = preview
+            Task { @MainActor in
+                let (script, arguments) = MailEditor.decorateScript(preview)
+                if let height = try? await view.callAsyncJavaScript(script, arguments: arguments, contentWorld: .defaultClient) as? NSNumber {
+                    resize(height.doubleValue)
+                }
             }
         }
 
@@ -107,6 +123,7 @@ struct HTMLEditorView: UIViewRepresentable {
                 }
                 ready = true
                 applyEditing(webView)
+                decorate(webView)
             }
         }
 

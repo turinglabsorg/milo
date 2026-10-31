@@ -118,8 +118,12 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["compose"].waitForExistence(timeout: 5))
         app.buttons["compose"].tap()
-        XCTAssertTrue(app.webViews["compose-rich-editor"].waitForExistence(timeout: 10))
+        let editor = app.webViews["compose-rich-editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
         if app.buttons["Fine"].waitForExistence(timeout: 5) { app.buttons["Fine"].tap() }
+        XCTAssertTrue(editor.links["X"].waitForExistence(timeout: 10), "The composer shows the signature card with its links")
+        XCTAssertFalse(editor.staticTexts["https://x.com/example"].exists, "The signature text is not shown as raw lines")
+        save("08a-compose-signature-card")
         if app.keyboards.firstMatch.exists { app.navigationBars.firstMatch.tap() }
         let track = app.switches["compose-track"]
         XCTAssertTrue(track.waitForExistence(timeout: 5), "The compose options offer open tracking")

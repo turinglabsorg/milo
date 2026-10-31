@@ -19,6 +19,7 @@ struct ComposeView: View {
     @State private var editor = HTMLEditorController()
     @State private var linkPrompt = false
     @State private var linkURL = "https://"
+    @State private var signatureCards: [String: Data] = [:]
 
     private enum RecipientSlot: Hashable { case to, cc }
 
@@ -120,7 +121,7 @@ struct ComposeView: View {
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("compose-edit-html")
             }
-            HTMLEditorView(html: draft.html ?? "", remoteImages: false, editing: editingHTML,
+            HTMLEditorView(html: draft.html ?? "", remoteImages: false, editing: editingHTML, signature: signaturePreview,
                            height: $editorHeight, controller: editor) { html, text in
                 draft.html = html
                 draft.body = text
@@ -131,6 +132,12 @@ struct ComposeView: View {
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(editingHTML ? Color.milo.accent : Color.milo.line, lineWidth: 1))
         }
         .padding(.vertical, 4)
+    }
+
+    private var signaturePreview: MailEditor.SignaturePreview? {
+        guard let text = mailbox.state?.signatures?[draft.accountId]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty, let png = signatureCards[draft.accountId] else { return nil }
+        return MailEditor.SignaturePreview(text: text, png: png)
     }
 
     var body: some View {
@@ -189,6 +196,12 @@ struct ComposeView: View {
                     draft.body += "\n\n-- \n" + after
                 }
                 draft.revision = max(Int(Date().timeIntervalSince1970 * 1000), draft.revision + 1)
+            }
+            .task(id: draft.accountId) {
+                let account = draft.accountId
+                guard signatureCards[account] == nil, mailbox.state?.signatures?[account]?.isEmpty == false,
+                      let png = try? await mailbox.api.signatureCard(accountId: account) else { return }
+                signatureCards[account] = png
             }
             .onChange(of: draft.to) { _, _ in if recipientSlot == .to { refreshSuggestions() } }
             .onChange(of: draft.cc) { _, _ in if recipientSlot == .cc { refreshSuggestions() } }

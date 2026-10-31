@@ -94,6 +94,14 @@ final class MailboxTests: XCTestCase {
         XCTAssertEqual(MailEditor.swappingSignature(in: draft, from: "Sam Taylor\nsam@a.test", to: nil), "<p>Ciao</p>")
         XCTAssertEqual(MailEditor.swappingSignature(in: "<p>Ciao</p>", from: nil, to: "Sam"), "<p>Ciao</p><p>-- <br>Sam</p>")
         XCTAssertEqual(MailEditor.swappingSignature(in: draft, from: "Sam Taylor\nsam@a.test", to: "Sam Taylor\nsam@a.test"), draft)
+        XCTAssertEqual(MailEditor.signatureLinks("Sam\nhttps://www.linkedin.com/in/sam\n https://x.com/sam?s=1 \nsee https://a.test"),
+                       ["https://www.linkedin.com/in/sam", "https://x.com/sam?s=1"])
+        XCTAssertEqual(MailEditor.linkLabel("https://www.linkedin.com/in/sam"), "LinkedIn")
+        XCTAssertEqual(MailEditor.linkLabel("https://x.com/sam?s=1"), "X")
+        XCTAssertEqual(MailEditor.linkLabel("https://example.org/me"), "example.org")
+        let preview = MailEditor.SignaturePreview(text: "Sam\nhttps://x.com/sam", png: Data([1, 2]))
+        XCTAssertEqual(preview.card, "data:image/png;base64,AQI=")
+        XCTAssertEqual(preview.links, [["url": "https://x.com/sam", "label": "X"]])
         let template = "<html><body><p>LetzGo</p></body></html>"
         XCTAssertEqual(MailEditor.swappingSignature(in: template, from: "Sam", to: "Other"), template)
     }
@@ -225,11 +233,22 @@ final class MailboxTests: XCTestCase {
         XCTAssertTrue(transport.requests.contains("PATCH /api/messages/m3/thread"))
     }
 
+    func testSignatureCardsComeFromTheService() async throws {
+        let (mailbox, transport) = make()
+        let card = try await mailbox.api.signatureCard(accountId: "demo")
+        XCTAssertEqual(card, DemoTransport.signatureCard)
+        let html = "<p>Ciao</p><img src=\"/api/signature/\(DemoTransport.cardToken).png\"><img src=\"/api/signature/\(String(repeating: "z", count: 24)).png\">"
+        let inlined = await mailbox.api.inliningSignatureCards(html)
+        XCTAssertTrue(inlined.contains("<img src=\"data:image/png;base64,\(DemoTransport.signatureCard.base64EncodedString())\">"))
+        XCTAssertTrue(inlined.contains("/api/signature/\(String(repeating: "z", count: 24)).png"), "A card that fails to load stays untouched")
+        XCTAssertTrue(transport.requests.contains("GET /api/signatures/demo/card.png"))
+    }
+
     func testSendIsScheduledForUndoAndUsesSignature() async throws {
         let (mailbox, transport) = make()
         await mailbox.start()
         var draft = try XCTUnwrap(mailbox.newDraft())
-        XCTAssertEqual(draft.body, "\n\n-- \nSam Taylor")
+        XCTAssertEqual(draft.body, "\n\n-- \n" + DemoTransport.signature)
         draft.to = "anna@example.com"
         draft.subject = "Ciao"
         try await mailbox.send(draft)
@@ -254,7 +273,7 @@ final class MailboxTests: XCTestCase {
         let reply = try XCTUnwrap(mailbox.replyDraft(all: true, body: "Ok"))
         XCTAssertEqual(reply.to, "marco@example.com")
         XCTAssertEqual(reply.subject, "Re: Il design è pronto per il tuo feedback")
-        XCTAssertEqual(reply.body, "Ok\n\n-- \nSam Taylor")
+        XCTAssertEqual(reply.body, "Ok\n\n-- \n" + DemoTransport.signature)
         XCTAssertEqual(reply.mode, .replyAll)
         XCTAssertTrue(mailbox.isVIP("Marco@example.com"))
     }

@@ -491,7 +491,8 @@ def html_with_signature(html, signature, url, width, height):
     pattern = (r"<p>\s*--(?:\s|&nbsp;|\u00a0)*<br\s*/?>\s*"
                + r"\s*<br\s*/?>\s*".join(re.escape(escape(line, quote=False)) for line in lines)
                + r"\s*(?:<br\s*/?>\s*)?</p>")
-    block = f"<p>-- <br>{image}</p>"
+    # No "-- " delimiter in HTML: Gmail folds everything after it like quoted text.
+    block = f'<div style="margin:16px 0 0">{image}</div>'
     replaced, count = re.subn(pattern, lambda _: block, html, count=1)
     if count:
         return replaced

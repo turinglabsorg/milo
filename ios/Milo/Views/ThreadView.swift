@@ -262,6 +262,7 @@ struct MessageCard: View {
     @Environment(Mailbox.self) private var mailbox
     @State private var height: CGFloat = 120
     @State private var showQuoted = false
+    @State private var inlined: (source: String, html: String)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -283,9 +284,14 @@ struct MessageCard: View {
             if expanded {
                 if message.bodyLoaded == true {
                     if let html = message.html, !html.isEmpty {
-                        MailWebView(html: MailHTML.document(html), height: $height)
+                        MailWebView(html: MailHTML.document(inlined?.source == html ? inlined!.html : html), height: $height)
                             .frame(height: height)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .task(id: html) {
+                                guard html.contains("/api/signature/") else { return }
+                                let result = await mailbox.api.inliningSignatureCards(html)
+                                if result != html { inlined = (html, result) }
+                            }
                     } else {
                         let split = Mailbox.splitQuoted(message.body ?? "")
                         Text(linked(split.text))

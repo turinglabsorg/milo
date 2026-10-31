@@ -9,7 +9,7 @@ public enum MailEditor {
         <meta data-milo-editor charset="utf-8"><meta data-milo-editor name="viewport" content="width=device-width, initial-scale=1">\
         <meta data-milo-editor name="referrer" content="no-referrer">\
         <meta data-milo-editor http-equiv="Content-Security-Policy" content="default-src 'none'; img-src \(images); style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">\
-        <style data-milo-editor>html{color-scheme:light;-webkit-text-size-adjust:100%}body{margin:0;padding:14px;min-height:120px;font:16px/1.55 -apple-system,system-ui,sans-serif;color:#172033;background:#fff;overflow-wrap:anywhere}body:focus{outline:none}img,table{max-width:100%!important}img{height:auto}</style>
+        <style data-milo-editor>html{color-scheme:light;-webkit-text-size-adjust:100%}body{margin:0;padding:14px;min-height:120px;font:16px/1.55 -apple-system,system-ui,sans-serif;color:#172033;background:#fff;overflow-wrap:anywhere}body:focus{outline:none}img,table{max-width:100%!important}img{height:auto}[data-milo-signature-source]{display:none!important}[data-milo-signature-preview]{margin:16px 0 0;-webkit-user-modify:read-only;user-select:none}[data-milo-signature-preview] img{display:block;border-radius:12px}[data-milo-signature-preview] span{display:block;margin:8px 0 0 4px;font:13px/18px -apple-system,system-ui,sans-serif;color:#617189}[data-milo-signature-preview] a{color:#2f5bd3;text-decoration:none}</style>
         """
         if html.range(of: "<html[\\s>]", options: [.regularExpression, .caseInsensitive]) != nil {
             var copy = html
@@ -54,19 +54,102 @@ public enum MailEditor {
         return html
     }
 
+    /// The sender's signature as the recipient sees it: the server-rendered card and the link lines
+    /// under it. The editor shows it in place of the signature text, which stays in the saved draft.
+    public struct SignaturePreview: Equatable, Sendable {
+        public var text: String
+        public var card: String
+        public var links: [[String: String]]
+
+        public init(text: String, png: Data) {
+            self.text = text
+            card = "data:image/png;base64," + png.base64EncodedString()
+            links = MailEditor.signatureLinks(text).map { ["url": $0, "label": MailEditor.linkLabel($0)] }
+        }
+
+        var script: [String: Any] { ["text": text, "card": card, "links": links] }
+    }
+
+    static let linkLabels = ["linkedin.com": "LinkedIn", "x.com": "X", "twitter.com": "X", "github.com": "GitHub",
+                             "instagram.com": "Instagram", "facebook.com": "Facebook"]
+
+    /// Signature lines made only of a URL: they become clickable links under the card.
+    public static func signatureLinks(_ text: String) -> [String] {
+        text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.range(of: "^https?://\\S+$", options: .regularExpression) != nil }
+    }
+
+    public static func linkLabel(_ url: String) -> String {
+        var host = url.replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
+        host = String(host.split(whereSeparator: { $0 == "/" || $0 == "?" }).first ?? "").lowercased()
+        if host.hasPrefix("www.") { host.removeFirst(4) }
+        return linkLabels[host] ?? host
+    }
+
+    /// Shows `preview` in place of its signature text, or restores the text when it is nil.
+    public static func decorateScript(_ preview: SignaturePreview?) -> (String, [String: Any]) {
+        ("window.miloEditor && window.miloEditor.decorate(signature)", ["signature": preview?.script ?? NSNull()])
+    }
+
     /// Installed once per load in the app's content world. Mail scripts never run; this script
     /// edits through `designMode` and reports `{html, text, height}` to the `miloEditor` handler.
     public static let script = #"""
     if (!window.miloEditor) {
       const ed = window.miloEditor = {range: null};
+      ed.clean = root => {
+        root.querySelectorAll('[data-milo-signature-preview]').forEach(node => node.remove());
+        root.querySelectorAll('[data-milo-signature-source]').forEach(node => node.removeAttribute('data-milo-signature-source'));
+        return root;
+      };
       ed.serialize = () => {
-        if (document.documentElement.hasAttribute('data-milo-fragment')) return document.body.innerHTML;
-        const root = document.documentElement.cloneNode(true);
+        if (document.documentElement.hasAttribute('data-milo-fragment')) return ed.clean(document.body.cloneNode(true)).innerHTML;
+        const root = ed.clean(document.documentElement.cloneNode(true));
         root.querySelectorAll('[data-milo-editor]').forEach(node => node.remove());
         return '<!doctype html>\n' + root.outerHTML;
       };
+      ed.lines = node => {
+        const clone = node.cloneNode(true);
+        clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+        return clone.textContent.replace(/\u00a0/g, ' ').split('\n').map(line => line.trim()).filter(Boolean).join('\n');
+      };
+      ed.decorate = signature => {
+        document.querySelectorAll('[data-milo-signature-preview]').forEach(node => node.remove());
+        document.querySelectorAll('[data-milo-signature-source]').forEach(node => node.removeAttribute('data-milo-signature-source'));
+        if (!signature || !signature.card) return ed.height();
+        const wanted = ['--', ...signature.text.split('\n').map(line => line.trim()).filter(Boolean)].join('\n');
+        const source = [...document.body.querySelectorAll('p')].reverse().find(node => ed.lines(node) === wanted);
+        if (!source) return ed.height();
+        const preview = document.createElement('div');
+        preview.setAttribute('data-milo-signature-preview', '');
+        preview.contentEditable = 'false';
+        const card = document.createElement('img');
+        card.alt = signature.text.split('\n').filter(line => !/^https?:\/\/\S+$/.test(line.trim())).join(' · ');
+        card.addEventListener('load', () => { card.style.width = Math.round(card.naturalWidth / 2) + 'px'; ed.post(); });
+        card.src = signature.card;
+        preview.append(card);
+        if (signature.links.length) {
+          const row = document.createElement('span');
+          signature.links.forEach((link, index) => {
+            if (index) row.append(' · ');
+            const anchor = document.createElement('a');
+            anchor.href = link.url;
+            anchor.textContent = link.label;
+            row.append(anchor);
+          });
+          preview.append(row);
+        }
+        source.setAttribute('data-milo-signature-source', '');
+        source.after(preview);
+        return ed.height();
+      };
+      ed.prune = () => {
+        document.querySelectorAll('[data-milo-signature-source]').forEach(source => {
+          const next = source.nextElementSibling;
+          if (!next || !next.hasAttribute('data-milo-signature-preview')) source.remove();
+        });
+      };
       ed.text = () => {
-        const clone = document.body.cloneNode(true);
+        const clone = ed.clean(document.body.cloneNode(true));
         clone.querySelectorAll('style,script,head').forEach(node => node.remove());
         clone.querySelectorAll('br').forEach(node => node.replaceWith('\n'));
         clone.querySelectorAll('div,li,tr').forEach(node => node.append('\n'));
@@ -80,7 +163,7 @@ public enum MailEditor {
       };
       ed.height = () => Math.ceil(document.documentElement.scrollHeight);
       ed.state = () => ({html: ed.serialize(), text: ed.text(), height: ed.height()});
-      ed.post = () => window.webkit.messageHandlers.miloEditor.postMessage(ed.state());
+      ed.post = () => { ed.prune(); window.webkit.messageHandlers.miloEditor.postMessage(ed.state()); };
       ed.restore = () => {
         if (!ed.range) return;
         const selection = getSelection();
