@@ -88,6 +88,14 @@ final class MailboxTests: XCTestCase {
         XCTAssertTrue(full.contains("<style>p{color:red}</style>"))
         XCTAssertEqual(MailEditor.paragraphs(from: "Ciao <Comune>\nriga\n\nSeconda"), "<p>Ciao &lt;Comune&gt;<br>riga</p><p>Seconda</p>")
         XCTAssertEqual(MailEditor.paragraphs(from: ""), "<p><br></p>")
+        let draft = "<p>Ciao</p><p>-- <br>Sam Taylor<br>sam@a.test</p>"
+        XCTAssertEqual(MailEditor.swappingSignature(in: draft, from: "Sam Taylor\nsam@a.test", to: "Sam\nsam@b.test"),
+                       "<p>Ciao</p><p>-- <br>Sam<br>sam@b.test</p>")
+        XCTAssertEqual(MailEditor.swappingSignature(in: draft, from: "Sam Taylor\nsam@a.test", to: nil), "<p>Ciao</p>")
+        XCTAssertEqual(MailEditor.swappingSignature(in: "<p>Ciao</p>", from: nil, to: "Sam"), "<p>Ciao</p><p>-- <br>Sam</p>")
+        XCTAssertEqual(MailEditor.swappingSignature(in: draft, from: "Sam Taylor\nsam@a.test", to: "Sam Taylor\nsam@a.test"), draft)
+        let template = "<html><body><p>LetzGo</p></body></html>"
+        XCTAssertEqual(MailEditor.swappingSignature(in: template, from: "Sam", to: "Other"), template)
     }
 
     func testInboxRendersFromCacheAfterRestart() async throws {

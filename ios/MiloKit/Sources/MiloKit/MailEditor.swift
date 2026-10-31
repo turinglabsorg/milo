@@ -37,6 +37,23 @@ public enum MailEditor {
         return blocks.map { "<p>" + escape($0).replacingOccurrences(of: "\n", with: "<br>") + "</p>" }.joined()
     }
 
+    /// The draft's HTML with the previous sender account's signature replaced by the new one's.
+    /// Complete HTML documents are templates that carry their own signature and stay untouched.
+    public static func swappingSignature(in html: String, from old: String?, to new: String?) -> String {
+        if html.range(of: "<html[\\s>]", options: [.regularExpression, .caseInsensitive]) != nil { return html }
+        let block = { (text: String?) -> String? in
+            guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+            return paragraphs(from: "-- \n" + text)
+        }
+        let before = block(old), after = block(new)
+        if before == after { return html }
+        if let before, let range = html.range(of: before, options: .backwards) {
+            return html.replacingCharacters(in: range, with: after ?? "")
+        }
+        if let after, !html.contains(after) { return html + after }
+        return html
+    }
+
     /// Installed once per load in the app's content world. Mail scripts never run; this script
     /// edits through `designMode` and reports `{html, text, height}` to the `miloEditor` handler.
     public static let script = #"""

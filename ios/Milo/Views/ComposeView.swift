@@ -177,6 +177,19 @@ struct ComposeView: View {
                     Section { Text(error).foregroundStyle(Color.milo.danger) }
                 }
             }
+            .onChange(of: draft.accountId) { old, new in
+                let signatures = mailbox.state?.signatures
+                let html = MailEditor.swappingSignature(in: draft.html ?? "", from: signatures?[old], to: signatures?[new])
+                guard html != (draft.html ?? "") else { return }
+                draft.html = html
+                if let before = signatures?[old], !before.isEmpty, draft.body.contains("-- \n" + before) {
+                    let after = signatures?[new].flatMap { $0.isEmpty ? nil : "-- \n" + $0 } ?? ""
+                    draft.body = draft.body.replacingOccurrences(of: "-- \n" + before, with: after)
+                } else if let after = signatures?[new], !after.isEmpty, !draft.body.contains("-- \n" + after) {
+                    draft.body += "\n\n-- \n" + after
+                }
+                draft.revision = max(Int(Date().timeIntervalSince1970 * 1000), draft.revision + 1)
+            }
             .onChange(of: draft.to) { _, _ in if recipientSlot == .to { refreshSuggestions() } }
             .onChange(of: draft.cc) { _, _ in if recipientSlot == .cc { refreshSuggestions() } }
             .onChange(of: recipientSlot) { _, _ in refreshSuggestions() }
