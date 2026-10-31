@@ -321,7 +321,9 @@ final class MailboxTests: XCTestCase {
         let unread = try XCTUnwrap(mailbox.conversations.first { !$0.read.value && !$0.archived.value })
         await mailbox.mutate(unread, MailEdit.Patch(read: true))
         XCTAssertEqual(mailbox.state?.counts.unread, 1)
-        await mailbox.mutate(unread, MailEdit.Patch(read: true))
+        let read = try XCTUnwrap(mailbox.conversations.first { $0.key == unread.key })
+        XCTAssertTrue(read.read.value)
+        await mailbox.mutate(read, MailEdit.Patch(read: true))
         XCTAssertEqual(mailbox.state?.counts.unread, 1)
     }
 
