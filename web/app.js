@@ -772,6 +772,12 @@ function richText(doc){
   clone.querySelectorAll('a[href]').forEach(node=>{const href=node.getAttribute('href');if(/^https?:/i.test(href)&&!node.textContent.includes(href))node.append(` (${href})`);});
   return clone.textContent.replace(/[ \t\u00a0]+\n/g,'\n').replace(/^--$/gm,'-- ').replace(/\n{3,}/g,'\n\n').trim();
 }
+function richBlockText(node){const copy=node.cloneNode(true);copy.querySelectorAll('br').forEach(br=>br.replaceWith('\n'));return copy.textContent.replace(/\u00a0/g,' ').replace(/[ \t]+$/gm,'').trim();}
+function richSignatureBlocks(doc,signature){
+  const blocks=('-- \n'+signature).split(/\n{2,}/).map(block=>block.replace(/[ \t]+$/gm,'').trim()),nodes=[...doc.body.children];
+  for(let start=0;start+blocks.length<=nodes.length;start++){const run=nodes.slice(start,start+blocks.length);if(run.every((node,index)=>richBlockText(node)===blocks[index]))return run;}
+  return null;
+}
 function textToHtml(text){return (text||'').split(/\n{2,}/).map(block=>`<p>${esc(block).replace(/\n/g,'<br>')||'<br>'}</p>`).join('')||'<p><br></p>';}
 function richReady(frame){const doc=frame?.contentDocument;return Boolean(doc?.body&&doc.readyState==='complete'&&doc.querySelector('[data-milo-editor]'));}
 function richSync(frame){
@@ -1447,10 +1453,11 @@ document.addEventListener('change', async event => {
     if(template&&field){const start=field.selectionStart??field.value.length;field.value=field.value.slice(0,start)+template.body+field.value.slice(field.selectionEnd??start);field.focus();field.setSelectionRange(start+template.body.length,start+template.body.length);field.dispatchEvent(new Event('input',{bubbles:true}));}
   }
   if(event.target.name==='account_id'&&event.target.closest('#compose-form')&&S.compose){
-    const field=$('#compose-form [name="body"]'),before=S.state.signatures?.[S.compose.account_id],after=S.state.signatures?.[event.target.value];
+    const field=$('#compose-form [name="body"]'),after=S.state.signatures?.[event.target.value],others=Object.entries(S.state.signatures||{}).filter(([id,text])=>id!==event.target.value&&text&&text!==after).map(([,text])=>text);
     const frame=$('#compose-form .rich-frame'),doc=frame?.contentDocument;
-    if(richReady(frame)){const sig=text=>textToHtml('-- \n'+text);if(before&&doc.body.innerHTML.includes(sig(before)))doc.body.innerHTML=doc.body.innerHTML.replace(sig(before),after?sig(after):'');else if(after&&!doc.body.innerHTML.includes(sig(after)))doc.body.insertAdjacentHTML('beforeend','<p><br></p>'+sig(after));richSync(frame);richFit(frame);S.compose.account_id=event.target.value;return;}
-    if(field&&before&&field.value.includes('-- \n'+before))field.value=field.value.replace('-- \n'+before,after?'-- \n'+after:'');
+    if(richReady(frame)){const sig=text=>textToHtml('-- \n'+text),old=others.map(text=>richSignatureBlocks(doc,text)).find(Boolean),present=after&&richSignatureBlocks(doc,after);if(old){old[0].insertAdjacentHTML('beforebegin',after?sig(after):'');old.forEach(node=>node.remove());}else if(after&&!present){doc.body.insertAdjacentHTML('beforeend','<p><br></p>'+sig(after));}richSync(frame);richFit(frame);S.compose.account_id=event.target.value;return;}
+    const before=others.find(text=>field?.value.includes('-- \n'+text));
+    if(field&&before)field.value=field.value.replace('-- \n'+before,after?'-- \n'+after:'');
     else if(field&&after&&!field.value.includes('-- \n'+after))field.value=`${field.value}\n\n-- \n${after}`;
     S.compose.account_id=event.target.value;field?.dispatchEvent(new Event('input',{bubbles:true}));
   }

@@ -345,3 +345,40 @@ def test_closing_a_signature_only_message_keeps_no_draft(tmp_path):
         page.locator('#compose-form [data-action="close-compose"]').first.click()
         wait_for_async(page, 'async()=>(await (await fetch("/api/drafts")).json()).drafts.length===1')
         browser.close()
+
+
+def test_switching_sender_replaces_a_signature_with_links(tmp_path):
+    def prepare(app, received, sent):
+        store = app.state.store
+        first = store.accounts()[0]['id']
+        second = store.add_account({"name": "Lavoro", "email": "work@example.com", "username": "work",
+            "password": "demo-only", "imap_host": "demo.invalid", "imap_port": 993,
+            "smtp_host": "demo.invalid", "smtp_port": 465, "smtp_security": "tls", "color": "#88ccff"})
+        store.set_setting("signatures", {
+            first: "Sam Taylor\n+39 000 111 2222\nhttps://www.linkedin.com/in/sam-taylor\nhttps://x.com/samtaylor",
+            second: "Sam Taylor\nWork Ltd\nhttps://x.com/samwork"})
+
+    with service(tmp_path, prepare) as (url, sent), sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(service_workers='block')
+        errors = []
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.goto(url)
+        expect(page.locator('.message-row').first).to_be_visible()
+        page.locator('[data-action="compose"]').first.click()
+        body = page.frame_locator('#compose-form .rich-frame').locator('body')
+        expect(body).to_contain_text('samtaylor')
+        select = page.locator('#compose-form [name="account_id"]')
+        work = select.locator('option', has_text='work@example.com').get_attribute('value')
+        personal = select.input_value()
+        select.select_option(work)
+        expect(body).to_contain_text('Work Ltd')
+        expect(body).not_to_contain_text('+39 000 111 2222')
+        expect(body).to_contain_text('https://x.com/samwork')
+        expect(body).not_to_contain_text('https://x.com/samtaylor')
+        select.select_option(personal)
+        expect(body).to_contain_text('+39 000 111 2222')
+        expect(body).not_to_contain_text('Work Ltd')
+        assert page.locator('#compose-form [name="body"]').input_value().count('-- ') == 1
+        assert errors == []
+        browser.close()
