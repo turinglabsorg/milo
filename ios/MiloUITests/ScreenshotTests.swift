@@ -148,7 +148,7 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(track.waitForExistence(timeout: 5), "The compose options offer open tracking")
         XCTAssertTrue(app.buttons["Ricordamelo se non risponde"].exists, "The follow-up reminder lives in the same menu")
         save("08-compose-track-open")
-        app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).tap()
         XCTAssertTrue(track.waitForNonExistence(timeout: 5), "The options menu closes")
         app.buttons["Chiudi"].tap()
         XCTAssertTrue(app.buttons["Elimina bozza"].waitForExistence(timeout: 5))
