@@ -159,6 +159,26 @@ final class ScreenshotTests: XCTestCase {
         save("10-thread-ticks")
     }
 
+    func testNewMessageWithASignatureCardAcceptsTyping() {
+        let compose = app.buttons["compose"]
+        if !compose.waitForExistence(timeout: 10) { app.staticTexts["Smart inbox"].firstMatch.tap() }
+        XCTAssertTrue(compose.waitForExistence(timeout: 10))
+        compose.tap()
+        let editor = app.webViews["compose-rich-editor"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        XCTAssertTrue(editor.images.firstMatch.waitForExistence(timeout: 15), "The signature shows as its card")
+        editor.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.05)).tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        for letter in "ciao" {
+            let key = app.keyboards.keys.matching(NSPredicate(format: "label ==[c] %@", String(letter))).firstMatch
+            XCTAssertTrue(key.waitForExistence(timeout: 5))
+            key.tap()
+        }
+        XCTAssertTrue(editor.staticTexts.containing(NSPredicate(format: "label CONTAINS[c] 'ciao'")).firstMatch.waitForExistence(timeout: 10),
+                      "Typing above the signature card writes the message")
+        save("10-compose-new-typing")
+    }
+
     func testHomeScreenIconShowsTheUnreadBadge() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         sleep(3)

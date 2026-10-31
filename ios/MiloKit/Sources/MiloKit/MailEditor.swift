@@ -140,7 +140,31 @@ public enum MailEditor {
         }
         source.setAttribute('data-milo-signature-source', '');
         source.after(preview);
+        // The hidden signature text must never be the only place the caret can go.
+        if (!source.previousElementSibling) {
+          const line = document.createElement('p');
+          line.append(document.createElement('br'));
+          source.before(line);
+        }
+        if (document.designMode === 'on') ed.caret(true);
         return ed.height();
+      };
+      ed.writable = node => !!node && !(node.closest && node.closest('[data-milo-signature-source],[data-milo-signature-preview]'));
+      ed.caret = force => {
+        const selection = getSelection();
+        const at = selection.rangeCount ? selection.getRangeAt(0).startContainer : null;
+        const anchor = at && (at.nodeType === 1 ? at : at.parentElement);
+        const source = document.querySelector('[data-milo-signature-source]');
+        if (anchor && document.body.contains(anchor) && ed.writable(anchor) && !(force && source)) return;
+        const target = source ? source.previousElementSibling : document.body;
+        if (!target) return;
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        range.collapse(!source);
+        if (source && target.lastChild && target.lastChild.nodeName === 'BR' && target.childNodes.length === 1) range.setStartBefore(target.lastChild);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        ed.range = range.cloneRange();
       };
       ed.prune = () => {
         document.querySelectorAll('[data-milo-signature-source]').forEach(source => {
@@ -178,13 +202,15 @@ public enum MailEditor {
       };
       ed.setEditing = on => {
         document.designMode = on ? 'on' : 'off';
-        if (on) document.body.focus();
+        if (on) { document.body.focus(); ed.caret(true); }
       };
       document.addEventListener('input', ed.post);
       new MutationObserver(ed.post).observe(document.documentElement, {subtree: true, childList: true, characterData: true});
       document.addEventListener('selectionchange', () => {
         const selection = getSelection();
-        if (selection.rangeCount && document.body.contains(selection.anchorNode)) ed.range = selection.getRangeAt(0).cloneRange();
+        if (!selection.rangeCount || !document.body.contains(selection.anchorNode)) return;
+        if (document.designMode === 'on' && !ed.writable(selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement)) return ed.caret();
+        ed.range = selection.getRangeAt(0).cloneRange();
       });
       document.addEventListener('click', event => {
         if (document.designMode !== 'on' && event.target.closest && event.target.closest('a')) event.preventDefault();
