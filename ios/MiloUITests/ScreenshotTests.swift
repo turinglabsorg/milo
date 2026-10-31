@@ -134,6 +134,14 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(editor.links["X"].waitForExistence(timeout: 10), "The composer shows the signature card with its links")
         XCTAssertFalse(editor.staticTexts["https://x.com/example"].exists, "The signature text is not shown as raw lines")
         save("08a-compose-signature-card")
+        let to = app.textFields["compose-to"]
+        to.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(to.exists, "The header stays while a recipient is typed")
+        XCTAssertGreaterThanOrEqual(to.frame.minY, app.navigationBars.firstMatch.frame.maxY - 1,
+                                    "The recipient rows stay below the navigation bar while suggestions show")
+        save("08b-compose-recipient-suggestions")
+        app.navigationBars.firstMatch.staticTexts.firstMatch.tap()
         app.buttons["compose-options"].tap()
         let track = app.buttons["Traccia apertura"]
         XCTAssertTrue(track.waitForExistence(timeout: 5), "The compose options offer open tracking")

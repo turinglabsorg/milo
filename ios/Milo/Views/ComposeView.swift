@@ -48,7 +48,7 @@ struct ComposeView: View {
         }
         .composeRow()
         if recipientSlot == slot {
-            ForEach(suggestions) { person in
+            ForEach(suggestions.prefix(5)) { person in
                 Button {
                     text.wrappedValue = RecipientEdit.inserting(person.email, name: person.name, into: text.wrappedValue)
                 } label: {
@@ -212,6 +212,7 @@ struct ComposeView: View {
                 .ignoresSafeArea(.container, edges: writing ? [] : .bottom)
                 if writing { formatBar }
             }
+            .frame(maxHeight: .infinity, alignment: .top)
             .animation(.easeOut(duration: 0.2), value: writing)
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
