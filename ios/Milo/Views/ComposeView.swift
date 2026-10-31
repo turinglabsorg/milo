@@ -1,5 +1,7 @@
+import Combine
 import MiloKit
 import SwiftUI
+import UIKit
 
 struct ComposeView: View {
     @State var draft: Draft
@@ -12,10 +14,10 @@ struct ComposeView: View {
     @State private var scheduling = false
     @State private var customDate = Date().addingTimeInterval(3600)
     @FocusState private var recipientSlot: RecipientSlot?
+    @FocusState private var subjectFocused: Bool
+    @State private var keyboardUp = false
     @State private var suggestions: [Recipient] = []
     @State private var suggestTask: Task<Void, Never>?
-    @State private var editingHTML = false
-    @State private var editorHeight: CGFloat = 240
     @State private var editor = HTMLEditorController()
     @State private var linkPrompt = false
     @State private var linkURL = "https://"
@@ -34,12 +36,17 @@ struct ComposeView: View {
 
     @ViewBuilder
     private func recipientField(_ title: String, text: Binding<String>, slot: RecipientSlot, identifier: String) -> some View {
-        TextField(title, text: text)
-            .keyboardType(.emailAddress)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .focused($recipientSlot, equals: slot)
-            .accessibilityIdentifier(identifier)
+        HStack(spacing: 8) {
+            Text(title).foregroundStyle(Color.milo.muted).frame(width: 34, alignment: .leading)
+            TextField("", text: text)
+                .keyboardType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($recipientSlot, equals: slot)
+                .accessibilityLabel(title)
+                .accessibilityIdentifier(identifier)
+        }
+        .composeRow()
         if recipientSlot == slot {
             ForEach(suggestions) { person in
                 Button {
@@ -54,6 +61,7 @@ struct ComposeView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
+                .composeRow()
                 .accessibilityIdentifier("recipient-\(person.email)")
             }
         }
@@ -96,42 +104,92 @@ struct ComposeView: View {
         RichTool(command: "removeFormat", symbol: "textformat", title: "Rimuovi formattazione"),
     ]
 
-    @ViewBuilder
-    private var richEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 4) {
-                if editingHTML {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 2) {
-                            ForEach(Self.tools) { tool in
-                                Button {
-                                    if tool.command == "createLink" { linkURL = "https://"; linkPrompt = true }
-                                    else { editor.exec(tool.command) }
-                                } label: {
-                                    Image(systemName: tool.symbol).frame(width: 36, height: 36)
-                                }
-                                .buttonStyle(.borderless)
-                                .accessibilityLabel(tool.title)
-                            }
+    /// The message is being written: the header folds away so the text gets the whole screen.
+    private var writing: Bool { keyboardUp && recipientSlot == nil && !subjectFocused }
+
+    private var formatBar: some View {
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(Self.tools) { tool in
+                        Button {
+                            if tool.command == "createLink" { linkURL = "https://"; linkPrompt = true }
+                            else { editor.exec(tool.command) }
+                        } label: {
+                            Image(systemName: tool.symbol).frame(width: 40, height: 40)
                         }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(tool.title)
                     }
                 }
-                Spacer(minLength: 0)
-                Button(editingHTML ? "Fine" : "Modifica") { editingHTML.toggle() }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("compose-edit-html")
+                .padding(.horizontal, 6)
             }
-            HTMLEditorView(html: draft.html ?? "", remoteImages: false, editing: editingHTML, signature: signaturePreview,
-                           height: $editorHeight, controller: editor) { html, text in
-                draft.html = html
-                draft.body = text
-                draft.revision = max(Int(Date().timeIntervalSince1970 * 1000), draft.revision + 1)
+            Button { editor.blur() } label: {
+                Image(systemName: "keyboard.chevron.compact.down").frame(width: 44, height: 40)
             }
-            .frame(height: editorHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(editingHTML ? Color.milo.accent : Color.milo.line, lineWidth: 1))
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Chiudi tastiera")
+            .accessibilityIdentifier("compose-hide-keyboard")
         }
-        .padding(.vertical, 4)
+        .frame(height: 44)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private var header: some View {
+        VStack(spacing: 0) {
+            if (mailbox.state?.accounts.count ?? 0) > 1 {
+                HStack(spacing: 8) {
+                    Text("Da").foregroundStyle(Color.milo.muted).frame(width: 34, alignment: .leading)
+                    Picker("Da", selection: $draft.accountId) {
+                        ForEach(mailbox.state?.accounts ?? []) { account in
+                            Text(account.email).tag(account.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    Spacer(minLength: 0)
+                }
+                .composeRow(vertical: 4)
+                Divider()
+            }
+            recipientField("A", text: $draft.to, slot: .to, identifier: "compose-to")
+            Divider()
+            recipientField("Cc", text: $draft.cc, slot: .cc, identifier: "compose-cc")
+            Divider()
+            TextField("Oggetto", text: $draft.subject)
+                .focused($subjectFocused)
+                .accessibilityIdentifier("compose-subject")
+                .composeRow()
+            Divider()
+            if let error {
+                Text(error).foregroundStyle(Color.milo.danger).composeRow()
+                Divider()
+            }
+        }
+    }
+
+    private var options: some View {
+        Menu {
+            if let templates = mailbox.state?.templates, !templates.isEmpty {
+                Menu {
+                    ForEach(templates, id: \.name) { template in
+                        Button(template.name) { editor.exec("insertHTML", MailEditor.paragraphs(from: template.body)) }
+                    }
+                } label: { Label("Risposte salvate", systemImage: "text.badge.plus") }
+            }
+            Toggle("Traccia apertura", isOn: $draft.tracksOpen)
+                .accessibilityIdentifier("compose-track")
+            Picker("Ricordamelo se non risponde", selection: $followup) {
+                Text("Mai").tag(0)
+                Text("Entro 1 giorno").tag(1)
+                Text("Entro 3 giorni").tag(3)
+                Text("Entro una settimana").tag(7)
+            }
+            .pickerStyle(.menu)
+        } label: { Image(systemName: "ellipsis.circle") }
+        .accessibilityLabel("Opzioni")
+        .accessibilityIdentifier("compose-options")
     }
 
     private var signaturePreview: MailEditor.SignaturePreview? {
@@ -142,48 +200,21 @@ struct ComposeView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    if (mailbox.state?.accounts.count ?? 0) > 1 {
-                        Picker("Da", selection: $draft.accountId) {
-                            ForEach(mailbox.state?.accounts ?? []) { account in
-                                Text(account.email).tag(account.id)
-                            }
-                        }
-                    }
-                    recipientField("A", text: $draft.to, slot: .to, identifier: "compose-to")
-                    recipientField("Cc", text: $draft.cc, slot: .cc, identifier: "compose-cc")
-                    TextField("Oggetto", text: $draft.subject)
-                        .accessibilityIdentifier("compose-subject")
+            VStack(spacing: 0) {
+                if !writing { header }
+                HTMLEditorView(html: draft.html ?? "", remoteImages: false, editing: true, signature: signaturePreview,
+                               controller: editor) { html, text in
+                    draft.html = html
+                    draft.body = text
+                    draft.revision = max(Int(Date().timeIntervalSince1970 * 1000), draft.revision + 1)
                 }
-                Section {
-                    richEditor
-                }
-                Section {
-                    if let templates = mailbox.state?.templates, !templates.isEmpty {
-                        Menu {
-                            ForEach(templates, id: \.name) { template in
-                                Button(template.name) {
-                                    editingHTML = true
-                                    editor.exec("insertHTML", MailEditor.paragraphs(from: template.body))
-                                }
-                            }
-                        } label: { Label("Risposte salvate", systemImage: "text.badge.plus") }
-                    }
-                    Toggle("Traccia apertura", isOn: $draft.tracksOpen)
-                        .tint(Color.milo.accent)
-                        .accessibilityIdentifier("compose-track")
-                    Picker("Ricordamelo se non risponde", selection: $followup) {
-                        Text("Mai").tag(0)
-                        Text("Entro 1 giorno").tag(1)
-                        Text("Entro 3 giorni").tag(3)
-                        Text("Entro una settimana").tag(7)
-                    }
-                }
-                if let error {
-                    Section { Text(error).foregroundStyle(Color.milo.danger) }
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea(.container, edges: writing ? [] : .bottom)
+                if writing { formatBar }
             }
+            .animation(.easeOut(duration: 0.2), value: writing)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
             .onChange(of: draft.accountId) { old, new in
                 let signatures = mailbox.state?.signatures
                 let html = MailEditor.swappingSignature(in: draft.html ?? "", from: signatures?[old], to: signatures?[new])
@@ -232,6 +263,7 @@ struct ComposeView: View {
                     }
                 }
                 ToolbarItemGroup(placement: .confirmationAction) {
+                    options
                     Button { scheduling = true } label: { Image(systemName: "clock") }
                         .accessibilityLabel("Programma l’invio")
                     Button { send() } label: {
@@ -244,10 +276,7 @@ struct ComposeView: View {
             }
             .sheet(isPresented: $scheduling) { scheduleSheet.presentationDetents([.medium, .large]) }
             .onAppear {
-                if !hasHTML {
-                    draft.html = MailEditor.paragraphs(from: draft.body)
-                    editingHTML = true
-                }
+                if !hasHTML { draft.html = MailEditor.paragraphs(from: draft.body) }
             }
             .interactiveDismissDisabled(sending)
         }
@@ -338,5 +367,11 @@ struct ComposeView: View {
             do { try await mailbox.save(draft); notice.show("Bozza salvata.") }
             catch { notice.show("Bozza salvata sul dispositivo: la sincronizzo appena possibile.") }
         }
+    }
+}
+
+private extension View {
+    func composeRow(vertical: CGFloat = 11) -> some View {
+        padding(.horizontal, 16).padding(.vertical, vertical).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     }
 }

@@ -9,7 +9,7 @@ public enum MailEditor {
         <meta data-milo-editor charset="utf-8"><meta data-milo-editor name="viewport" content="width=device-width, initial-scale=1">\
         <meta data-milo-editor name="referrer" content="no-referrer">\
         <meta data-milo-editor http-equiv="Content-Security-Policy" content="default-src 'none'; img-src \(images); style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">\
-        <style data-milo-editor>html{color-scheme:light;-webkit-text-size-adjust:100%}body{margin:0;padding:14px;min-height:120px;font:16px/1.55 -apple-system,system-ui,sans-serif;color:#172033;background:#fff;overflow-wrap:anywhere}body:focus{outline:none}img,table{max-width:100%!important}img{height:auto}[data-milo-signature-source]{display:none!important}[data-milo-signature-preview]{margin:16px 0 0;-webkit-user-modify:read-only;user-select:none}[data-milo-signature-preview] img{display:block;border-radius:12px}[data-milo-signature-preview] span{display:block;margin:8px 0 0 4px;font:13px/18px -apple-system,system-ui,sans-serif;color:#617189}[data-milo-signature-preview] a{color:#2f5bd3;text-decoration:none}</style>
+        <style data-milo-editor>html{color-scheme:light;-webkit-text-size-adjust:100%;height:100%}body{margin:0;padding:12px 16px 24px;min-height:100%;box-sizing:border-box;font:16px/1.55 -apple-system,system-ui,sans-serif;color:#172033;background:#fff;overflow-wrap:anywhere}body:focus{outline:none}img,table{max-width:100%!important}img{height:auto}[data-milo-signature-source]{display:none!important}[data-milo-signature-preview]{margin:16px 0 0;-webkit-user-modify:read-only;user-select:none}[data-milo-signature-preview] img{display:block;border-radius:12px}[data-milo-signature-preview] span{display:block;margin:8px 0 0 4px;font:13px/18px -apple-system,system-ui,sans-serif;color:#617189}[data-milo-signature-preview] a{color:#2f5bd3;text-decoration:none}</style>
         """
         if html.range(of: "<html[\\s>]", options: [.regularExpression, .caseInsensitive]) != nil {
             var copy = html
@@ -92,13 +92,15 @@ public enum MailEditor {
     }
 
     /// Installed once per load in the app's content world. Mail scripts never run; this script
-    /// edits through `designMode` and reports `{html, text, height}` to the `miloEditor` handler.
+    /// edits the body as `contentEditable` (so the keyboard keeps autocorrection and predictions) and reports `{html, text, height}` to the `miloEditor` handler.
     public static let script = #"""
     if (!window.miloEditor) {
-      const ed = window.miloEditor = {range: null};
+      const ed = window.miloEditor = {range: null, editing: false};
       ed.clean = root => {
         root.querySelectorAll('[data-milo-signature-preview]').forEach(node => node.remove());
         root.querySelectorAll('[data-milo-signature-source]').forEach(node => node.removeAttribute('data-milo-signature-source'));
+        const body = root.nodeName === 'BODY' ? root : root.querySelector('body');
+        if (body) ['contenteditable', 'autocorrect', 'autocapitalize', 'spellcheck'].forEach(name => body.removeAttribute(name));
         return root;
       };
       ed.serialize = () => {
@@ -146,7 +148,7 @@ public enum MailEditor {
           line.append(document.createElement('br'));
           source.before(line);
         }
-        if (document.designMode === 'on') ed.caret(true);
+        if (ed.editing) ed.caret(true);
         return ed.height();
       };
       ed.writable = node => !!node && !(node.closest && node.closest('[data-milo-signature-source],[data-milo-signature-preview]'));
@@ -201,19 +203,30 @@ public enum MailEditor {
         ed.post();
       };
       ed.setEditing = on => {
-        document.designMode = on ? 'on' : 'off';
-        if (on) { document.body.focus(); ed.caret(true); }
+        ed.editing = on;
+        const body = document.body;
+        if (on) {
+          body.contentEditable = 'true';
+          body.setAttribute('autocorrect', 'on');
+          body.setAttribute('autocapitalize', 'sentences');
+          body.setAttribute('spellcheck', 'true');
+          ed.caret(true);
+        } else {
+          body.removeAttribute('contenteditable');
+          ['autocorrect', 'autocapitalize', 'spellcheck'].forEach(name => body.removeAttribute(name));
+        }
       };
+      ed.blur = () => { if (document.activeElement) document.activeElement.blur(); };
       document.addEventListener('input', ed.post);
       new MutationObserver(ed.post).observe(document.documentElement, {subtree: true, childList: true, characterData: true});
       document.addEventListener('selectionchange', () => {
         const selection = getSelection();
         if (!selection.rangeCount || !document.body.contains(selection.anchorNode)) return;
-        if (document.designMode === 'on' && !ed.writable(selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement)) return ed.caret();
+        if (ed.editing && !ed.writable(selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement)) return ed.caret();
         ed.range = selection.getRangeAt(0).cloneRange();
       });
       document.addEventListener('click', event => {
-        if (document.designMode !== 'on' && event.target.closest && event.target.closest('a')) event.preventDefault();
+        if (!ed.editing && event.target.closest && event.target.closest('a')) event.preventDefault();
       }, true);
     }
     return window.miloEditor.height();

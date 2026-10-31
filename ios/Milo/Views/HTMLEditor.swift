@@ -1,4 +1,5 @@
 import MiloKit
+import ObjectiveC
 import SwiftUI
 import UIKit
 import WebKit
@@ -16,16 +17,22 @@ final class HTMLEditorController {
                                                        contentWorld: .defaultClient)
         }
     }
+
+    func blur() {
+        guard let webView else { return }
+        Task { _ = try? await webView.callAsyncJavaScript("window.miloEditor && window.miloEditor.blur()", contentWorld: .defaultClient) }
+        webView.endEditing(true)
+    }
 }
 
 /// The draft's HTML rendered as the recipient sees it; editable in place while `editing` is on.
-/// Mail scripts are disabled; remote images stay blocked unless `remoteImages` is set.
+/// It fills the space it is given and scrolls by itself. Mail scripts are disabled; remote images
+/// stay blocked unless `remoteImages` is set.
 struct HTMLEditorView: UIViewRepresentable {
     var html: String
     var remoteImages: Bool
     var editing: Bool
     var signature: MailEditor.SignaturePreview? = nil
-    @Binding var height: CGFloat
     var controller: HTMLEditorController
     var onChange: (String, String) -> Void
 
@@ -37,7 +44,9 @@ struct HTMLEditorView: UIViewRepresentable {
         configuration.userContentController.add(context.coordinator, contentWorld: .defaultClient, name: "miloEditor")
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
-        view.scrollView.isScrollEnabled = false
+        view.scrollView.keyboardDismissMode = .interactive
+        view.scrollView.alwaysBounceVertical = true
+        Self.hideFormAccessory(view)
         view.isOpaque = false
         view.backgroundColor = .white
         view.accessibilityIdentifier = "compose-rich-editor"
@@ -59,6 +68,25 @@ struct HTMLEditorView: UIViewRepresentable {
             if coordinator.ready { coordinator.applyEditing(view) }
         }
         if coordinator.ready, signature != coordinator.signature { coordinator.decorate(view) }
+    }
+
+    /// Removes the previous/next/done bar WebKit puts above the keyboard: the composer shows its
+    /// own formatting bar there.
+    static func hideFormAccessory(_ view: WKWebView) {
+        guard let content = view.scrollView.subviews.first(where: { NSStringFromClass(type(of: $0)).hasPrefix("WKContent") }) else { return }
+        let base: AnyClass = type(of: content)
+        let name = "MiloEditorContent_" + NSStringFromClass(base)
+        var subclass: AnyClass? = NSClassFromString(name)
+        if subclass == nil, let made = objc_allocateClassPair(base, name, 0) {
+            let selector = #selector(getter: UIResponder.inputAccessoryView)
+            let none: @convention(block) (AnyObject) -> AnyObject? = { _ in nil }
+            if let method = class_getInstanceMethod(UIResponder.self, selector) {
+                class_addMethod(made, selector, imp_implementationWithBlock(none), method_getTypeEncoding(method))
+            }
+            objc_registerClassPair(made)
+            subclass = made
+        }
+        if let subclass { object_setClass(content, subclass) }
     }
 
     static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
@@ -97,30 +125,20 @@ struct HTMLEditorView: UIViewRepresentable {
             signature = preview
             Task { @MainActor in
                 let (script, arguments) = MailEditor.decorateScript(preview)
-                if let height = try? await view.callAsyncJavaScript(script, arguments: arguments, contentWorld: .defaultClient) as? NSNumber {
-                    resize(height.doubleValue)
-                }
+                _ = try? await view.callAsyncJavaScript(script, arguments: arguments, contentWorld: .defaultClient)
             }
-        }
-
-        func resize(_ value: Double) {
-            let measured = max(160, CGFloat(value))
-            if abs(parent.height - measured) > 1 { parent.height = measured }
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let state = message.body as? [String: Any], let html = state["html"] as? String,
                   let text = state["text"] as? String else { return }
             self.html = html
-            if let height = state["height"] as? NSNumber { resize(height.doubleValue) }
             parent.onChange(html, text)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             Task { @MainActor in
-                if let height = try? await webView.callAsyncJavaScript(MailEditor.script, contentWorld: .defaultClient) as? NSNumber {
-                    resize(height.doubleValue)
-                }
+                _ = try? await webView.callAsyncJavaScript(MailEditor.script, contentWorld: .defaultClient)
                 ready = true
                 applyEditing(webView)
                 decorate(webView)

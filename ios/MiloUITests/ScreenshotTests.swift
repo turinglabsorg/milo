@@ -95,10 +95,16 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertFalse(app.buttons["Testo semplice"].exists, "There is no plain-text mode")
         XCTAssertFalse(app.buttons["Formattato"].exists)
         XCTAssertFalse(app.textViews["compose-body"].exists)
-        XCTAssertTrue(app.buttons["Grassetto"].waitForExistence(timeout: 5), "The formatting toolbar shows while editing")
-        XCTAssertTrue(app.buttons["Fine"].exists)
+        XCTAssertTrue(app.textFields["compose-to"].exists, "The header shows before writing")
         editor.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "Editing opens the keyboard on the rendered message")
+        XCTAssertTrue(app.buttons["Grassetto"].waitForExistence(timeout: 5), "The formatting bar sits above the keyboard while writing")
+        XCTAssertFalse(app.textFields["compose-to"].exists, "The header folds away while writing")
+        XCTAssertFalse(app.buttons["Done"].exists, "WebKit's previous/next/done bar is gone")
+        XCTAssertFalse(app.buttons["Fine"].exists)
+        let window = app.windows.firstMatch.frame
+        XCTAssertEqual(editor.frame.width, window.width, accuracy: 1, "The editor spans the whole width")
+        XCTAssertGreaterThanOrEqual(editor.frame.minY, 0)
         for letter in "ragusa" {
             let key = app.keyboards.keys.matching(NSPredicate(format: "label ==[c] %@", String(letter))).firstMatch
             XCTAssertTrue(key.waitForExistence(timeout: 5))
@@ -106,9 +112,10 @@ final class ScreenshotTests: XCTestCase {
         }
         XCTAssertTrue(editor.staticTexts.containing(NSPredicate(format: "label CONTAINS[c] 'ragusa'")).firstMatch.waitForExistence(timeout: 10),
                       "Typing edits the rendered message")
+        sleep(1)
         save("06-compose-html-editing")
-        app.buttons["Fine"].tap()
-        XCTAssertTrue(app.buttons["Modifica"].waitForExistence(timeout: 5))
+        app.buttons["compose-hide-keyboard"].tap()
+        XCTAssertTrue(app.textFields["compose-to"].waitForExistence(timeout: 5), "The header comes back with the keyboard down")
         XCTAssertFalse(app.buttons["Grassetto"].exists)
         sleep(1)
         save("07-compose-html-rendered")
@@ -124,18 +131,15 @@ final class ScreenshotTests: XCTestCase {
         app.buttons["compose"].tap()
         let editor = app.webViews["compose-rich-editor"]
         XCTAssertTrue(editor.waitForExistence(timeout: 10))
-        if app.buttons["Fine"].waitForExistence(timeout: 5) { app.buttons["Fine"].tap() }
         XCTAssertTrue(editor.links["X"].waitForExistence(timeout: 10), "The composer shows the signature card with its links")
         XCTAssertFalse(editor.staticTexts["https://x.com/example"].exists, "The signature text is not shown as raw lines")
         save("08a-compose-signature-card")
-        if app.keyboards.firstMatch.exists { app.navigationBars.firstMatch.tap() }
-        let track = app.switches["compose-track"]
+        app.buttons["compose-options"].tap()
+        let track = app.buttons["Traccia apertura"]
         XCTAssertTrue(track.waitForExistence(timeout: 5), "The compose options offer open tracking")
-        for _ in 0..<6 where !track.isHittable { app.swipeUp(velocity: .slow) }
-        XCTAssertTrue(track.isHittable, "The tracking toggle is on screen")
-        XCTAssertFalse(app.keyboards.firstMatch.exists, "The keyboard does not cover the compose options")
-        XCTAssertEqual(track.value as? String, "1", "Open tracking is on by default")
+        XCTAssertTrue(app.buttons["Ricordamelo se non risponde"].exists, "The follow-up reminder lives in the same menu")
         save("08-compose-track-open")
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.95)).tap()
         app.buttons["Chiudi"].tap()
         XCTAssertTrue(app.buttons["Elimina bozza"].waitForExistence(timeout: 5))
         app.buttons["Elimina bozza"].tap()

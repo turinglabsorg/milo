@@ -61,9 +61,13 @@ external action. That file is the single source of global agent instructions.
   pending suggestion lookup when the previous field loses focus.
 - Drafts may carry an optional `html` field (API only): `build_message` then
   adds it as the `text/html` alternative of the plain `body` (docs/API.md).
-  Web and iOS composers render it and edit it WYSIWYG (sandboxed `designMode`
-  iframe on web, editable WKWebView driven from the client content world on
-  iOS), deriving `body` from the HTML; remote images stay blocked until asked.
+  Web and iOS composers render it and edit it WYSIWYG, deriving `body` from
+  the HTML; remote images stay blocked until asked. Web: sandboxed
+  `designMode` iframe. iOS: a full-screen WKWebView whose body is
+  `contentEditable` with autocorrect on (designMode loses predictions),
+  driven from the client content world; WebKit's previous/next/done bar is
+  removed and a native formatting bar sits above the keyboard while the
+  header folds away.
 - Outgoing attachments: `draft_attachments` rows + files in
   `draft-attachments/<draft_id>/` (raw-body `POST /api/drafts/{id}/attachments?name=`,
   18 MB total); added by `build_message`, removed when the draft is sent or
