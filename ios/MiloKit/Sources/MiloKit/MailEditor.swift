@@ -152,12 +152,22 @@ public enum MailEditor {
         return ed.height();
       };
       ed.writable = node => !!node && !(node.closest && node.closest('[data-milo-signature-source],[data-milo-signature-preview]'));
+      // The caret may be anywhere above the signature; a tap on the empty page below it puts the
+      // caret at the end of the body, after the card, where typing must not land.
+      ed.allowed = () => {
+        const selection = getSelection();
+        if (!selection.rangeCount) return false;
+        const range = selection.getRangeAt(0);
+        const at = range.startContainer;
+        const anchor = at.nodeType === 1 ? at : at.parentElement;
+        if (!anchor || !document.body.contains(anchor) || !ed.writable(anchor)) return false;
+        const source = document.querySelector('[data-milo-signature-source]');
+        return !(source && at === document.body && [...document.body.childNodes].indexOf(source) < range.startOffset);
+      };
       ed.caret = force => {
         const selection = getSelection();
-        const at = selection.rangeCount ? selection.getRangeAt(0).startContainer : null;
-        const anchor = at && (at.nodeType === 1 ? at : at.parentElement);
         const source = document.querySelector('[data-milo-signature-source]');
-        if (anchor && document.body.contains(anchor) && ed.writable(anchor) && !(force && source)) return;
+        if (ed.allowed() && !(force && source)) return;
         const target = source ? source.previousElementSibling : document.body;
         if (!target) return;
         const range = document.createRange();
@@ -217,12 +227,13 @@ public enum MailEditor {
         }
       };
       ed.blur = () => { if (document.activeElement) document.activeElement.blur(); };
+      document.addEventListener('beforeinput', () => { if (ed.editing && !ed.allowed()) ed.caret(); }, true);
       document.addEventListener('input', ed.post);
       new MutationObserver(ed.post).observe(document.documentElement, {subtree: true, childList: true, characterData: true});
       document.addEventListener('selectionchange', () => {
         const selection = getSelection();
         if (!selection.rangeCount || !document.body.contains(selection.anchorNode)) return;
-        if (ed.editing && !ed.writable(selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement)) return ed.caret();
+        if (ed.editing && !ed.allowed()) return ed.caret();
         ed.range = selection.getRangeAt(0).cloneRange();
       });
       document.addEventListener('click', event => {
