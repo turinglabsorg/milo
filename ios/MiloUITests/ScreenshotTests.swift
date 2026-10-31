@@ -9,6 +9,10 @@ final class ScreenshotTests: XCTestCase {
         app = XCUIApplication()
         app.launchArguments = ["-MiloDemo"]
         app.launch()
+        // The demo asks once for the badge permission; accept it so it never covers the app.
+        let allow = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons
+            .matching(NSPredicate(format: "label IN {'Allow', 'Consenti'}")).firstMatch
+        if allow.waitForExistence(timeout: 5) { allow.tap() }
     }
 
     func save(_ name: String) {
@@ -153,5 +157,17 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "delivery-opened").firstMatch.waitForExistence(timeout: 10),
                       "The thread shows the delivery ticks on the sent message")
         save("10-thread-ticks")
+    }
+
+    func testHomeScreenIconShowsTheUnreadBadge() {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        sleep(3)
+        XCUIDevice.shared.press(.home)
+        let icon = springboard.icons["Milo"]
+        XCTAssertTrue(icon.waitForExistence(timeout: 10))
+        let badged = NSPredicate(format: "value CONTAINS '2'")
+        expectation(for: badged, evaluatedWith: icon)
+        waitForExpectations(timeout: 15)
+        save("09-home-badge")
     }
 }

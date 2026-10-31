@@ -74,8 +74,10 @@ struct MainView: View {
         }
         .task {
             PushCenter.shared.mailbox = mailbox
-            if !ProcessInfo.processInfo.arguments.contains("-MiloDemo") { await PushCenter.shared.requestAuthorization() }
+            await PushCenter.shared.requestAuthorization(remote: !ProcessInfo.processInfo.arguments.contains("-MiloDemo"))
+            PushCenter.shared.showBadge(mailbox.state?.counts.unread)
         }
+        .onChange(of: mailbox.state?.counts.unread) { _, unread in PushCenter.shared.showBadge(unread) }
         .onChange(of: PushCenter.shared.token) { _, token in
             guard let token else { return }
             Task { try? await mailbox.api.registerDevice(token: token, environment: PushCenter.environment) }

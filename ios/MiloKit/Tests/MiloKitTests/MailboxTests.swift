@@ -314,6 +314,17 @@ final class MailboxTests: XCTestCase {
         XCTAssertNotNil(cached?.first?.todos?.first { $0.text == "Rispondere a Marco" }?.accepted)
     }
 
+    func testReadingAConversationLowersTheUnreadBadgeAtOnce() async throws {
+        let (mailbox, _) = make()
+        await mailbox.start()
+        XCTAssertEqual(mailbox.state?.counts.unread, 2)
+        let unread = try XCTUnwrap(mailbox.conversations.first { !$0.read.value && !$0.archived.value })
+        await mailbox.mutate(unread, MailEdit.Patch(read: true))
+        XCTAssertEqual(mailbox.state?.counts.unread, 1)
+        await mailbox.mutate(unread, MailEdit.Patch(read: true))
+        XCTAssertEqual(mailbox.state?.counts.unread, 1)
+    }
+
     func testRecipientEditKeepsEarlierAddresses() {
         XCTAssertEqual(RecipientEdit.token("Anna <anna@example.com>, mar"), "mar")
         XCTAssertEqual(RecipientEdit.token("Anna <anna@example.com>, "), "")

@@ -32,6 +32,9 @@ class Push:
         self._token = (0, "")
         self._queue = []
         self._lock = threading.Lock()
+        # Callable returning the unread inbox conversations, the same number the apps show.
+        self.unread = None
+        self._badge = None
 
     @classmethod
     def from_environment(cls, store):
@@ -86,28 +89,44 @@ class Push:
         return result
 
     def flush(self):
+        """Send new-mail alerts, and keep the app icon badge equal to the unread count.
+
+        Every alert carries the current badge; when only the count changed (mail read
+        elsewhere, a newsletter arrived) a quiet badge-only notification updates it.
+        """
         with self._lock:
             items, self._queue = self._queue, []
         items = self.eligible(items)
-        if not items or not self.configured:
+        if not self.configured:
             return 0
         devices = self.store.rows("SELECT token,environment FROM devices")
         if not devices:
             return 0
+        badge = self.unread() if self.unread else None
         payloads = [self.payload(item) for item in items[:3]]
         if len(items) > 3:
             payloads.append({"aps": {"alert": {"title": "Milo", "body": f"Altre {len(items) - 3} email nuove"},
                                      "sound": "default"}})
+        quiet = not payloads
+        if quiet:
+            if badge is None or badge == self._badge:
+                return 0
+            payloads = [{"aps": {"badge": badge}}]
+        elif badge is not None:
+            for payload in payloads:
+                payload["aps"]["badge"] = badge
         sent = 0
         for device in devices:
             for payload in payloads:
-                status = self.send(device["token"], device["environment"], payload)
+                status = self.send(device["token"], device["environment"], payload, priority=5 if quiet else 10)
                 if status == 200:
                     sent += 1
                 elif status == 410 or status == 400:
                     # Unregistered or bad token: the app was removed or reinstalled.
                     self.unregister(device["token"])
                     break
+        if sent:
+            self._badge = badge
         return sent
 
     @staticmethod
@@ -134,9 +153,9 @@ class Push:
         self._token = (time.time(), f"{header}.{claims}.{signature}")
         return self._token[1]
 
-    def send(self, device_token, environment, payload):
+    def send(self, device_token, environment, payload, priority=10):
         headers = {"authorization": "bearer " + self.token(), "apns-topic": self.topic,
-                   "apns-push-type": "alert", "apns-priority": "10"}
+                   "apns-push-type": "alert", "apns-priority": str(priority)}
         url = f"{HOSTS[environment]}/3/device/{device_token}"
         try:
             if self.transport:

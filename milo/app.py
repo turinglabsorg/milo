@@ -401,16 +401,21 @@ def create_app(directory: Path, demo=False, ollama_url="http://127.0.0.1:11434",
                           "ORDER BY seq LIMIT 50", (after, time.time() - NOTIFY_RECENT))
         return {"cursor": latest, "messages": push.eligible(rows)}
 
+    def mailbox_counts():
+        now = time.time()
+        # Group on the covering catalogue index; COUNT(DISTINCT expr) needs a temp B-tree per call.
+        return store.rows("SELECT SUM(inbox) AS inbox,SUM(inbox*unread) AS unread,SUM(starred) AS starred,SUM(snoozed) AS snoozed "
+                          "FROM (SELECT MAX((archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?))::int) AS inbox,"
+                          "MAX((read=0 AND archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?))::int) AS unread,"
+                          "MAX(starred) AS starred,MAX((snoozed_until>?)::int) AS snoozed FROM messages "
+                          "WHERE hidden=0 AND trashed=0 GROUP BY account_id,COALESCE(thread_id,id))", (now, now, now))[0]
+
+    push.unread = lambda: mailbox_counts()["unread"] or 0
+
     @app.get("/api/state", dependencies=[Depends(auth)])
     def state():
-        now = time.time()
         screening = features.screening()
-        # Group on the covering catalogue index; COUNT(DISTINCT expr) needs a temp B-tree per call.
-        counts = store.rows("SELECT SUM(inbox) AS inbox,SUM(inbox*unread) AS unread,SUM(starred) AS starred,SUM(snoozed) AS snoozed "
-                            "FROM (SELECT MAX((archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?))::int) AS inbox,"
-                            "MAX((read=0 AND archived=0 AND sent=0 AND (snoozed_until IS NULL OR snoozed_until<=?))::int) AS unread,"
-                            "MAX(starred) AS starred,MAX((snoozed_until>?)::int) AS snoozed FROM messages "
-                            "WHERE hidden=0 AND trashed=0 GROUP BY account_id,COALESCE(thread_id,id))", (now, now, now))[0]
+        counts = mailbox_counts()
         return {"accounts": store.accounts(), "ai": store.setting("ai"), "ai_error": store.setting("ai_error"),
                 "identity": store.setting("identity") or Identity().model_dump(),
                 "recap": {"generated_at": recaps.snapshot()["generated_at"],

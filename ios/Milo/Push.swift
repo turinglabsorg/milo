@@ -18,10 +18,18 @@ final class PushCenter {
     static let environment = "production"
     #endif
 
-    func requestAuthorization() async {
+    func requestAuthorization(remote: Bool = true) async {
         let center = UNUserNotificationCenter.current()
-        guard (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) == true else { return }
-        UIApplication.shared.registerForRemoteNotifications()
+        let options: UNAuthorizationOptions = remote ? [.alert, .sound, .badge] : [.badge]
+        guard (try? await center.requestAuthorization(options: options)) == true else { return }
+        if remote { UIApplication.shared.registerForRemoteNotifications() }
+    }
+
+    /// The app icon shows the unread inbox conversations, the same number as «Da leggere».
+    /// Pushes carry the same count from the server while Milo is closed.
+    func showBadge(_ unread: Int?) {
+        guard let unread else { return }
+        Task { try? await UNUserNotificationCenter.current().setBadgeCount(max(0, unread)) }
     }
 }
 

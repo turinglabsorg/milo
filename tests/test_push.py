@@ -60,11 +60,11 @@ def test_backfill_newsletters_blocked_and_screened_senders_stay_quiet(logged_in,
     logged_in.patch("/api/senders/spam@example.com", json={"status": "blocked"})
     add(store, account_id, 3, msg_id="<spam@x>", sender="Spam <spam@example.com>", when=time.time())
     logged_in.app.state.feature_tick(False)
-    assert sent == []
+    assert [payload for _, _, payload in sent if "alert" in payload["aps"]] == []
     logged_in.patch("/api/senders/news@brand.example", json={"vip": True})
     add(store, account_id, 4, msg_id="<news2@x>", sender="News <news@brand.example>", category="newsletters", when=time.time())
     logged_in.app.state.feature_tick(False)
-    assert len(sent) == 1
+    assert len([payload for _, _, payload in sent if "alert" in payload["aps"]]) == 1
 
 
 def test_many_new_mails_are_grouped_and_dead_tokens_removed(logged_in, account_data, tmp_path):
@@ -77,7 +77,7 @@ def test_many_new_mails_are_grouped_and_dead_tokens_removed(logged_in, account_d
         add(store, account_id, uid, msg_id=f"<m{uid}@x>", subject=f"Email {uid}", sender=f"P{uid} <p{uid}@example.com>",
             when=time.time())
     logged_in.app.state.feature_tick(False)
-    live = [payload for url, _, payload in sent if url.endswith(TOKEN)]
+    live = [payload for url, _, payload in sent if url.endswith(TOKEN) and "alert" in payload["aps"]]
     assert len(live) == 4 and live[-1]["aps"]["alert"]["body"] == "Altre 2 email nuove"
     assert sent[0][0].startswith("https://api.sandbox.push.apple.com") or any("sandbox" in url for url, _, _ in sent)
     assert [row["token"] for row in store.rows("SELECT token FROM devices")] == [TOKEN]
@@ -89,3 +89,27 @@ def test_unconfigured_push_sends_nothing(logged_in, account_data):
     add(store, account_id, 1, when=time.time())
     logged_in.app.state.feature_tick(False)
     assert logged_in.post("/api/devices", json={"token": TOKEN}).json()["push"] is False
+
+
+def test_badge_follows_the_unread_count(logged_in, account_data, tmp_path):
+    store, account_id = setup_account(logged_in, account_data)
+    push, _, sent = configure(logged_in, tmp_path)
+    push.register(TOKEN, "production")
+    add(store, account_id, 1, subject="Pranzo domani?", sender="Anna <anna@example.com>", when=time.time())
+    add(store, account_id, 2, msg_id="<news@x>", sender="News <news@brand.example>", category="newsletters",
+        when=time.time())
+    unread = logged_in.get("/api/state").json()["counts"]["unread"]
+    assert unread == 2
+    logged_in.app.state.feature_tick(False)
+    assert len(sent) == 1 and sent[0][2]["aps"]["badge"] == 2 and sent[0][1]["apns-priority"] == "10"
+    logged_in.app.state.feature_tick(False)
+    assert len(sent) == 1
+    first = logged_in.get("/api/messages?view=unread").json()["messages"][0]["id"]
+    assert logged_in.patch(f"/api/messages/{first}", json={"read": True}).status_code == 200
+    logged_in.app.state.feature_tick(False)
+    assert len(sent) == 2
+    url, headers, payload = sent[1]
+    assert payload == {"aps": {"badge": 1}}
+    assert headers["apns-push-type"] == "alert" and headers["apns-priority"] == "5"
+    logged_in.app.state.feature_tick(False)
+    assert len(sent) == 2

@@ -351,6 +351,12 @@ public final class Mailbox {
             lastError = "Spazio sul dispositivo non disponibile: la modifica non è stata salvata."
             return
         }
+        if let read = patch.read, read != conversation.read.value, var current = state,
+           let unread = current.counts.unread, !conversation.archived.value {
+            // Keep «Da leggere» and the app badge in step before the server confirms.
+            current.counts.unread = max(0, unread + (read ? -1 : 1))
+            state = current
+        }
         await reloadCatalogue()
         pendingCount = await cache.pending().count
         if deleted || patch.archived == true || patch.snoozedUntil != nil, selectedKey == conversation.key { close() }
