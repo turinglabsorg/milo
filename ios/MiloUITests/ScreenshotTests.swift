@@ -98,6 +98,7 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(app.textFields["compose-to"].exists, "The header shows before writing")
         editor.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "Editing opens the keyboard on the rendered message")
+        skipKeyboardTip()
         XCTAssertTrue(app.buttons["Grassetto"].waitForExistence(timeout: 5), "The formatting bar sits above the keyboard while writing")
         XCTAssertFalse(app.textFields["compose-to"].exists, "The header folds away while writing")
         XCTAssertFalse(app.buttons["Done"].exists, "WebKit's previous/next/done bar is gone")
@@ -183,6 +184,7 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(editor.images.firstMatch.waitForExistence(timeout: 15), "The signature shows as its card")
         editor.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.05)).tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        skipKeyboardTip()
         for letter in "ciao" {
             let key = app.keyboards.keys.matching(NSPredicate(format: "label ==[c] %@", String(letter))).firstMatch
             XCTAssertTrue(key.waitForExistence(timeout: 5))
@@ -191,6 +193,12 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(editor.staticTexts.containing(NSPredicate(format: "label CONTAINS[c] 'ciao'")).firstMatch.waitForExistence(timeout: 10),
                       "Typing above the signature card writes the message")
         save("10-compose-new-typing")
+    }
+
+    /// A fresh simulator covers the keyboard with the slide-to-type tip the first time it opens.
+    private func skipKeyboardTip() {
+        let tip = app.buttons["Continue"]
+        if tip.waitForExistence(timeout: 2) { tip.tap() }
     }
 
     func testHomeScreenIconShowsTheUnreadBadge() {
