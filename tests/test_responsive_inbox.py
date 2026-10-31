@@ -1,4 +1,5 @@
 """Real Chromium checks with delayed service responses, using an isolated archive."""
+import re
 import threading
 from contextlib import contextmanager
 from email.message import EmailMessage
@@ -380,5 +381,54 @@ def test_switching_sender_replaces_a_signature_with_links(tmp_path):
         expect(body).to_contain_text('+39 000 111 2222')
         expect(body).not_to_contain_text('Work Ltd')
         assert page.locator('#compose-form [name="body"]').input_value().count('-- ') == 1
+        assert errors == []
+        browser.close()
+
+
+def test_composer_shows_the_signature_card_and_keeps_the_text_in_the_draft(tmp_path):
+    def prepare(app, received, sent):
+        store = app.state.store
+        first = store.accounts()[0]['id']
+        second = store.add_account({"name": "Lavoro", "email": "work@example.com", "username": "work",
+            "password": "demo-only", "imap_host": "demo.invalid", "imap_port": 993,
+            "smtp_host": "demo.invalid", "smtp_port": 465, "smtp_security": "tls", "color": "#88ccff"})
+        store.set_setting("signatures", {
+            first: "Sam Taylor\n+39 000 111 2222\nhttps://www.linkedin.com/in/sam-taylor\nhttps://x.com/samtaylor",
+            second: "Sam Taylor\nWork Ltd\nhttps://x.com/samwork"})
+
+    with service(tmp_path, prepare) as (url, sent), sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(service_workers='block')
+        errors = []
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.goto(url)
+        expect(page.locator('.message-row').first).to_be_visible()
+        page.locator('[data-action="compose"]').first.click()
+        frame = page.frame_locator('#compose-form .rich-frame')
+        card = frame.locator('[data-milo-signature-preview] img')
+        expect(card).to_be_visible()
+        expect(card).to_have_attribute('src', re.compile(r'^data:image/png;base64,'))
+        expect(frame.locator('[data-milo-signature-preview] a')).to_have_text(['LinkedIn', 'X'])
+        expect(frame.locator('[data-milo-signature-source]')).to_be_hidden()
+        assert page.evaluate("() => document.querySelector('#compose-form .rich-frame').contentDocument.querySelector('[data-milo-signature-preview] img').naturalWidth") > 0
+        html = page.locator('#compose-form [name="html"]').input_value()
+        assert 'data-milo-signature' not in html and 'data:image/png' not in html
+        assert '+39 000 111 2222' in html
+        body = page.locator('#compose-form [name="body"]').input_value()
+        assert body.count('-- ') == 1 and 'https://x.com/samtaylor' in body
+
+        select = page.locator('#compose-form [name="account_id"]')
+        select.select_option(select.locator('option', has_text='work@example.com').get_attribute('value'))
+        expect(frame.locator('[data-milo-signature-preview] a')).to_have_text(['X'])
+        expect(frame.locator('[data-milo-signature-preview]')).to_have_count(1)
+        expect(card).to_have_attribute('alt', 'Sam Taylor · Work Ltd')
+        assert 'Work Ltd' in page.locator('#compose-form [name="html"]').input_value()
+
+        page.locator('#compose-form .rich-frame').evaluate('(frame)=>{const doc=frame.contentDocument;if(doc.designMode!=="on")'
+            'frame.closest(".rich-editor").querySelector(".rich-edit").click();frame.focus();doc.body.focus();'
+            'const sel=doc.getSelection();sel.selectAllChildren(doc.body);sel.collapseToStart();}')
+        page.keyboard.type('Ciao')
+        expect(page.locator('#compose-form [name="body"]')).to_have_value(re.compile(r'^Ciao'))
+        expect(frame.locator('[data-milo-signature-preview] img')).to_be_visible()
         assert errors == []
         browser.close()

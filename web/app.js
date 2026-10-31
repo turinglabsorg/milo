@@ -755,17 +755,18 @@ function richEditorMarkup(html,images=false,editing=false){
   return `<div class="rich-editor${editing?' editing':''}"><div class="rich-bar"><div class="rich-tools" role="toolbar" aria-label="Formattazione"${editing?'':' hidden'}>${RICH_TOOLS.map(([command,label,title])=>`<button type="button" data-rich-command="${command}" title="${title}" aria-label="${title}" class="rich-tool rich-${command}">${esc(label)}</button>`).join('')}</div><button type="button" class="secondary rich-edit" data-rich-action="edit" aria-pressed="${editing}">${editing?'Fine':'Modifica'}</button></div><iframe class="rich-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer" title="Messaggio formattato" data-images="${images?1:0}" data-editing="${editing?1:0}" srcdoc="${esc(richDocument(html,images))}"></iframe></div>`;
 }
 function richDocument(html,images=false){
-  const head=`<meta data-milo-editor charset="utf-8"><meta data-milo-editor name="referrer" content="no-referrer"><meta data-milo-editor http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: ${images?'https:':''}; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style data-milo-editor>html{color-scheme:light}body{margin:0;padding:16px;min-height:calc(100% - 32px);font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;background:#fff;overflow-wrap:anywhere}body:focus{outline:none}img,table{max-width:100%!important}</style>`;
+  const head=`<meta data-milo-editor charset="utf-8"><meta data-milo-editor name="referrer" content="no-referrer"><meta data-milo-editor http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: ${images?'https:':''}; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><style data-milo-editor>html{color-scheme:light}body{margin:0;padding:16px;min-height:calc(100% - 32px);font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172033;background:#fff;overflow-wrap:anywhere}body:focus{outline:none}img,table{max-width:100%!important}[data-milo-signature-source]{display:none!important}[data-milo-signature-preview]{margin:16px 0 0;user-select:none;-webkit-user-modify:read-only}[data-milo-signature-preview] img{display:block;border-radius:12px}[data-milo-signature-preview] span{display:block;margin:8px 0 0 4px;font:13px/18px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#617189}[data-milo-signature-preview] a{color:#2f5bd3;text-decoration:none}</style>`;
   if(/<html[\s>]/i.test(html)){return /<head[^>]*>/i.test(html)?html.replace(/<head[^>]*>/i,match=>match+head):html.replace(/<html[^>]*>/i,match=>match+'<head>'+head+'</head>');}
   return `<!doctype html><html data-milo-fragment><head>${head}</head><body>${html}</body></html>`;
 }
+function richClean(root){root.querySelectorAll('[data-milo-signature-preview]').forEach(node=>node.remove());root.querySelectorAll('[data-milo-signature-source]').forEach(node=>node.removeAttribute('data-milo-signature-source'));return root;}
 function richSerialize(doc){
-  if(doc.documentElement.hasAttribute('data-milo-fragment'))return doc.body.innerHTML;
-  const root=doc.documentElement.cloneNode(true);root.querySelectorAll('[data-milo-editor]').forEach(node=>node.remove());root.querySelector('body')?.removeAttribute('contenteditable');
+  if(doc.documentElement.hasAttribute('data-milo-fragment'))return richClean(doc.body.cloneNode(true)).innerHTML;
+  const root=richClean(doc.documentElement.cloneNode(true));root.querySelectorAll('[data-milo-editor]').forEach(node=>node.remove());root.querySelector('body')?.removeAttribute('contenteditable');
   return '<!doctype html>\n'+root.outerHTML;
 }
 function richText(doc){
-  const clone=doc.body.cloneNode(true);clone.querySelectorAll('style,script,head').forEach(node=>node.remove());
+  const clone=richClean(doc.body.cloneNode(true));clone.querySelectorAll('style,script,head').forEach(node=>node.remove());
   clone.querySelectorAll('br').forEach(node=>node.replaceWith('\n'));
   clone.querySelectorAll('div,li,tr').forEach(node=>node.append('\n'));clone.querySelectorAll('p,h1,h2,h3,h4,table,blockquote,ul,ol').forEach(node=>node.append('\n\n'));
   clone.querySelectorAll('li').forEach(node=>node.prepend('• '));
@@ -777,6 +778,34 @@ function richSignatureBlocks(doc,signature){
   const blocks=('-- \n'+signature).split(/\n{2,}/).map(block=>block.replace(/[ \t]+$/gm,'').trim()),nodes=[...doc.body.children];
   for(let start=0;start+blocks.length<=nodes.length;start++){const run=nodes.slice(start,start+blocks.length);if(run.every((node,index)=>richBlockText(node)===blocks[index]))return run;}
   return null;
+}
+const SIGNATURE_LINK=/^https?:\/\/\S+$/,SIGNATURE_LABELS={'linkedin.com':'LinkedIn','x.com':'X','twitter.com':'X','github.com':'GitHub','instagram.com':'Instagram','facebook.com':'Facebook'},signatureCards=new Map();
+function signatureLinkLabel(url){const host=url.replace(/^https?:\/\//,'').split(/[/?]/)[0].toLowerCase().replace(/^www\./,'');return SIGNATURE_LABELS[host]||host;}
+function signatureCard(accountId,text){
+  const key=accountId+'\n'+text;
+  if(!signatureCards.has(key))signatureCards.set(key,fetch(`/api/signatures/${encodeURIComponent(accountId)}/card.png`,{credentials:'same-origin',signal:AbortSignal.timeout(12000)}).then(response=>response.ok?response.blob():null).then(blob=>blob&&new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>resolve(null);reader.readAsDataURL(blob);})).catch(()=>null).then(card=>{if(!card)signatureCards.delete(key);return card;}));
+  return signatureCards.get(key);
+}
+function richUndecorate(doc){doc.querySelectorAll('[data-milo-signature-preview]').forEach(node=>node.remove());doc.querySelectorAll('[data-milo-signature-source]').forEach(node=>node.removeAttribute('data-milo-signature-source'));}
+function richPrune(doc){
+  const sources=doc.querySelectorAll('[data-milo-signature-source]'),previews=doc.querySelectorAll('[data-milo-signature-preview]');
+  if(sources.length&&!previews.length)sources.forEach(node=>node.remove());
+  else if(previews.length&&!sources.length)previews.forEach(node=>node.remove());
+}
+async function richDecorate(frame){
+  const form=frame?.closest('#compose-form');if(!form||!richReady(frame))return;
+  const doc=frame.contentDocument,accountId=form.querySelector('[name="account_id"]')?.value||S.compose?.account_id,text=(S.state.signatures?.[accountId]||'').trim();
+  if(!text||!richSignatureBlocks(doc,text)){richUndecorate(doc);return;}
+  const card=await signatureCard(accountId,text);
+  if(!card||frame.contentDocument!==doc||(form.querySelector('[name="account_id"]')?.value||S.compose?.account_id)!==accountId)return;
+  const run=richSignatureBlocks(doc,text);richUndecorate(doc);if(!run)return;
+  const preview=doc.createElement('div');preview.setAttribute('data-milo-signature-preview','');preview.contentEditable='false';
+  const image=doc.createElement('img'),lines=text.split('\n').map(line=>line.trim()).filter(Boolean),links=lines.filter(line=>SIGNATURE_LINK.test(line));
+  image.alt=lines.filter(line=>!SIGNATURE_LINK.test(line)).join(' · ');
+  image.addEventListener('load',()=>{image.style.width=Math.round(image.naturalWidth/2)+'px';richFit(frame);});
+  image.src=card;preview.append(image);
+  if(links.length){const row=doc.createElement('span');links.forEach((url,index)=>{if(index)row.append(' · ');const anchor=doc.createElement('a');anchor.href=url;anchor.textContent=signatureLinkLabel(url);row.append(anchor);});preview.append(row);}
+  run.forEach(node=>node.setAttribute('data-milo-signature-source',''));run.at(-1).after(preview);richFit(frame);
 }
 function textToHtml(text){return (text||'').split(/\n{2,}/).map(block=>`<p>${esc(block).replace(/\n/g,'<br>')||'<br>'}</p>`).join('')||'<p><br></p>';}
 function richReady(frame){const doc=frame?.contentDocument;return Boolean(doc?.body&&doc.readyState==='complete'&&doc.querySelector('[data-milo-editor]'));}
@@ -790,9 +819,10 @@ function initRichFrame(frame){
   const doc=frame.contentDocument;if(!doc?.body)return;
   richFit(frame);
   if(frame.dataset.editing==='1')doc.designMode='on';
-  new MutationObserver(()=>{richSync(frame);richFit(frame);}).observe(doc.documentElement,{subtree:true,childList:true,characterData:true,attributes:true});
+  new MutationObserver(()=>{richPrune(doc);richSync(frame);richFit(frame);}).observe(doc.documentElement,{subtree:true,childList:true,characterData:true,attributes:true});
   doc.addEventListener('keydown',handleKeydown);
   doc.addEventListener('click',event=>{if(frame.dataset.editing!=='1'&&event.target.closest?.('a'))event.preventDefault();});
+  richDecorate(frame);
 }
 function setRichEditing(editor,editing){
   const frame=editor.querySelector('.rich-frame'),doc=frame.contentDocument;frame.dataset.editing=editing?'1':'0';
@@ -1455,7 +1485,7 @@ document.addEventListener('change', async event => {
   if(event.target.name==='account_id'&&event.target.closest('#compose-form')&&S.compose){
     const field=$('#compose-form [name="body"]'),after=S.state.signatures?.[event.target.value],others=Object.entries(S.state.signatures||{}).filter(([id,text])=>id!==event.target.value&&text&&text!==after).map(([,text])=>text);
     const frame=$('#compose-form .rich-frame'),doc=frame?.contentDocument;
-    if(richReady(frame)){const sig=text=>textToHtml('-- \n'+text),old=others.map(text=>richSignatureBlocks(doc,text)).find(Boolean),present=after&&richSignatureBlocks(doc,after);if(old){old[0].insertAdjacentHTML('beforebegin',after?sig(after):'');old.forEach(node=>node.remove());}else if(after&&!present){doc.body.insertAdjacentHTML('beforeend','<p><br></p>'+sig(after));}richSync(frame);richFit(frame);S.compose.account_id=event.target.value;return;}
+    if(richReady(frame)){const sig=text=>textToHtml('-- \n'+text),old=others.map(text=>richSignatureBlocks(doc,text)).find(Boolean),present=after&&richSignatureBlocks(doc,after);if(old){old[0].insertAdjacentHTML('beforebegin',after?sig(after):'');old.forEach(node=>node.remove());}else if(after&&!present){doc.body.insertAdjacentHTML('beforeend','<p><br></p>'+sig(after));}richSync(frame);richFit(frame);S.compose.account_id=event.target.value;richDecorate(frame);return;}
     const before=others.find(text=>field?.value.includes('-- \n'+text));
     if(field&&before)field.value=field.value.replace('-- \n'+before,after?'-- \n'+after:'');
     else if(field&&after&&!field.value.includes('-- \n'+after))field.value=`${field.value}\n\n-- \n${after}`;
