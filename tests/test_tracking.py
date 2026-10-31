@@ -5,6 +5,7 @@ from test_app import add_mail
 
 from milo.mail import build_message
 from milo.public import create_public_app
+from milo.signature import render_signature
 
 PIXEL = re.compile(r'<img src="http://127\.0\.0\.1:8025/o/([A-Za-z0-9_-]{24})\.gif" width="1" height="1"')
 
@@ -140,3 +141,23 @@ def test_template_documents_keep_their_own_signature(logged_in, account_data, mo
     assert ".png" not in html and "-- " not in html
     assert re.search(r'<img src="http://127\.0\.0\.1:8025/o/[A-Za-z0-9_-]{24}\.gif" width="1" height="1"[^>]*></body></html>', html)
     assert client.get("/api/deliveries").json()["deliveries"][0]["tracked"] == 1
+
+
+def test_signature_links_stay_clickable_under_the_card(logged_in, account_data, monkeypatch):
+    client = logged_in
+    add_mail(client, account_data)
+    account_id = client.app.state.store.accounts()[0]["id"]
+    card = "Sebastiano Cataudo\nZonzolab · you@example.com\n+39 334 112 3870"
+    signature = card + "\nhttps://www.linkedin.com/in/someone\nhttps://x.com/someone"
+    assert client.put("/api/settings/signatures", json={"signatures": {account_id: signature}}).status_code == 200
+    html = "<p>Buongiorno</p><p>-- <br>" + "<br>".join(signature.split("\n")) + "</p>"
+    message = send(client, account_id, monkeypatch, [], id="linked", html=html, body="Buongiorno\n\n-- \n" + signature)
+    sent_html = message.get_body(("html",)).get_content()
+    assert sent_html.startswith("<p>Buongiorno</p><p>-- <br><img")
+    assert 'alt="Sebastiano Cataudo · Zonzolab · you@example.com · +39 334 112 3870"' in sent_html
+    assert '<a href="https://www.linkedin.com/in/someone"' in sent_html and ">LinkedIn</a>" in sent_html
+    assert '<a href="https://x.com/someone"' in sent_html and ">X</a>" in sent_html
+    assert "<br>https://" not in sent_html
+    token = re.search(r"/o/([A-Za-z0-9_-]{24})\.png", sent_html).group(1)
+    sender = client.app.state.store.accounts()[0]["email"]
+    assert client.get(f"/api/signature/{token}.png").content == render_signature(card, sender)[0]

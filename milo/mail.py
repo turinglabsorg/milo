@@ -16,6 +16,7 @@ from html import escape
 from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
 
+from .signature import link_label, signature_parts
 from .store import preview_text
 
 
@@ -479,8 +480,13 @@ def html_with_signature(html, signature, url, width, height):
 
     Complete HTML documents are templates with their own signature: they return None.
     """
-    image = (f'<img src="{escape(url)}" width="{width}" height="{height}" alt="{escape(" · ".join(signature.split(chr(10))))}" '
+    card, links = signature_parts(signature)
+    image = (f'<img src="{escape(url)}" width="{width}" height="{height}" alt="{escape(" · ".join(card))}" '
              'style="display:block;border:0;border-radius:12px">')
+    if links:
+        image += ('<span style="display:block;margin:8px 0 0 4px;font:13px/18px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#617189">'
+                  + " · ".join(f'<a href="{escape(link)}" style="color:#2f5bd3;text-decoration:none">{escape(link_label(link))}</a>'
+                               for link in links) + "</span>")
     lines = [line.rstrip() for line in signature.strip().splitlines()]
     pattern = (r"<p>\s*--(?:\s|&nbsp;|\u00a0)*<br\s*/?>\s*"
                + r"\s*<br\s*/?>\s*".join(re.escape(escape(line, quote=False)) for line in lines)

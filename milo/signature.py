@@ -1,5 +1,6 @@
 """Signature cards rendered as images, so a tracked message reports its first open."""
 import io
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -8,6 +9,20 @@ from PIL import Image, ImageDraw, ImageFont
 ASSETS = Path(__file__).resolve().parent / "signature_assets"
 LOGOS = {"zonzolab.com": "zonzolab.png", "meaningtech.io": "meaningtech.png"}
 SCALE = 2
+LINK = re.compile(r"https?://\S+")
+LINK_LABELS = {"linkedin.com": "LinkedIn", "x.com": "X", "twitter.com": "X", "github.com": "GitHub",
+               "instagram.com": "Instagram", "facebook.com": "Facebook"}
+
+
+def signature_parts(text):
+    """Card lines and link lines of a signature: a line that is only a URL becomes a clickable link."""
+    lines = [line.strip() for line in (text or "").strip().splitlines() if line.strip()]
+    return [line for line in lines if not LINK.fullmatch(line)], [line for line in lines if LINK.fullmatch(line)]
+
+
+def link_label(url):
+    host = re.sub(r"^www\.", "", re.sub(r"^https?://", "", url).split("/")[0].split("?")[0].lower())
+    return LINK_LABELS.get(host, host)
 
 
 def logo_name(email):
@@ -20,7 +35,7 @@ def logo_name(email):
 @lru_cache(maxsize=64)
 def render_signature(text, email=""):
     """A white rounded card with the account logo and the signature lines: (png, width, height) at 1x."""
-    lines = [line.rstrip() for line in (text or "").strip().splitlines() if line.strip()][:6] or [""]
+    lines = signature_parts(text)[0][:6] or [""]
     title = ImageFont.truetype(str(ASSETS / "Geist-SemiBold.ttf"), 15 * SCALE)
     body = ImageFont.truetype(str(ASSETS / "Geist-Regular.ttf"), 13 * SCALE)
     fonts = [title] + [body] * (len(lines) - 1)
