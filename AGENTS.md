@@ -125,6 +125,13 @@ external action. That file is the single source of global agent instructions.
 - The `macOS` workflow tests the desktop client and uploads `macos-client`, a
   `Milo-macOS.zip` containing a universal arm64/x86_64 app with ad-hoc signing.
 
+- Public site: `site/` is the static page served at milo.fluxkit.dev (Fluxkit
+  pop style, see `DESIGN.md`). It is not part of the mail service or its Docker
+  image. Deploy: push `main`, then `git -C ~/Sites/milo.fluxkit.dev pull` on the
+  Mac (a clone used only for the site); grog serves its `site/` folder
+  (`~/.grog/sites.json`: `milo.fluxkit.dev` → `{"dir": ...}`). The private
+  deployment's own landing (`web/landing.html`, milo.grooooog.space) is separate.
+
 ## iOS app (`ios/`)
 
 - Native SwiftUI app (iOS 17+). `ios/MiloKit` is a Foundation-only Swift

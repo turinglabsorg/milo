@@ -1,6 +1,7 @@
 <p align="center"><img src="web/icon.svg" width="76" alt="Milo"></p>
 <h1 align="center">Milo</h1>
 <p align="center">Your inbox, with room to think.<br>Open source. Linux first. Built for an inbox that follows you.</p>
+<p align="center"><a href="https://milo.fluxkit.dev">milo.fluxkit.dev</a></p>
 
 Milo is a new email client inspired by the calm, focused experience of
 [Spark](https://sparkmailapp.com). A private service stores your accounts, email,
