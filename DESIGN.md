@@ -160,3 +160,26 @@ The dark theme uses `data-theme="dark"`; sender HTML retains its own white frame
   Regular 13 px `--muted`) served from the public origin; the plain-text part keeps
   the text signature. Milo shows the same card from the private origin without
   counting an open.
+
+## Public site (`site/`, milo.fluxkit.dev)
+
+The project's public page follows the Fluxkit tools' pop style, the one ubercal
+uses (ubercal's `DESIGN.md`), not the mail client's: a cream ground with a dot
+grid, 2px ink outlines, hard ink shadows, Unbounded for display type and Figtree
+for text (both OFL, bundled in `site/static/fonts`), light first with a dark
+mode (system, or the sun/moon switch remembered as `milo.theme`).
+
+- Milo's own blue `#2563eb` (`--milo`) marks it: the crumb pill (`fluxkit /
+  milo`), the tilted wordmark block, the first section number and the cards'
+  top band; `--milo-soft` `#bfdbfe` is the selected row and the last fact pill.
+- Hero: the wordmark, “Your inbox, with room to think.”, the lede, Get the
+  source / Run it, and an SVG of the inbox (accounts and folders, conversations
+  with a new one arriving, the open conversation with a yellow recap and a
+  dashed draft whose lines type, “The AI drafts. You send.”).
+- Readouts: yellow `new mail · sec 60`, pink `archive, every device 01`, green
+  `mails sent by the AI 00`. Then `01 how it works` (three cards), `02 your
+  data` (the Google scope and what Milo does with mail, in fact rows) and `03
+  run it` (a terminal card with copy, and the early-development note).
+- Like an app on a phone: no zoom, 16px fields, the bar keeps only the crumb
+  and the theme switch. Every fact on the page must match the README and
+  `docs/GOOGLE.md`; Google's verification reads it.

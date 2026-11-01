@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>milo · your inbox, with room to think</title>
+  <meta name="description" content="Milo is an open-source email client you run on your own server: Gmail and IMAP accounts in one calm inbox, conversations in order, and an optional AI that drafts replies and never sends them.">
+  <meta property="og:title" content="milo · your inbox, with room to think">
+  <meta property="og:description" content="An open-source email client you run on your own server: Gmail and IMAP in one calm inbox, and an AI that drafts and never sends.">
+  <meta property="og:url" content="https://milo.fluxkit.dev/">
+  <meta name="theme-color" content="#fffaf0" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121117" media="(prefers-color-scheme: dark)">
+  <script src="/static/theme.js"></script>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/static/fonts/unbounded.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/figtree.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+  <svg width="0" height="0" class="sr" aria-hidden="true">
+    <symbol id="i-mark" viewBox="0 0 30 34"><g fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="15" y1="2" x2="15" y2="16"/><line x1="15" y1="16" x2="3" y2="31"/><line x1="15" y1="16" x2="27" y2="31"/></g></symbol>
+    <symbol id="i-github" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <div class="wrap">
+    <header class="bar">
+      <a class="crumb" href="https://fluxkit.dev">
+        <svg aria-hidden="true"><use href="#i-mark"/></svg>
+        fluxkit <span>/</span> <strong>milo</strong>
+      </a>
+      <nav aria-label="Site">
+        <a class="bar-link" href="#how">how it works</a>
+        <a class="bar-link" href="#google">your data</a>
+        <a class="bar-source" href="https://github.com/turinglabsorg/milo">source</a>
+        <button class="theme" type="button" data-theme-toggle aria-label="Switch between light and dark"><svg class="sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="moon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="prompt">milo</p>
+          <h1 class="wordmark"><span>milo</span></h1>
+          <p class="tagline">Your inbox, <mark>with room to think.</mark></p>
+          <p class="lede">An open-source email client you run on your own server. Your Gmail and IMAP accounts in one calm inbox, conversations in order, and an optional AI that recaps your mail and drafts replies, which wait for you to send them.</p>
+          <div class="actions">
+            <a class="btn primary" href="https://github.com/turinglabsorg/milo"><svg aria-hidden="true"><use href="#i-github"/></svg>Get the source</a>
+            <a class="btn" href="#run">Run it</a>
+          </div>
+          <p class="fineprint"><b>Your server, your mail.</b> Milo keeps your mail on the machine you run it on.</p>
+        </div>
+
+        <figure class="inbox" aria-label="Milo's inbox: three accounts on the left, conversations in the middle, and an open conversation with an AI recap and a reply draft that waits for you to send it.">
+          <svg viewBox="0 0 540 420" aria-hidden="true">
+            <rect class="m-shadow" x="14" y="14" width="520" height="400" rx="20"/>
+            <rect class="m-card" x="6" y="6" width="520" height="400" rx="20"/>
+            <line class="m-rule" x1="6" y1="50" x2="526" y2="50"/>
+            <circle class="m-red m-outline" cx="30" cy="28" r="6"/>
+            <circle class="m-yellow m-outline" cx="50" cy="28" r="6"/>
+            <circle class="m-green m-outline" cx="70" cy="28" r="6"/>
+            <text class="m-meta" x="330" y="33" text-anchor="middle">milo · all accounts</text>
+
+            <text class="m-meta t-small" x="22" y="78">ACCOUNTS</text>
+            <circle class="m-blue m-outline" cx="28" cy="98" r="6"/><text class="m-ink" x="42" y="103">Work</text>
+            <circle class="m-green m-outline" cx="28" cy="124" r="6"/><text class="m-ink" x="42" y="129">Personal</text>
+            <circle class="m-pink m-outline" cx="28" cy="150" r="6"/><text class="m-ink" x="42" y="155">Studio</text>
+            <text class="m-meta t-small" x="22" y="190">FOLDERS</text>
+            <rect class="m-chosen" x="14" y="202" width="114" height="28" rx="8"/>
+            <text class="m-on-pop" x="26" y="221">Inbox</text><text class="m-on-pop" x="118" y="221" text-anchor="end">12</text>
+            <text class="m-meta" x="26" y="252">Pinned</text>
+            <text class="m-meta" x="26" y="280">Snoozed</text>
+            <text class="m-meta" x="26" y="308">Sent</text>
+            <text class="m-meta" x="26" y="336">Drafts</text>
+            <line class="m-rule" x1="140" y1="50" x2="140" y2="406"/>
+
+            <text class="m-ink t-display" x="154" y="80" font-size="15">Inbox</text>
+            <g class="m-new">
+              <rect class="m-soft" x="142" y="92" width="196" height="54"/>
+              <circle class="m-pink m-outline" cx="158" cy="110" r="5"/>
+              <text class="m-ink" x="170" y="114">Bea</text><text class="m-meta t-small" x="328" y="114" text-anchor="end">now</text>
+              <text class="m-meta t-small" x="170" y="133">Invoice for October</text>
+            </g>
+            <line class="m-rule" x1="140" y1="146" x2="340" y2="146"/>
+            <g class="m-rows">
+              <g>
+                <rect class="m-sel" x="142" y="148" width="196" height="54"/>
+                <circle class="m-blue m-outline" cx="158" cy="166" r="5"/>
+                <text class="m-on-pop" x="170" y="170">Ada</text><text class="m-on-pop t-small" x="328" y="170" text-anchor="end">09:41</text>
+                <text class="m-on-pop t-small" x="170" y="189">Launch plan, v3</text>
+                <path class="m-yellow m-outline" d="M318 180l3 6 6 1-4.5 4 1 6-5.5-3-5.5 3 1-6-4.5-4 6-1z"/>
+              </g>
+              <g>
+                <circle class="m-green m-outline" cx="158" cy="222" r="5"/>
+                <text class="m-ink" x="170" y="226">Marco</text><text class="m-meta t-small" x="328" y="226" text-anchor="end">08:15</text>
+                <text class="m-meta t-small" x="170" y="245">Dinner on Friday?</text>
+              </g>
+              <g>
+                <circle class="m-blue m-outline" cx="158" cy="278" r="5"/>
+                <text class="m-ink" x="170" y="282">Release bot</text><text class="m-meta t-small" x="328" y="282" text-anchor="end">Mon</text>
+                <text class="m-meta t-small" x="170" y="301">Weekly digest</text>
+              </g>
+              <g>
+                <circle class="m-green m-outline" cx="158" cy="334" r="5"/>
+                <text class="m-ink" x="170" y="338">Lucia</text><text class="m-meta t-small" x="328" y="338" text-anchor="end">Sun</text>
+                <text class="m-meta t-small" x="170" y="357">Photos from the trip</text>
+              </g>
+            </g>
+            <line class="m-rule" x1="140" y1="202" x2="340" y2="202"/>
+            <line class="m-rule" x1="140" y1="258" x2="340" y2="258"/>
+            <line class="m-rule" x1="140" y1="314" x2="340" y2="314"/>
+            <line class="m-rule" x1="340" y1="50" x2="340" y2="406"/>
+
+            <text class="m-ink t-display" x="354" y="80" font-size="13">Launch plan, v3</text>
+            <text class="m-meta t-small" x="354" y="99">Ada · Work · 09:41</text>
+            <g class="m-recap">
+              <rect class="m-shadow" x="356" y="118" width="158" height="88" rx="12"/>
+              <rect class="m-yellow m-outline" x="352" y="114" width="158" height="88" rx="12"/>
+              <text class="m-on-pop t-small" x="366" y="135">RECAP</text>
+              <circle class="m-on-pop m-pulse" cx="494" cy="131" r="4.5"/>
+              <rect class="m-on-pop" x="366" y="148" width="122" height="7" rx="3.5" opacity=".55"/>
+              <rect class="m-on-pop" x="366" y="164" width="132" height="7" rx="3.5" opacity=".55"/>
+              <rect class="m-on-pop" x="366" y="180" width="92" height="7" rx="3.5" opacity=".55"/>
+            </g>
+            <g class="m-draft-group">
+              <rect class="m-draft" x="352" y="222" width="158" height="120" rx="12"/>
+              <text class="m-blue t-small" x="366" y="243">DRAFT · YOURS TO SEND</text>
+              <rect class="m-line m-type" x="366" y="256" width="126" height="7" rx="3.5"/>
+              <rect class="m-line m-type b" x="366" y="272" width="110" height="7" rx="3.5"/>
+              <rect class="m-line m-type c" x="366" y="288" width="78" height="7" rx="3.5"/>
+              <rect class="m-blue m-outline" x="366" y="304" width="78" height="26" rx="8"/>
+              <text class="m-white" x="405" y="322" text-anchor="middle">send</text>
+            </g>
+            <text class="m-meta t-small" x="352" y="368">The AI drafts. You send.</text>
+          </svg>
+        </figure>
+      </section>
+
+      <section class="readouts" aria-label="milo in numbers">
+        <div class="readout"><p class="plate">new mail · sec</p><span class="digits" data-count="60">60</span></div>
+        <div class="readout"><p class="plate">archive, every device</p><span class="digits" data-count="1">01</span></div>
+        <div class="readout"><p class="plate">mails sent by the AI</p><span class="digits">00</span></div>
+      </section>
+
+      <section class="section" id="how">
+        <p class="label"><b>01</b> how it works</p>
+        <h2>One archive on your server. A quiet inbox on every screen.</h2>
+        <div class="cells">
+          <article class="cell">
+            <span class="num">01</span>
+            <h3>run it</h3>
+            <p>Milo is a small service with a PostgreSQL archive. It keeps your accounts, mail, preferences and drafts once, on your machine, and every client opens that same archive: a Linux app window and a native macOS app today, iOS on the way.</p>
+          </article>
+          <article class="cell">
+            <span class="num">02</span>
+            <h3>connect</h3>
+            <p>Gmail signs in with Google; any other mailbox connects over IMAP and SMTP. Milo checks for new mail every 60 seconds, and what you read, star, archive or delete goes back to your provider.</p>
+          </article>
+          <article class="cell">
+            <span class="num">03</span>
+            <h3>think</h3>
+            <p>Conversations in order, search, categories and snooze. With Ollama, Milo can sort your mail, recap the inbox and propose replies. Every proposal stays a draft until you read it and press send.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="google">
+        <p class="label"><b>02</b> your data</p>
+        <h2>Your Google account, your server, your say.</h2>
+        <ul class="facts">
+          <li><b>gmail.modify</b><span>Milo asks Google for <code>gmail.modify</code>: to read your mail, keep read, starred, archived and trashed in step with Gmail, and send the messages you write. It does not ask to delete mail permanently.</span></li>
+          <li><b>your server</b><span>Mail, contacts and Google's tokens stay on the Milo service you run, with the tokens encrypted by its own key. Neither fluxkit nor meaningtech receive them.</span></li>
+          <li><b>AI by consent</b><span>Analysis is off until you turn it on. Then the email content you choose goes to the Ollama model you pick: one on your machine, or Ollama Cloud once you agree to it.</span></li>
+          <li><b>AI never sends</b><span>Milo's AI has no way to send, delete or archive mail. What it writes is a draft for you to read.</span></li>
+          <li><b>your say</b><span>Pause an account in Milo whenever you like, or take Google's access back at <a href="https://myaccount.google.com/connections">myaccount.google.com/connections</a>.</span></li>
+          <li><b>open source</b><span>Every line of Milo is public on <a href="https://github.com/turinglabsorg/milo">GitHub</a>, under the MIT license, including how it talks to Google (<a href="https://github.com/turinglabsorg/milo/blob/main/docs/GOOGLE.md">docs/GOOGLE.md</a>).</span></li>
+        </ul>
+      </section>
+
+      <section class="section" id="run">
+        <p class="label"><b>03</b> run it</p>
+        <h2>Five lines from clone to inbox.</h2>
+        <div class="run">
+          <div class="term">
+            <div class="term-bar"><span>on your server</span><button class="btn small" type="button" data-copy="install">copy</button></div>
+            <pre id="install"><span class="c"># Python 3.11+, uv, PostgreSQL 16+</span>
+git clone https://github.com/turinglabsorg/milo.git
+cd milo
+uv sync
+export MILO_DATABASE_URL=postgresql://milo@127.0.0.1:5432/milo
+uv run python scripts/launch.py</pre>
+          </div>
+          <div class="needs">
+            <span class="early">early development</span>
+            <p>Milo is a working foundation, not yet a finished replacement for an established email client.</p>
+            <p>The launcher starts Milo at <b>127.0.0.1:8025</b> and opens it on password setup; then add your accounts. Gmail needs a Google OAuth client of your own: <a href="https://github.com/turinglabsorg/milo/blob/main/docs/GOOGLE.md">Google setup</a>.</p>
+            <p>Docker, macOS and deployment: <a href="https://github.com/turinglabsorg/milo#readme">the README</a>.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="foot">
+        <span><a href="https://github.com/turinglabsorg/milo">milo</a> is an open-source <a href="https://fluxkit.dev">fluxkit</a> tool by <a href="https://meaningtech.io">meaningtech</a></span>
+        <nav aria-label="Footer">
+          <a href="https://github.com/turinglabsorg/milo">source</a>
+          <a href="https://github.com/turinglabsorg/milo/blob/main/docs/GOOGLE.md">google setup</a>
+          <a href="https://fluxkit.dev">fluxkit.dev</a>
+        </nav>
+      </div>
+    </footer>
+  </div>
+  <script src="/static/landing.js" defer></script>
+</body>
+</html>
