@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>milo · your inbox, with room to think</title>
-  <meta name="description" content="Milo is an open-source email client you run on your own server: Gmail and IMAP accounts in one calm inbox, conversations in order, and an optional AI that drafts replies and never sends them.">
+  <meta name="description" content="Milo is an open-source email client you run on your own server, with native apps for iPhone and Mac and a Linux app: Gmail and IMAP accounts in one calm inbox, conversations in order, and an optional AI that drafts replies and never sends them.">
   <meta property="og:title" content="milo · your inbox, with room to think">
   <meta property="og:description" content="An open-source email client you run on your own server: Gmail and IMAP in one calm inbox, and an AI that drafts and never sends.">
   <meta property="og:url" content="https://milo.fluxkit.dev/">
@@ -44,7 +44,7 @@
           <p class="prompt">milo</p>
           <h1 class="wordmark"><span>milo</span></h1>
           <p class="tagline">Your inbox, <mark>with room to think.</mark></p>
-          <p class="lede">An open-source email client you run on your own server. Your Gmail and IMAP accounts in one calm inbox, conversations in order, and an optional AI that recaps your mail and drafts replies, which wait for you to send them.</p>
+          <p class="lede">An open-source email client you run on your own server, with native apps for iPhone and Mac and a Linux app. Your Gmail and IMAP accounts in one calm inbox, conversations in order, and an optional AI that recaps your mail and drafts replies, which wait for you to send them.</p>
           <div class="actions">
             <a class="btn primary" href="https://github.com/turinglabsorg/milo"><svg aria-hidden="true"><use href="#i-github"/></svg>Get the source</a>
             <a class="btn" href="#run">Run it</a>
@@ -150,7 +150,7 @@
           <article class="cell">
             <span class="num">01</span>
             <h3>run it</h3>
-            <p>Milo is a small service with a PostgreSQL archive. It keeps your accounts, mail, preferences and drafts once, on your machine, and every client opens that same archive: a Linux app window and a native macOS app today, iOS on the way.</p>
+            <p>Milo is a small service with a PostgreSQL archive. It keeps your accounts, mail, preferences and drafts once, on your machine, and every client opens that same archive: the native iPhone and Mac apps, and a Linux app window. Each keeps what it downloaded for reading offline.</p>
           </article>
           <article class="cell">
             <span class="num">02</span>
@@ -192,10 +192,9 @@ export MILO_DATABASE_URL=postgresql://milo@127.0.0.1:5432/milo
 uv run python scripts/launch.py</pre>
           </div>
           <div class="needs">
-            <span class="early">early development</span>
-            <p>Milo is a working foundation, not yet a finished replacement for an established email client.</p>
             <p>The launcher starts Milo at <b>127.0.0.1:8025</b> and opens it on password setup; then add your accounts. Gmail needs a Google OAuth client of your own: <a href="https://github.com/turinglabsorg/milo/blob/main/docs/GOOGLE.md">Google setup</a>.</p>
-            <p>Docker, macOS and deployment: <a href="https://github.com/turinglabsorg/milo#readme">the README</a>.</p>
+            <p>The Mac app (<a href="https://github.com/turinglabsorg/milo/tree/main/macos">macos/</a>) and the iPhone app (<a href="https://github.com/turinglabsorg/milo/tree/main/ios">ios/</a>) connect to the same service.</p>
+            <p>Docker and deployment: <a href="https://github.com/turinglabsorg/milo#readme">the README</a>.</p>
           </div>
         </div>
       </section>

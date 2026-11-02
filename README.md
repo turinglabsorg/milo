@@ -5,12 +5,9 @@
 
 Milo is a new email client inspired by the calm, focused experience of
 [Spark](https://sparkmailapp.com). A private service stores your accounts, email,
-preferences and drafts once; clients connect to that same archive. The first
-client runs on Linux in a dedicated Chromium window. Native iOS comes next.
-
-**Early development:** this is a working foundation, not a finished replacement
-for an established email client. A real mailbox and a physical iPhone still need
-end-to-end validation. See [the roadmap](docs/ROADMAP.md).
+preferences and drafts once; clients connect to that same archive: a native
+iPhone app ([`ios/`](ios/)), a native Mac app ([`macos/`](macos/README.md)) and
+a Linux app in a dedicated Chromium window. See [the roadmap](docs/ROADMAP.md).
 
 ## Run on Linux
 
@@ -132,14 +129,14 @@ for offline reading. Folder/account navigation, cached-content search and ordina
 mailbox edits run locally; a durable journal synchronizes changes in background.
 Saving/closing drafts and safe preferences do not wait for the server. Metadata
 refreshes separately; already downloaded bodies are reused. Sending, AI and
-uncached downloads still need the service. This cache is a requirement of every client, including the future iOS app;
+uncached downloads still need the service. This cache is a requirement of every client, including the iOS app;
 see [the cache contract](docs/CLIENT_CACHE.md).
 
 For access from iOS, the service needs a stable HTTPS address reachable by the
 phone. Do not publish an unauthenticated demo or plain HTTP service to the
 internet. A private HTTPS reverse proxy can route to the loopback service; run
-Milo with `--secure-cookies` behind it. Native iOS, background sync, push and
-device pairing are unfinished. [Architecture and deployment](docs/ARCHITECTURE.md).
+Milo with `--secure-cookies` behind it. Background sync, push and device
+pairing are unfinished. [Architecture and deployment](docs/ARCHITECTURE.md).
 
 ## Data and backup
 

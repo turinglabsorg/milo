@@ -179,7 +179,7 @@ mode (system, or the sun/moon switch remembered as `milo.theme`).
 - Readouts: yellow `new mail · sec 60`, pink `archive, every device 01`, green
   `mails sent by the AI 00`. Then `01 how it works` (three cards), `02 your
   data` (the Google scope and what Milo does with mail, in fact rows) and `03
-  run it` (a terminal card with copy, and the early-development note).
+  run it` (a terminal card with copy, and where the Mac and iPhone apps live).
 - Like an app on a phone: no zoom, 16px fields, the bar keeps only the crumb
   and the theme switch. Every fact on the page must match the README and
   `docs/GOOGLE.md`; Google's verification reads it.
