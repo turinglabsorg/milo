@@ -383,7 +383,6 @@ footer { margin-top: clamp(4rem, 9vw, 6.5rem); border-top: 2px solid var(--line)
 .needs p:last-child { margin-bottom: 0; }
 .needs b { color: var(--ink); }
 .needs a { color: var(--ink); font-weight: 800; text-decoration-color: var(--milo); text-decoration-thickness: 2px; }
-.early { display: inline-block; margin-bottom: .8rem; padding: .15rem .6rem; border: 2px solid var(--line); border-radius: 999px; background: var(--orange); color: var(--on-pop); font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 
 @media (max-width: 860px) {
   .run { grid-template-columns: minmax(0, 1fr); }
